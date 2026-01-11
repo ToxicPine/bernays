@@ -1,0 +1,33 @@
+{
+  "name": "@bernays/browser",
+  "version": "0.1.0",
+  "exports": "./mod.ts",
+  "imports": {
+    "$/": "./",
+    "@std/encoding": "jsr:@std/encoding@^1.0.10",
+    "@zod/zod": "jsr:@zod/zod@^4.3.5"
+  },
+  "tasks": {
+    "build": "deno run --allow-read --allow-write --allow-run --allow-env scripts/build.ts",
+    "build:zip": {
+      "command": "deno run --allow-read --allow-write --allow-run --allow-env scripts/build.ts --zip",
+      "dependencies": ["build"]
+    },
+    "sync": {
+      "command": "deno run --allow-read --allow-write --allow-net --allow-env --allow-run scripts/sync.ts",
+      "dependencies": ["build:zip"]
+    }
+  },
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "lib": ["deno.ns", "DOM", "ES2022"],
+    "paths": {
+      "$/*": ["./*"]
+    }
+  }
+}

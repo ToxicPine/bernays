@@ -1,0 +1,11 @@
+app = "virtual-bernays"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[processes]
+  worker = "deno run --allow-all agents/src/main.ts"
+
+[env]
+  RUN_SOCKPUPPET = "1"

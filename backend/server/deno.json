@@ -1,0 +1,42 @@
+{
+  "name": "@bernays/server",
+  "version": "0.1.0",
+  "exports": {
+    "./core": "./src/core/mod.ts",
+    "./events": "./src/events/mod.ts",
+    "./intents": "./src/intents/mod.ts",
+    "./store": "./src/store/mod.ts",
+    "./bridge": "./src/bridge/mod.ts",
+    "./backend": "./src/backend/mod.ts",
+    "./platforms": "./src/platforms/mod.ts",
+    "./platforms/linkedin": "./src/platforms/linkedin/mod.ts",
+    "./platforms/x": "./src/platforms/x/mod.ts",
+    "./platform": "./src/platform/mod.ts",
+    "./views": "./src/views/mod.ts",
+    "./projections": "./src/projections/mod.ts",
+    "./routing": "./src/routing/mod.ts",
+    "./runtime": "./src/runtime/mod.ts"
+  },
+  "imports": {
+    "$/": "./src/",
+    "@std/async": "jsr:@std/async@^1.0.16",
+    "@std/encoding": "jsr:@std/encoding@^1.0.10",
+    "@zod/zod": "jsr:@zod/zod@^4.3.5",
+    "@std/uuid": "jsr:@std/uuid@^1.1.0",
+    "postgres": "npm:postgres@^3.4.8",
+    "effect": "npm:effect@^3.19.14",
+    "playwright": "npm:playwright@^1.57.0",
+    "@browserbasehq/sdk": "npm:@browserbasehq/sdk@^2.6.0"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "paths": {
+      "$/*": ["./src/*"]
+    }
+  }
+}

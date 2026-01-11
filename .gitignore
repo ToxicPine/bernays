@@ -1,0 +1,26 @@
+# secret sauce projects
+secret-sauce/
+
+# build artifacts
+packages/browser/dist/
+packages/browser/extension-zips/
+
+# Deno cache
+.deno/
+
+# deployment artifacts
+.deploy/
+
+# node modules
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# event store
+*.events.json
+
+# environment
+.env
+.env.local

@@ -1,0 +1,28 @@
+{
+  "name": "@bernays/plugins",
+  "version": "0.1.0",
+  "exports": {
+    "./linkedin": "./linkedin/mod.ts",
+    "./x": "./x/mod.ts"
+  },
+  "imports": {
+    "$/": "./",
+    "@std/async": "jsr:@std/async@^1.0.16",
+    "@std/encoding": "jsr:@std/encoding@^1.0.10",
+    "@zod/zod": "jsr:@zod/zod@^4.3.5",
+    "@std/uuid": "jsr:@std/uuid@^1.1.0",
+    "effect": "npm:effect@^3.19.14",
+    "@bernays/server": "workspace:*"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "paths": {
+      "$/*": ["./*"]
+    }
+  }
+}

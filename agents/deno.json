@@ -1,0 +1,25 @@
+{
+  "name": "@bernays/commandline",
+  "version": "0.1.0",
+  "exports": "./src/main.ts",
+  "imports": {
+    "$/": "./",
+    "@bernays/server": "workspace:*",
+    "@zod/zod": "jsr:@zod/zod@^4.3.5",
+    "@std/uuid": "jsr:@std/uuid@^1.1.0",
+    "playwright": "npm:playwright@^1.57.0",
+    "effect": "npm:effect@^3.12.7"
+  },
+  "tasks": {
+    "dev": "deno run --allow-all src/main.ts"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "paths": {
+      "$/*": ["./*"]
+    }
+  }
+}

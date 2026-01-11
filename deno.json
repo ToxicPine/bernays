@@ -1,0 +1,14 @@
+{
+  "nodeModulesDir": "auto",
+  "workspace": [
+    "./backend/server",
+    "./backend/browser",
+    "./plugins",
+    "./agents"
+  ],
+  "tasks": {
+    "dev": "deno run --allow-all agents/src/main.ts",
+    "test": "deno test --allow-all",
+    "check": "deno check backend/server/src/**/*.ts backend/browser/src/**/*.ts plugins/**/*.ts agents/src/**/*.ts"
+  }
+}
