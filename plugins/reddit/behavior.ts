@@ -16,6 +16,7 @@ import {
 } from "@bernays/server/views";
 import {
   type ExecuteError,
+  ExecuteErrorCode,
   executeError,
   type PlatformBehavior,
 } from "@bernays/server/platforms";
@@ -315,7 +316,7 @@ export const redditBehavior: PlatformBehavior<
       if (!selected) {
         return yield* Effect.fail(
           executeError(
-            "NoBrowserAvailable",
+            ExecuteErrorCode("NoBrowserAvailable"),
             "No running browser available (all may be banned or not authenticated)",
           ),
         );
@@ -340,7 +341,7 @@ export const redditBehavior: PlatformBehavior<
       yield* pool.send(configId, command).pipe(
         Effect.mapError((err) =>
           executeError(
-            "CommandFailed",
+            ExecuteErrorCode("CommandFailed"),
             `Bridge command failed: ${err.message}`,
             err,
           )

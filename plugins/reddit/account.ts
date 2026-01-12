@@ -2,6 +2,7 @@
 // Reddit account type and storage
 
 import { Context, Effect, Layer, Option } from "effect";
+import type postgres from "postgres";
 import {
   AccountId,
   type AccountId as AccountIdType,
@@ -76,27 +77,32 @@ export interface PostgresRedditAccountStoreOptions {
   readonly connectionString: string;
 }
 
+const ensureAccountTable = async (sql: postgres.Sql): Promise<void> => {
+  await sql`
+    CREATE TABLE IF NOT EXISTS reddit_accounts (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL,
+      karma INTEGER NOT NULL DEFAULT 0,
+      account_created_at TIMESTAMPTZ NOT NULL,
+      browser_bindings JSONB NOT NULL DEFAULT '[]',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+};
+
 /**
  * PostgreSQL-backed Reddit account store.
- *
- * Table schema:
- * ```sql
- * CREATE TABLE reddit_accounts (
- *   id TEXT PRIMARY KEY,
- *   username TEXT NOT NULL,
- *   karma INTEGER NOT NULL DEFAULT 0,
- *   account_created_at TIMESTAMPTZ NOT NULL,
- *   browser_bindings JSONB NOT NULL DEFAULT '[]',
- *   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
- *   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
- * );
- * ```
  */
 export const createPostgresRedditAccountStore = async (
   options: PostgresRedditAccountStoreOptions,
 ): Promise<RedditAccountStoreService> => {
   const postgres = await import("npm:postgres").then((m) => m.default);
-  const sql = postgres(options.connectionString);
+  const sql = postgres(options.connectionString, {
+    onnotice: () => {}, // Suppress NOTICE/WARNING messages
+  });
+
+  await ensureAccountTable(sql);
 
   return {
     get: (id) =>

@@ -16,6 +16,7 @@ import {
 } from "@bernays/server/views";
 import {
   type ExecuteError,
+  ExecuteErrorCode,
   executeError,
   type PlatformBehavior,
 } from "@bernays/server/platforms";
@@ -333,7 +334,7 @@ export const linkedInBehavior: PlatformBehavior<
 
       if (!selected) {
         return yield* Effect.fail(
-          executeError("NoBrowserAvailable", "No running browser available"),
+          executeError(ExecuteErrorCode("NoBrowserAvailable"), "No running browser available"),
         );
       }
 
@@ -372,7 +373,7 @@ export const linkedInBehavior: PlatformBehavior<
       yield* pool.send(configId, command).pipe(
         Effect.mapError((err) =>
           executeError(
-            "CommandFailed",
+            ExecuteErrorCode("CommandFailed"),
             `Bridge command failed: ${err.message}`,
             err,
           )

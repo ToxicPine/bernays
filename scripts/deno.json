@@ -6,8 +6,12 @@
     "@std/encoding": "jsr:@std/encoding@^1.0.10",
     "@std/fs": "jsr:@std/fs@^1.0.21",
     "@std/toml": "jsr:@std/toml@^1.0.11",
+    "@types/react": "npm:@types/react@^19.2.8",
     "@zod/zod": "jsr:@zod/zod@^4.3.5",
-    "effect": "npm:effect@^3.19.14"
+    "effect": "npm:effect@^3.19.14",
+    "ink": "npm:ink@^6.6.0",
+    "ink-text-input": "npm:ink-text-input@^6.0.0",
+    "react": "npm:react@^19.2.3"
   },
   "compilerOptions": {
     "strict": true,
@@ -16,6 +20,8 @@
     "strictFunctionTypes": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
     "paths": {
       "$/*": ["./*"]
     }

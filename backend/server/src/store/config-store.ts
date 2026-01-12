@@ -120,7 +120,9 @@ const ensureConfigTable = async (sql: postgres.Sql): Promise<void> => {
 export const createPostgresConfigStore = async (
   options: PostgresConfigStoreOptions,
 ): Promise<ConfigStoreService> => {
-  const sql = postgres(options.connectionString);
+  const sql = postgres(options.connectionString, {
+    onnotice: () => {}, // Suppress NOTICE/WARNING messages
+  });
 
   await ensureConfigTable(sql);
 

@@ -39,6 +39,10 @@ export interface BaseIntent<TScope extends Scope = Scope> {
 
 export type ExecuteErrorCode = string & { readonly _brand: "ExecuteErrorCode" };
 
+/** Branded constructor for ExecuteErrorCode */
+export const ExecuteErrorCode = (code: string): ExecuteErrorCode =>
+  code as ExecuteErrorCode;
+
 export interface ExecuteError {
   readonly _tag: "ExecuteError";
   readonly code: ExecuteErrorCode;

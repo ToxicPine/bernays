@@ -29,6 +29,7 @@ help:
     @printf '  just %-20s %s\n' "ext-sync" "Sync Extension to Browserbase"
     @printf '\n'
     @printf '\033[1m%s\033[0m\n' "LOCAL"
+    @printf '  just %-20s %s\n' "inbox [platform]" "View Inbox (linkedin, x)"
     @printf '  just %-20s %s\n' "event-logs" "Query Event Log"
     @printf '  just %-20s %s\n' "configure-browsers" "Manage Browser Configs"
 
@@ -71,16 +72,22 @@ sync:
 ssh *args:
     @fly ssh console -a {{app}} {{args}}
 
+inbox *args: _start-test-machine
+    #!/usr/bin/env sh
+    id=$(just _test-machine-id)
+    fly ssh console -a {{app}} --machine $id --pty -C 'deno run -A scripts/view-inbox.tsx {{args}}'
+    just _stop-test-machine
+
 event-logs *args: _start-test-machine
     #!/usr/bin/env sh
     id=$(just _test-machine-id)
-    fly ssh console -a {{app}} --machine $id -C 'deno run -A scripts/view-event-log.ts {{args}}'
+    fly ssh console -a {{app}} --machine $id --pty -C 'deno run -A scripts/view-event-log.tsx {{args}}'
     just _stop-test-machine
 
 configure-browsers *args: _start-test-machine
     #!/usr/bin/env sh
     id=$(just _test-machine-id)
-    fly ssh console -a {{app}} --machine $id -C 'deno run -A scripts/manage-browser-configs.ts {{args}}'
+    fly ssh console -a {{app}} --machine $id --pty -C 'deno run -A scripts/manage-browser-configs.tsx {{args}}'
     just _stop-test-machine
 
 # =============================================================================
@@ -94,21 +101,23 @@ _ensure-test-machine:
     #!/usr/bin/env sh
     id=$(just _test-machine-id)
     if [ -z "$id" ]; then
-        fly machine create . -a {{app}} --name test-machine --vm-memory 1024 --region iad --autostop=stop --autostart=false
+        fly machine create . -a {{app}} --name test-machine --vm-memory 1024 --region iad --autostop=stop --autostart=false >/dev/null 2>&1
     fi
 
 _prod-machine-image:
-    @fly machine list -a {{app}} --json 2>/dev/null | jq -r '[.[] | select(.name != "test-machine")][0].image_ref | .repository + ":" + .tag' || true
+    @fly machine list -a {{app}} --json 2>/dev/null | jq -r '[.[] | select(.name != "test-machine")][0].image_ref | .registry + "/" + .repository + ":" + .tag' || true
 
 _start-test-machine: _ensure-test-machine
     #!/usr/bin/env sh
     id=$(just _test-machine-id)
     image=$(just _prod-machine-image)
-    if [ -n "$image" ] && [ "$image" != "null:null" ]; then
-        printf '\033[2mUpdating Machine to %s...\033[0m\n' "$image"
-        fly machine update $id -a {{app}} --image "$image" -y 2>/dev/null || true
+    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+        printf '\033[33mWarning: Local Changes Detected! This Command Will Run the Last Deployed Code, Rather Than the Most Recent Local Changes.\033[0m\n'
     fi
-    fly machine start $id -a {{app}} 2>/dev/null || true
+    if [ -n "$image" ] && [ "$image" != "/:" ]; then
+        fly machine update $id -a {{app}} --image "$image" -y >/dev/null 2>&1 || true
+    fi
+    fly machine start $id -a {{app}} >/dev/null 2>&1 || true
     for i in 1 2 3 4 5 6; do
         state=$(fly machine list -a {{app}} --json 2>/dev/null | jq -r ".[] | select(.id==\"$id\") | .state")
         [ "$state" = "started" ] && break
@@ -118,7 +127,7 @@ _start-test-machine: _ensure-test-machine
 _stop-test-machine:
     #!/usr/bin/env sh
     id=$(just _test-machine-id)
-    if [ -n "$id" ]; then fly machine stop $id -a {{app}} 2>/dev/null || true; fi
+    if [ -n "$id" ]; then fly machine stop $id -a {{app}} >/dev/null 2>&1 || true; fi
 
 test-ssh *args: _start-test-machine
     #!/usr/bin/env sh

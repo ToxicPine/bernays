@@ -2,6 +2,7 @@
 // X (Twitter) account type and storage
 
 import { Context, Effect, Layer, Option } from "effect";
+import type postgres from "postgres";
 import {
   AccountId,
   type AccountId as AccountIdType,
@@ -82,30 +83,35 @@ export interface PostgresXAccountStoreOptions {
   readonly connectionString: string;
 }
 
+const ensureAccountTable = async (sql: postgres.Sql): Promise<void> => {
+  await sql`
+    CREATE TABLE IF NOT EXISTS x_accounts (
+      id TEXT PRIMARY KEY,
+      handle TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+      follower_count INTEGER NOT NULL DEFAULT 0,
+      following_count INTEGER NOT NULL DEFAULT 0,
+      api_tier TEXT NOT NULL DEFAULT 'free',
+      browser_bindings JSONB NOT NULL DEFAULT '[]',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+};
+
 /**
  * PostgreSQL-backed X account store.
- *
- * Table schema:
- * ```sql
- * CREATE TABLE x_accounts (
- *   id TEXT PRIMARY KEY,
- *   handle TEXT NOT NULL,
- *   display_name TEXT NOT NULL,
- *   is_verified BOOLEAN NOT NULL DEFAULT FALSE,
- *   follower_count INTEGER NOT NULL DEFAULT 0,
- *   following_count INTEGER NOT NULL DEFAULT 0,
- *   api_tier TEXT NOT NULL DEFAULT 'free',
- *   browser_bindings JSONB NOT NULL DEFAULT '[]',
- *   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
- *   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
- * );
- * ```
  */
 export const createPostgresXAccountStore = async (
   options: PostgresXAccountStoreOptions,
 ): Promise<XAccountStoreService> => {
   const postgres = await import("npm:postgres").then((m) => m.default);
-  const sql = postgres(options.connectionString);
+  const sql = postgres(options.connectionString, {
+    onnotice: () => {}, // Suppress NOTICE/WARNING messages
+  });
+
+  await ensureAccountTable(sql);
 
   return {
     get: (id) =>

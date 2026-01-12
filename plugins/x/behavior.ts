@@ -16,6 +16,7 @@ import {
 } from "@bernays/server/views";
 import {
   type ExecuteError,
+  ExecuteErrorCode,
   executeError,
   type PlatformBehavior,
 } from "@bernays/server/platforms";
@@ -305,7 +306,7 @@ export const xBehavior: PlatformBehavior<
 
       if (!selected) {
         return yield* Effect.fail(
-          executeError("NoBrowserAvailable", "No running browser available"),
+          executeError(ExecuteErrorCode("NoBrowserAvailable"), "No running browser available"),
         );
       }
 
@@ -315,7 +316,7 @@ export const xBehavior: PlatformBehavior<
         if (retryAfter > new Date()) {
           return yield* Effect.fail(
             executeError(
-              "RateLimited",
+              ExecuteErrorCode("RateLimited"),
               `Browser rate limited until ${selected.rateLimitedUntil}`,
             ),
           );
@@ -359,7 +360,7 @@ export const xBehavior: PlatformBehavior<
       yield* pool.send(configId, command).pipe(
         Effect.mapError((err) =>
           executeError(
-            "CommandFailed",
+            ExecuteErrorCode("CommandFailed"),
             `Bridge command failed: ${err.message}`,
             err,
           )

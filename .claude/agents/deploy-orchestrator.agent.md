@@ -27,6 +27,18 @@ After reading HACKS.md, examine actual configuration:
 - `Dockerfile` - container configuration
 - `fly.toml`, `docker-compose.yml`, `railway.json`, etc. - backend-specific config
 
+# Scripts with Infrastructure Dependencies
+
+These scripts depend on store/plugin implementations and may need updates when infrastructure changes:
+
+| Script | Dependencies | Update When |
+|--------|--------------|-------------|
+| `scripts/view-inbox.ts` | `plugins/*/` (account stores, behaviors) | New platform added, account store API changes |
+| `scripts/view-event-log.ts` | `backend/server/src/store/` (EventStore) | Event store API changes, new query types |
+| `scripts/manage-browser-configs.ts` | `backend/server/src/store/` (ConfigStore) | Config store API changes |
+
+When changing DB backends (e.g., PostgreSQL to SQLite), verify these scripts still work with the new store implementation.
+
 # Hackable Structure
 
 Both `deploy.sh` and `Justfile` are structured for hackability:

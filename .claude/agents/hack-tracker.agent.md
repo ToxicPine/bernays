@@ -78,3 +78,15 @@ grep -r "HACK\|FIXME\|XXX" .  # Hack comments
 - Non-standard event flows
 - Temporary workarounds
 - Dependency deviations
+
+# Script Dependencies
+
+When documenting infrastructure changes, note impact on scripts:
+
+| Change Type | Affected Scripts | Action |
+|-------------|------------------|--------|
+| New platform plugin | `scripts/view-inbox.ts` | Add platform adapter and menu option |
+| Store API change | `scripts/view-event-log.ts`, `scripts/manage-browser-configs.ts` | Update store usage |
+| Account store change | `scripts/view-inbox.ts` | Update account listing |
+
+Always check if infrastructure changes require script updates and document in HACKS.md under `## Scripts` section.

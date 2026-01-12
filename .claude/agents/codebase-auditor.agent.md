@@ -21,9 +21,16 @@ Layer 2: Event Flow      - events/, ingestion/
 Layer 3: Projections     - projections/
 Layer 4: Platform        - platforms/, runtime/
 Layer 5: Sockpuppet      - sockpuppets only see Platform + Journal
+---
+Scripts                  - scripts/ (operational tooling, can import any layer)
 ```
 
 **Critical rule**: Sockpuppets must NEVER import from EventStore, BrowserPool, Projections, Behaviors, or schemas directly. They see only `Platform` and `Journal`.
+
+**Scripts exception**: Scripts in `scripts/` are operational tooling and can import from any layer. However, they have dependencies that must be updated when infrastructure changes:
+- `view-inbox.ts` depends on `plugins/*/` (behaviors, account stores)
+- `view-event-log.ts` depends on `store/` (EventStore)
+- `manage-browser-configs.ts` depends on `store/` (ConfigStore)
 
 # Import Discipline
 

@@ -26,7 +26,6 @@ export const loadDotenv = (envPath: string = ".env"): void => {
     const key = trimmed.slice(0, eqIndex).trim();
     let value = trimmed.slice(eqIndex + 1);
 
-    // Strip surrounding quotes
     if (
       (value.startsWith('"') && value.endsWith('"')) ||
       (value.startsWith("'") && value.endsWith("'"))
@@ -34,7 +33,6 @@ export const loadDotenv = (envPath: string = ".env"): void => {
       value = value.slice(1, -1);
     }
 
-    // Only set if not already defined
     if (Deno.env.get(key) === undefined) {
       Deno.env.set(key, value);
     }
@@ -63,30 +61,26 @@ export const writeDotenv = (
     const content = Deno.readTextFileSync(envPath);
     lines = content.split("\n");
 
-    // Check if key already exists with same value
     for (const line of lines) {
       const trimmed = line.trim();
       if (trimmed.startsWith(`${key}=`)) {
         const existingValue = trimmed.slice(key.length + 1).replace(/^["']|["']$/g, "");
         if (existingValue === value) {
-          return false; // No change needed
+          return false;
         }
       }
     }
 
-    // Filter out existing key
     lines = lines.filter((line) => {
       const trimmed = line.trim();
       return !trimmed.startsWith(`${key}=`);
     });
   }
 
-  // Remove trailing empty lines
   while (lines.length > 0 && lines[lines.length - 1].trim() === "") {
     lines.pop();
   }
 
-  // Add the new key-value pair
   lines.push(`${key}=${value}`);
 
   Deno.writeTextFileSync(envPath, lines.join("\n") + "\n");

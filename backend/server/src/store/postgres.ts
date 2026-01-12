@@ -73,7 +73,6 @@ const ensureSetup = async (
     )
   `);
 
-  // Indexes for common queries
   await sql.unsafe(`create index if not exists ${table}_ts_idx on ${qt} (ts)`);
   await sql.unsafe(
     `create index if not exists ${table}_scope_ts_idx on ${qt} (scope, ts)`,
@@ -106,7 +105,10 @@ export const createPostgresEventStore = async <
     maxConnections = 5,
   } = options;
 
-  const sql = postgres(databaseUrl, { max: maxConnections });
+  const sql = postgres(databaseUrl, {
+    max: maxConnections,
+    onnotice: () => {}, // Suppress NOTICE/WARNING messages (e.g., "already exists, skipping")
+  });
 
   try {
     await ensureSetup(sql, schema, table);

@@ -110,7 +110,9 @@ const ensureAccountTable = async (sql: postgres.Sql): Promise<void> => {
 export const createPostgresLinkedInAccountStore = async (
   options: PostgresLinkedInAccountStoreOptions,
 ): Promise<LinkedInAccountStoreService> => {
-  const sql = postgres(options.connectionString);
+  const sql = postgres(options.connectionString, {
+    onnotice: () => {}, // Suppress NOTICE/WARNING messages
+  });
 
   await ensureAccountTable(sql);
 

@@ -85,6 +85,8 @@ Deno.test("ModuleName - handles error case", async () => {
 - File store: persistence, recovery
 - Config store: CRUD operations
 
+**Note**: Scripts (`view-event-log.ts`, `manage-browser-configs.ts`) depend on store implementations. When store APIs change, verify scripts still work.
+
 ## Backend Tests (`tests/backend/`)
 - Pool: session lifecycle, connection state
 - Extensions: registration, loading, validation
@@ -100,6 +102,8 @@ Deno.test("ModuleName - handles error case", async () => {
 ## Platform Tests (`tests/platforms/`)
 - Behavior: deriveInbox, deriveThread, deriveBrowsers
 - Execute: intent handling, browser selection
+
+**Note**: `scripts/view-inbox.ts` depends on platform behaviors and account stores. When platform APIs change, verify the inbox viewer still works.
 
 # Key Imports (from tests/deno.json)
 

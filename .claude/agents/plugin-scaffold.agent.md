@@ -89,6 +89,11 @@ backend/browser/src/
 After scaffolding:
 - Add to `deno.json` workspaces: `"plugins/{name}"`
 - Register in main.ts PLATFORMS array
+- **Update `scripts/view-inbox.ts`** to add the new platform:
+  1. Import the new platform's types: account, behavior, views, schemas
+  2. Create a platform adapter following the LinkedIn/X pattern
+  3. Add the platform to the `selectPlatform()` menu
+  4. Add a case in `main()` to handle the new platform subcommand
 
 ## Deviations
 
