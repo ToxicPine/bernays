@@ -33,14 +33,14 @@ export const ensureBrowserConfig = async (
   const existing = await Effect.runPromise(store.get(id));
   if (Option.isSome(existing)) return existing.value;
 
-  tty.info("Creating default browser config...");
+  tty.info("Creating Default Browser Config...");
   const record: BrowserConfig = {
     id,
     context: config.browserbaseContextId,
     extensionIds: [],
   };
   await Effect.runPromise(store.upsert(record));
-  tty.info("Browser config created.");
+  tty.info("Browser Config Created.");
   return record;
 };
 
@@ -51,11 +51,11 @@ export const ensureLinkedInAccount = async (
 ): Promise<LinkedInAccount> => {
   const existing = await Effect.runPromise(store.get(accountId));
   if (Option.isSome(existing)) {
-    tty.info(`Using account '${existing.value.displayName}'.`);
+    tty.info(`Using Account '${existing.value.displayName}'.`);
     return existing.value;
   }
 
-  tty.info("Creating default LinkedIn account...");
+  tty.info("Creating Default LinkedIn Account...");
   const record: LinkedInAccount = {
     id: accountId,
     browserBindings: [{ configId, metadata: { deviceType: "desktop" } }],

@@ -98,6 +98,9 @@ load_dotenv() {
     [[ -z "$line" || "$line" == \#* ]] && continue
     key="${line%%=*}"
     value="${line#*=}"
+    # Strip surrounding quotes (single or double)
+    value="${value#\"}" ; value="${value%\"}"
+    value="${value#\'}" ; value="${value%\'}"
     if [[ -n "$key" && -z "${!key+x}" ]]; then
       export "$key=$value"
     fi
@@ -199,46 +202,7 @@ require_jq() {
 }
 
 # =============================================================================
-# Fly.io Auth & App
-# =============================================================================
-
-ensure_fly_auth() {
-  if fly auth whoami >/dev/null 2>&1; then
-    ok "Logged in to Fly.io"
-    return 0
-  fi
-
-  warn "Not logged in to Fly.io"
-  confirm "Open browser to log in?" || die "Aborted"
-  fly auth login
-  fly auth whoami >/dev/null 2>&1 || die "Login failed"
-  ok "Logged in to Fly.io"
-}
-
-app_exists() {
-  fly status -a "$1" >/dev/null 2>&1
-}
-
-ensure_app() {
-  local app="$1" region="$2" org="${3:-}"
-
-  if app_exists "$app"; then
-    ok "App exists: $app"
-    return 0
-  fi
-
-  bold "Creating app: $app"
-  if [[ -n "$org" ]]; then
-    run_quiet "Creating app" fly apps create "$app" --org "$org" \
-      || die "Failed to create app '$app'"
-  else
-    run_quiet "Creating app" fly apps create "$app" \
-      || die "Failed to create app '$app'"
-  fi
-}
-
-# =============================================================================
-# Secrets
+# Secrets Management
 # =============================================================================
 
 # Accumulator for batched secrets
@@ -299,186 +263,6 @@ prompt_secret() {
 }
 
 # =============================================================================
-# Managed Postgres
-# =============================================================================
-
-get_org_slug() {
-  if [[ -n "${ORG:-}" ]]; then
-    printf '%s' "$ORG"
-    return 0
-  fi
-
-  local out
-  out="$(fly orgs list 2>/dev/null)" || return 1
-  printf '%s' "$out" | awk '$3 ~ /PERSONAL|ORGANIZATION/ { print $2; exit }'
-}
-
-# Get cluster ID by name, returns empty if not found
-mpg_get_cluster_id() {
-  local name="$1"
-  local org_slug json result
-
-  org_slug="$(get_org_slug)" || return 1
-  [[ -n "$org_slug" ]] || return 1
-
-  json="$(fly mpg list -o "$org_slug" --json 2>/dev/null)" || return 1
-  [[ "$json" == \[* ]] || return 1
-
-  result="$(printf '%s' "$json" | jq -re --arg n "$name" '
-    .[] | select((.name // "") | ascii_downcase == ($n | ascii_downcase)) | .id
-  ' 2>/dev/null | head -n1)" || true
-
-  printf '%s' "$result"
-}
-
-# Get cluster status JSON
-mpg_get_status() {
-  local cluster_id="$1"
-  fly mpg status "$cluster_id" --json 2>/dev/null
-}
-
-# Get credential status from cluster status JSON
-mpg_credential_status() {
-  local json="$1"
-  printf '%s' "$json" | jq -r '.credentials.status // "unknown"'
-}
-
-# Get pgbouncer URI from cluster status JSON
-mpg_get_url() {
-  local json="$1"
-  printf '%s' "$json" | jq -r '.credentials.pgbouncer_uri // empty'
-}
-
-# Create cluster if it doesn't exist
-mpg_create() {
-  local name="$1" region="$2"
-  local org_slug
-
-  org_slug="$(get_org_slug)" || die "Cannot fetch organization list from Fly.io"
-  [[ -n "$org_slug" ]] || die "Cannot determine organization — set ORG=<slug>"
-
-  local plan="${DB_PLAN:-development}"
-  local size="${DB_VOLUME_GB:-10}"
-
-  run_quiet "Creating database" \
-    fly mpg create -n "$name" -o "$org_slug" -r "$region" --plan "$plan" --volume-size "$size" \
-    || die "Failed to create database cluster"
-}
-
-# Attach cluster to app
-mpg_attach() {
-  local app="$1" cluster_id="$2"
-
-  if run_quiet "Attaching database to agent" fly mpg attach "$cluster_id" -a "$app" --variable-name DATABASE_URL; then
-    return 0
-  else
-    dim "  (may already be attached)"
-    return 0
-  fi
-}
-
-# Wait for cluster credentials to be ready
-mpg_wait_ready() {
-  local cluster_id="$1"
-  local timeout="${2:-300}"
-  local interval=5
-  local elapsed=0
-  local status json
-
-  while (( elapsed < timeout )); do
-    json="$(mpg_get_status "$cluster_id" 2>/dev/null || true)"
-    if [[ -n "$json" ]]; then
-      status="$(mpg_credential_status "$json")"
-      [[ "$status" == "ready" ]] && return 0
-    else
-      status="unknown"
-    fi
-
-    spinner_start "Waiting for database to be ready (${elapsed}s elapsed, status: $status)"
-    sleep "$interval"
-    spinner_stop
-    (( elapsed += interval ))
-  done
-
-  return 1
-}
-
-# Get DATABASE_URL, waiting for ready if needed
-mpg_get_database_url() {
-  local cluster_id="$1"
-  local timeout="${2:-300}"
-  local json status url
-
-  # Check current status
-  json="$(mpg_get_status "$cluster_id" 2>/dev/null)" || json=""
-  if [[ -z "$json" ]]; then
-    die "Could not fetch database status — check your network connection"
-  fi
-
-  status="$(mpg_credential_status "$json")" || status="unknown"
-
-  if [[ "$status" != "ready" ]]; then
-    bold "Database is setting-up..."
-    dim "  This typically takes 1-3 minutes. Safe to ctrl-c and re-run later."
-    echo
-
-    if ! mpg_wait_ready "$cluster_id" "$timeout"; then
-      warn "Timed out waiting for database (${timeout}s)"
-      dim "  Re-run this script once the database is ready, or fetch URL manually:"
-      dim "  https://fly.io/dashboard/$(get_org_slug)/managed_postgres/$cluster_id"
-      return 1
-    fi
-
-    # Re-fetch status after ready
-    json="$(mpg_get_status "$cluster_id" 2>/dev/null)" || json=""
-    if [[ -z "$json" ]]; then
-      die "Could not fetch database status after waiting"
-    fi
-  fi
-
-  ok "Database is ready"
-
-  url="$(mpg_get_url "$json")" || url=""
-  if [[ -z "$url" ]]; then
-    die "Could not extract DATABASE_URL from backend."
-  fi
-
-  printf '%s' "$url"
-}
-
-# Main database setup orchestration
-setup_database() {
-  local app="$1" name="$2" region="$3"
-  local timeout="${DB_READY_TIMEOUT:-300}"
-  local cluster_id url
-
-  require_jq
-
-  bold "Setting up database: $name"
-
-  # Step 1: Ensure cluster exists
-  cluster_id="$(mpg_get_cluster_id "$name")"
-  if [[ -n "$cluster_id" ]]; then
-    ok "Database cluster exists: $name"
-  else
-    mpg_create "$name" "$region"
-    cluster_id="$(mpg_get_cluster_id "$name")"
-    [[ -n "$cluster_id" ]] || die "Failed to create database cluster"
-  fi
-
-  # Step 2: Attach to app
-  mpg_attach "$app" "$cluster_id"
-
-  # Step 3: Wait for ready and get URL
-  url="$(mpg_get_database_url "$cluster_id" "$timeout")" || return 1
-
-  # Step 4: Write to .env for local use
-  write_dotenv DATABASE_URL "$url"
-
-  echo
-}
-
-# =============================================================================
 # Deploy Gating
 # =============================================================================
 
@@ -531,6 +315,257 @@ record_deploy() {
 }
 
 # =============================================================================
+# Platform Backend Interface
+# =============================================================================
+# This section defines the interface that platform backends must implement.
+# To add a new backend (e.g., Railway, Render), implement these functions.
+# =============================================================================
+
+# Platform: Authentication
+# Ensures the user is authenticated with the platform
+platform_ensure_auth() {
+  if fly auth whoami >/dev/null 2>&1; then
+    ok "Logged in to Fly.io"
+    return 0
+  fi
+
+  warn "Not logged in to Fly.io"
+  confirm "Open browser to log in?" || die "Aborted"
+  fly auth login
+  fly auth whoami >/dev/null 2>&1 || die "Login failed"
+  ok "Logged in to Fly.io"
+}
+
+# Platform: App Management
+# Check if app exists
+platform_app_exists() {
+  local app="$1"
+  fly status -a "$app" >/dev/null 2>&1
+}
+
+# Create app if it doesn't exist
+platform_ensure_app() {
+  local app="$1" region="$2" org="${3:-}"
+
+  if platform_app_exists "$app"; then
+    ok "App exists: $app"
+    return 0
+  fi
+
+  bold "Creating app: $app"
+  if [[ -n "$org" ]]; then
+    run_quiet "Creating app" fly apps create "$app" --org "$org" \
+      || die "Failed to create app '$app'"
+  else
+    run_quiet "Creating app" fly apps create "$app" \
+      || die "Failed to create app '$app'"
+  fi
+}
+
+# Platform: Database Management
+# Get organization slug for database operations
+platform_get_org_slug() {
+  if [[ -n "${ORG:-}" ]]; then
+    printf '%s' "$ORG"
+    return 0
+  fi
+
+  local out
+  out="$(fly orgs list 2>/dev/null)" || return 1
+  printf '%s' "$out" | awk '$3 ~ /PERSONAL|ORGANIZATION/ { print $2; exit }'
+}
+
+# Get database cluster ID by name
+platform_db_get_cluster_id() {
+  local name="$1"
+  local org_slug json result
+
+  org_slug="$(platform_get_org_slug)" || return 1
+  [[ -n "$org_slug" ]] || return 1
+
+  json="$(fly mpg list -o "$org_slug" --json 2>/dev/null)" || return 1
+  [[ "$json" == \[* ]] || return 1
+
+  result="$(printf '%s' "$json" | jq -re --arg n "$name" '
+    .[] | select((.name // "") | ascii_downcase == ($n | ascii_downcase)) | .id
+  ' 2>/dev/null | head -n1)" || true
+
+  printf '%s' "$result"
+}
+
+# Get database cluster status
+platform_db_get_status() {
+  local cluster_id="$1"
+  fly mpg status "$cluster_id" --json 2>/dev/null
+}
+
+# Extract credential status from status JSON
+platform_db_credential_status() {
+  local json="$1"
+  printf '%s' "$json" | jq -r '.credentials.status // "unknown"'
+}
+
+# Extract connection URL from status JSON
+platform_db_get_url() {
+  local json="$1"
+  printf '%s' "$json" | jq -r '.credentials.pgbouncer_uri // empty'
+}
+
+# Create database cluster
+platform_db_create() {
+  local name="$1" region="$2"
+  local org_slug
+
+  org_slug="$(platform_get_org_slug)" || die "Cannot fetch organization list from Fly.io"
+  [[ -n "$org_slug" ]] || die "Cannot determine organization — set ORG=<slug>"
+
+  local plan="${DB_PLAN:-development}"
+  local size="${DB_VOLUME_GB:-10}"
+
+  run_quiet "Creating database" \
+    fly mpg create -n "$name" -o "$org_slug" -r "$region" --plan "$plan" --volume-size "$size" \
+    || die "Failed to create database cluster"
+}
+
+# Attach database to app
+platform_db_attach() {
+  local app="$1" cluster_id="$2"
+
+  if run_quiet "Attaching database to agent" fly mpg attach "$cluster_id" -a "$app" --variable-name DATABASE_URL; then
+    return 0
+  else
+    dim "  (may already be attached)"
+    return 0
+  fi
+}
+
+# Wait for database to be ready
+platform_db_wait_ready() {
+  local cluster_id="$1"
+  local timeout="${2:-300}"
+  local interval=5
+  local elapsed=0
+  local status json
+
+  while (( elapsed < timeout )); do
+    json="$(platform_db_get_status "$cluster_id" 2>/dev/null || true)"
+    if [[ -n "$json" ]]; then
+      status="$(platform_db_credential_status "$json")"
+      [[ "$status" == "ready" ]] && return 0
+    else
+      status="unknown"
+    fi
+
+    spinner_start "Waiting for database to be ready (${elapsed}s elapsed, status: $status)"
+    sleep "$interval"
+    spinner_stop
+    (( elapsed += interval ))
+  done
+
+  return 1
+}
+
+# Get DATABASE_URL, waiting for ready if needed
+platform_db_get_database_url() {
+  local cluster_id="$1"
+  local timeout="${2:-300}"
+  local json status url
+
+  # Check current status
+  json="$(platform_db_get_status "$cluster_id" 2>/dev/null)" || json=""
+  if [[ -z "$json" ]]; then
+    die "Could not fetch database status — check your network connection"
+  fi
+
+  status="$(platform_db_credential_status "$json")" || status="unknown"
+
+  if [[ "$status" != "ready" ]]; then
+    bold "Database is setting-up..."
+    dim "  This typically takes 1-3 minutes. Safe to ctrl-c and re-run later."
+    echo
+
+    if ! platform_db_wait_ready "$cluster_id" "$timeout"; then
+      warn "Timed out waiting for database (${timeout}s)"
+      dim "  Re-run this script once the database is ready, or fetch URL manually:"
+      dim "  https://fly.io/dashboard/$(platform_get_org_slug)/managed_postgres/$cluster_id"
+      return 1
+    fi
+
+    # Re-fetch status after ready
+    json="$(platform_db_get_status "$cluster_id" 2>/dev/null)" || json=""
+    if [[ -z "$json" ]]; then
+      die "Could not fetch database status after waiting"
+    fi
+  fi
+
+  ok "Database is ready"
+
+  url="$(platform_db_get_url "$json")" || url=""
+  if [[ -z "$url" ]]; then
+    die "Could not extract DATABASE_URL from backend."
+  fi
+
+  printf '%s' "$url"
+}
+
+# Platform: Deployment
+# Execute the actual deployment
+platform_deploy() {
+  local app="$1"
+  run_quiet "fly deploy" fly deploy -a "$app" \
+    || die "Deploy failed — check the output above for details"
+}
+
+# =============================================================================
+# High-Level Orchestration
+# =============================================================================
+
+setup_database() {
+  local app="$1" name="$2" region="$3"
+  local timeout="${DB_READY_TIMEOUT:-300}"
+  local cluster_id url
+
+  require_jq
+
+  bold "Setting up database: $name"
+
+  # Step 1: Ensure cluster exists
+  cluster_id="$(platform_db_get_cluster_id "$name")"
+  if [[ -n "$cluster_id" ]]; then
+    ok "Database cluster exists: $name"
+  else
+    platform_db_create "$name" "$region"
+    cluster_id="$(platform_db_get_cluster_id "$name")"
+    [[ -n "$cluster_id" ]] || die "Failed to create database cluster"
+  fi
+
+  # Step 2: Attach to app
+  platform_db_attach "$app" "$cluster_id"
+
+  # Step 3: Wait for ready and get URL
+  url="$(platform_db_get_database_url "$cluster_id" "$timeout")" || return 1
+
+  # Step 4: Write to .env for local use
+  write_dotenv DATABASE_URL "$url"
+
+  echo
+}
+
+configure_secrets() {
+  local app="$1"
+
+  bold "Configuring agent..."
+  secrets_add RUN_SOCKPUPPET "${RUN_SOCKPUPPET:-1}"
+  secrets_add ACCOUNT_ID "${ACCOUNT_ID:-}"
+  prompt_secret BROWSERBASE_API_KEY "${BROWSERBASE_API_KEY:-}"
+  prompt_secret BROWSERBASE_CONTEXT_ID "${BROWSERBASE_CONTEXT_ID:-}"
+  prompt_secret BROWSERBASE_PROJECT_ID "${BROWSERBASE_PROJECT_ID:-}"
+  prompt_secret BROWSERBASE_EXTENSION_ID "${BROWSERBASE_EXTENSION_ID:-}"
+  secrets_flush "$app"
+  echo
+}
+
+# =============================================================================
 # Main
 # =============================================================================
 
@@ -556,8 +591,8 @@ main() {
   echo
 
   # -- Prerequisites ----------------------------------------------------------
-  ensure_fly_auth
-  ensure_app "$app" "$region" "$org"
+  platform_ensure_auth
+  platform_ensure_app "$app" "$region" "$org"
   check_should_deploy "$app"
 
   # -- Database ---------------------------------------------------------------
@@ -576,22 +611,14 @@ main() {
 
   # -- Secrets ----------------------------------------------------------------
   if [[ "${SKIP_SECRETS:-0}" != "1" ]]; then
-    bold "Configuring agent..."
-    secrets_add RUN_SOCKPUPPET "${RUN_SOCKPUPPET:-1}"
-    secrets_add ACCOUNT_ID "${ACCOUNT_ID:-}"
-    prompt_secret BROWSERBASE_API_KEY "${BROWSERBASE_API_KEY:-}"
-    prompt_secret BROWSERBASE_CONTEXT_ID "${BROWSERBASE_CONTEXT_ID:-}"
-    prompt_secret BROWSERBASE_EXTENSION_ID "${BROWSERBASE_EXTENSION_ID:-}"
-    secrets_flush "$app"
-    echo
+    configure_secrets "$app"
   else
     dim "Skipping secrets (SKIP_SECRETS=1)"
   fi
 
   # -- Deploy -----------------------------------------------------------------
   bold "Deploying..."
-  run_quiet "fly deploy" fly deploy -a "$app" \
-    || die "Deploy failed — check the output above for details"
+  platform_deploy "$app"
 
   record_deploy "$app"
 

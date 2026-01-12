@@ -12,6 +12,7 @@
     "@zod/zod": "jsr:@zod/zod@^4.3.5",
     "@std/uuid": "jsr:@std/uuid@^1.1.0",
     "effect": "npm:effect@^3.19.14",
+    "postgres": "npm:postgres@^3.4.8",
     "@bernays/server": "workspace:*"
   },
   "compilerOptions": {

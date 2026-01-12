@@ -1,10 +1,10 @@
-# bernays - Social Automation Framework
+# bernays
 
 ## Document Purpose
 
-This document provides **coding standards and design principles** for the Social
-Automation Framework. For detailed architectural specifications, layer
-definitions, and implementation patterns, see `EFFECT_ARCHITECTURE.md`.
+This document provides **coding standards and design principles** for bernays. 
+For detailed architectural specifications, layer definitions, and implementation 
+patterns, see `EFFECT_ARCHITECTURE.md`.
 
 **This document covers**:
 

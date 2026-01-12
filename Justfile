@@ -1,84 +1,111 @@
 # =============================================================================
-# Justfile — Task runner for the Social Automation Framework
+# Backend Config
+# =============================================================================
+# HACKABLE: Change these for your deployment target
+#
+# Current backend: Fly.io
 # =============================================================================
 
-app := env_var_or_default("APP_NAME", "linkedin-automation-worker")
+app := env_var_or_default("APP_NAME", "virtual-bernays")
 
-# Show available commands
+# =============================================================================
+# Help
+# =============================================================================
+
 help:
-    @printf '\033[1m%s\033[0m\n' "Social Automation Framework"
+    @printf '\033[1m%s\033[0m\n' "Bernays"
     @printf '\n'
-    @printf '\033[1m%s\033[0m\n' "COMMANDS"
-    @printf '  just %-18s %s\n' "help" "Show this help"
-    @printf '  just %-18s %s\n' "deploy" "Build, sync extension, deploy to Fly.io"
-    @printf '  just %-18s %s\n' "logs" "Tail application logs"
-    @printf '  just %-18s %s\n' "status" "Show app status"
-    @printf '  just %-18s %s\n' "events" "Query event log (CSV → csvlens)"
+    @printf '\033[1m%s\033[0m\n' "DEPLOYMENT"
+    @printf '  just %-20s %s\n' "deploy" "Deploy to Production"
+    @printf '  just %-20s %s\n' "logs" "Tail Application Logs"
+    @printf '  just %-20s %s\n' "status" "Show Application Status"
+    @printf '\n'
+    @printf '\033[1m%s\033[0m\n' "TESTING"
+    @printf '  just %-20s %s\n' "test" "Run E2E Tests"
+    @printf '  just %-20s %s\n' "ssh" "SSH into Production Instance"
     @printf '\n'
     @printf '\033[1m%s\033[0m\n' "EXTENSION"
-    @printf '  just %-18s %s\n' "ext-build" "Build browser extension"
-    @printf '  just %-18s %s\n' "ext-sync" "Sync extension to Browserbase"
+    @printf '  just %-20s %s\n' "ext-build" "Build Browser Extension"
+    @printf '  just %-20s %s\n' "ext-sync" "Sync Extension to Browserbase"
     @printf '\n'
-    @printf '\033[1m%s\033[0m\n' "EXAMPLES"
-    @printf '  just deploy\n'
-    @printf '  just logs --since 5m\n'
-    @printf '  just events --type linkedin --limit 50\n'
-    @printf '  just ext-build && just ext-sync\n'
-    @printf '\n'
-    @printf '\033[2m%s\033[0m\n' "Run 'just <command> --help' for command-specific help."
+    @printf '\033[1m%s\033[0m\n' "LOCAL"
+    @printf '  just %-20s %s\n' "event-logs" "Query Event Log"
+    @printf '  just %-20s %s\n' "configure-browsers" "Manage Browser Configs"
 
 # =============================================================================
-# Deployment
+# Backend Operations
+# =============================================================================
+# HACKABLE: Replace these recipes for your deployment target
+#
+# Required recipes:
+#   - deploy        Run deployment
+#   - logs          Tail logs
+#   - status        Show status
+#
+# Current backend: Fly.io
 # =============================================================================
 
-# Build extension, sync to Browserbase, deploy to Fly.io
-deploy: (_ext-sync "--silent")
-    @APP_NAME={{app}} bernays-deploy
+deploy: (ext-sync "--silent")
+    @deno run -A scripts/deploy-application.ts
 
-# =============================================================================
-# Extension
-# =============================================================================
-
-# Build browser extension (TypeScript → JS + zip)
-ext-build *args:
-    @deno run -A packages/browser/scripts/build.ts --zip {{args}}
-
-# Sync extension to Browserbase
-ext-sync *args: (_ext-build "--silent")
-    @deno run -A packages/browser/scripts/sync.ts {{args}}
-
-# Internal: build with args (for silent mode in deploy)
-_ext-build *args:
-    @deno run -A packages/browser/scripts/build.ts --zip {{args}}
-
-# Internal: sync with args (for silent mode in deploy)
-_ext-sync *args: (_ext-build "--silent")
-    @deno run -A packages/browser/scripts/sync.ts {{args}}
-
-# =============================================================================
-# Operations
-# =============================================================================
-
-# Tail application logs
 logs *args:
     @fly logs -a {{app}} {{args}}
 
-# Show app status
 status:
     @fly status -a {{app}}
 
-# Query the event log
-events *args:
-    @bash -lc 'set -euo pipefail; \
-      set -- {{args}}; \
-      [[ "${1-}" == "--" ]] && shift; \
-      joined="$*"; \
-      if printf "%s" "$joined" | grep -Eq "(^|[[:space:]])--help([[:space:]]|$)"; then \
-        deno run -A scripts/events.ts "$@"; \
-      elif printf "%s" "$joined" | grep -Eq "(^|[[:space:]])--format(=|[[:space:]]+)json([[:space:]]|$)"; then \
-        deno run -A scripts/events.ts "$@"; \
-      elif [[ -t 0 && -t 1 ]]; then \
-        output="$(deno run -A scripts/events.ts --silent "$@")" && printf "%s\n" "$output" | csvlens; \
-      else \
-        deno run -A scripts/events.ts "$@"; \
-      fi'
+# =============================================================================
+# Backend Testing
+# =============================================================================
+# HACKABLE: Replace these recipes for your deployment target
+#
+# Note: Tests spawn a separate machine with access to private network.
+# They do NOT run on the production instance.
+#
+# Current backend: Fly.io
+# =============================================================================
+
+dispatch-backend-test *args: sync
+    @echo "Spawning test machine..."
+    @fly machine run . -a {{app}} --rm --vm-memory 1024 -- deno task test:e2e:all {{args}}
+
+dispatch-backend-test-db: sync
+    @fly machine run . -a {{app}} --rm -- deno eval "const p = (await import('postgres')).default; const sql = p(Deno.env.get('DATABASE_URL')); await sql\`SELECT 1\`; console.log('DB OK'); await sql.end()"
+
+read-backend-test-logs:
+    @fly logs -a {{app}}
+
+sync:
+    @if [ ! -f .env ]; then echo "Error: .env File Not Found"; exit 1; fi
+    @grep -v '^#' .env | grep -v '^$$' | while IFS='=' read -r key value; do \
+        if [ -n "$$key" ]; then \
+            echo "Setting $$key..."; \
+            echo "$$value" | fly secrets set "$$key=-" -a {{app}}; \
+        fi \
+    done
+    @echo "Secrets Synced Successfully"
+
+test: dispatch-backend-test dispatch-backend-test-db
+    read-backend-test-logs
+
+ssh *args: sync
+    @fly ssh console -a {{app}} {{args}}
+
+event-logs *args:
+    fly ssh console -a {{app}} -C 'deno run -A scripts/view-event-log.ts {{args}}'
+
+configure-browsers *args:
+    fly ssh console -a {{app}} -C 'deno run -A scripts/manage-browser-configs.ts {{args}}'
+
+# =============================================================================
+# Extensions
+# =============================================================================
+
+# Build Browser Extension
+ext-build *args:
+    @deno run -A scripts/build-extension.ts --zip {{args}}
+
+# Sync Extension to Browserbase
+ext-sync *args: (ext-build "--silent")
+    @deno run -A scripts/sync-extension.ts {{args}}
+

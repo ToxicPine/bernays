@@ -37,12 +37,7 @@ export interface BaseIntent<TScope extends Scope = Scope> {
 // Execute Error
 // ============================================================================
 
-export type ExecuteErrorCode =
-  | "NoBrowserAvailable"
-  | "BrowserNotRunning"
-  | "CommandFailed"
-  | "ValidationFailed"
-  | "Unknown";
+export type ExecuteErrorCode = string & { readonly _brand: "ExecuteErrorCode" };
 
 export interface ExecuteError {
   readonly _tag: "ExecuteError";

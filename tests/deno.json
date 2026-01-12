@@ -1,0 +1,30 @@
+{
+  "name": "@bernays/tests",
+  "version": "0.1.0",
+  "exports": "./lib/mod.ts",
+  "imports": {
+    "@bernays/server/core": "../backend/server/src/core/mod.ts",
+    "@bernays/server/events": "../backend/server/src/events/mod.ts",
+    "@bernays/server/intents": "../backend/server/src/intents/mod.ts",
+    "@bernays/server/store": "../backend/server/src/store/mod.ts",
+    "@bernays/server/backend": "../backend/server/src/backend/mod.ts",
+    "@bernays/server/platforms": "../backend/server/src/platforms/mod.ts",
+    "@bernays/server/views": "../backend/server/src/views/mod.ts",
+    "@bernays/server/projections": "../backend/server/src/projections/mod.ts",
+    "@bernays/server/routing": "../backend/server/src/routing/mod.ts",
+    "@bernays/server/runtime": "../backend/server/src/runtime/mod.ts",
+    "@bernays/plugins/linkedin": "../plugins/linkedin/mod.ts",
+    "@bernays/plugins/x": "../plugins/x/mod.ts",
+    "@std/assert": "jsr:@std/assert@^1.0.0",
+    "@zod/zod": "jsr:@zod/zod@^4.3.5",
+    "effect": "npm:effect@^3.19.14",
+    "playwright": "npm:playwright@^1.48.0",
+    "@browserbasehq/sdk": "npm:@browserbasehq/sdk@^2.0.0",
+    "postgres": "npm:postgres@^3.4.0"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true
+  }
+}

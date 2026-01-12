@@ -176,6 +176,67 @@ export type LinkedInActionConfirmed = z.infer<
   typeof LinkedInActionConfirmedSchema
 >;
 
+export const LinkedInRateLimitObservedSchema = CorrelationMetadataSchema.extend(
+  {
+    scope: linkedInScopeSchema,
+    type: z.literal("RateLimitObserved"),
+    configId: z.string(),
+    accountId: z.string().transform((val) => val as AccountId),
+    retryAfter: z.iso.datetime().optional(),
+    limitType: z.enum(["weekly_invites", "daily_messages", "searches"]),
+  },
+);
+
+export type LinkedInRateLimitObserved = z.infer<
+  typeof LinkedInRateLimitObservedSchema
+>;
+
+export const LinkedInProfileViewedSchema = CorrelationMetadataSchema.extend({
+  scope: linkedInScopeSchema,
+  type: z.literal("ProfileViewed"),
+  targetUserId: z.string(),
+  profileUrl: z.string().optional(),
+  viewedAt: z.iso.datetime(),
+});
+
+export type LinkedInProfileViewed = z.infer<typeof LinkedInProfileViewedSchema>;
+
+export const LinkedInInvitationWithdrawnSchema = CorrelationMetadataSchema
+  .extend({
+    scope: linkedInScopeSchema,
+    type: z.literal("InvitationWithdrawn"),
+    invitationId: z.string(),
+    targetUserId: z.string(),
+  });
+
+export type LinkedInInvitationWithdrawn = z.infer<
+  typeof LinkedInInvitationWithdrawnSchema
+>;
+
+export const LinkedInConnectionAcceptedSchema = CorrelationMetadataSchema
+  .extend({
+    scope: linkedInScopeSchema,
+    type: z.literal("ConnectionAccepted"),
+    invitationId: z.string(),
+    userId: z.string(),
+  });
+
+export type LinkedInConnectionAccepted = z.infer<
+  typeof LinkedInConnectionAcceptedSchema
+>;
+
+export const LinkedInConnectionRejectedSchema = CorrelationMetadataSchema
+  .extend({
+    scope: linkedInScopeSchema,
+    type: z.literal("ConnectionRejected"),
+    invitationId: z.string(),
+    userId: z.string(),
+  });
+
+export type LinkedInConnectionRejected = z.infer<
+  typeof LinkedInConnectionRejectedSchema
+>;
+
 // Event Union
 export const LinkedInEventSchema = z.discriminatedUnion("type", [
   LinkedInAuthObservedSchema,
@@ -189,6 +250,11 @@ export const LinkedInEventSchema = z.discriminatedUnion("type", [
   LinkedInSearchResultsRetrievedSchema,
   LinkedInActionAttemptedSchema,
   LinkedInActionConfirmedSchema,
+  LinkedInRateLimitObservedSchema,
+  LinkedInProfileViewedSchema,
+  LinkedInInvitationWithdrawnSchema,
+  LinkedInConnectionAcceptedSchema,
+  LinkedInConnectionRejectedSchema,
 ]);
 
 export type LinkedInEvent = z.infer<typeof LinkedInEventSchema>;
@@ -252,6 +318,55 @@ export const LinkedInRecallMessageSchema = LinkedInIntentBase.extend({
 
 export type LinkedInRecallMessage = z.infer<typeof LinkedInRecallMessageSchema>;
 
+export const LinkedInWithdrawInvitationSchema = LinkedInIntentBase.extend({
+  type: z.literal("WithdrawInvitation"),
+  invitationId: z.string(),
+  targetUserId: z.string(),
+});
+
+export type LinkedInWithdrawInvitation = z.infer<
+  typeof LinkedInWithdrawInvitationSchema
+>;
+
+export const LinkedInViewProfileSchema = LinkedInIntentBase.extend({
+  type: z.literal("ViewProfile"),
+  targetUserId: z.string(),
+  profileUrl: z.string().optional(),
+  fetchData: z.boolean().optional(),
+});
+
+export type LinkedInViewProfile = z.infer<typeof LinkedInViewProfileSchema>;
+
+export const LinkedInAcceptInvitationSchema = LinkedInIntentBase.extend({
+  type: z.literal("AcceptInvitation"),
+  invitationId: z.string(),
+  userId: z.string(),
+});
+
+export type LinkedInAcceptInvitation = z.infer<
+  typeof LinkedInAcceptInvitationSchema
+>;
+
+export const LinkedInRejectInvitationSchema = LinkedInIntentBase.extend({
+  type: z.literal("RejectInvitation"),
+  invitationId: z.string(),
+  userId: z.string(),
+});
+
+export type LinkedInRejectInvitation = z.infer<
+  typeof LinkedInRejectInvitationSchema
+>;
+
+export const LinkedInSearchCompaniesSchema = LinkedInIntentBase.extend({
+  type: z.literal("SearchCompanies"),
+  query: z.string(),
+  limit: z.number().positive().optional(),
+});
+
+export type LinkedInSearchCompanies = z.infer<
+  typeof LinkedInSearchCompaniesSchema
+>;
+
 // Intent Union
 export const LinkedInIntentSchema = z.discriminatedUnion("type", [
   LinkedInSendMessageSchema,
@@ -260,6 +375,11 @@ export const LinkedInIntentSchema = z.discriminatedUnion("type", [
   LinkedInFollowSchema,
   LinkedInPeopleSearchSchema,
   LinkedInRecallMessageSchema,
+  LinkedInWithdrawInvitationSchema,
+  LinkedInViewProfileSchema,
+  LinkedInAcceptInvitationSchema,
+  LinkedInRejectInvitationSchema,
+  LinkedInSearchCompaniesSchema,
 ]);
 
 export type LinkedInIntent = z.infer<typeof LinkedInIntentSchema>;

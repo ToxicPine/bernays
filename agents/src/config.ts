@@ -2,9 +2,9 @@
 // Environment configuration
 
 export const config = {
-  browserbaseApiKey: Deno.env.get("BROWSERBASE_API_KEY") ?? "",
-  browserbaseContextId: Deno.env.get("BROWSERBASE_CONTEXT_ID") ?? "",
-  databaseUrl: Deno.env.get("DATABASE_URL"),
+  browserbaseApiKey: Deno.env.get("BROWSERBASE_API_KEY")!,
+  browserbaseContextId: Deno.env.get("BROWSERBASE_CONTEXT_ID")!,
+  databaseUrl: Deno.env.get("DATABASE_URL")!,
   accountId: Deno.env.get("ACCOUNT_ID") ?? "demo-account",
   runSockpuppet: Deno.env.get("RUN_SOCKPUPPET") === "1",
 } as const;

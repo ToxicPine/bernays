@@ -22,17 +22,19 @@
 //
 // =============================================================================
 
-import { parseArgs } from "jsr:@std/cli@^1.0.25/parse-args";
+import { parseArgs } from "@std/cli";
+import { createLogger, type Logger } from "./lib/log.ts";
 
 // =============================================================================
 // Config
 // =============================================================================
 
-const PROJECT_ROOT = new URL("../../..", import.meta.url).pathname;
+const PROJECT_ROOT = new URL("..", import.meta.url).pathname;
 const BROWSER_PKG = new URL("..", import.meta.url).pathname;
+
 const API_BASE = "https://www.browserbase.com";
 
-const ZIP_DIR = `${BROWSER_PKG}/injectables`;
+const ZIP_DIR = `${BROWSER_PKG}/.build/injectables`;
 
 // =============================================================================
 // Types
@@ -49,33 +51,6 @@ interface ExtensionInfo {
 interface SyncConfig {
   silent: boolean;
 }
-
-// =============================================================================
-// Logger
-// =============================================================================
-
-const createLogger = (silent: boolean) => {
-  const c = {
-    red: "\x1b[31m",
-    green: "\x1b[32m",
-    yellow: "\x1b[33m",
-    cyan: "\x1b[36m",
-    dim: "\x1b[2m",
-    reset: "\x1b[0m",
-  };
-
-  return {
-    info: (msg: string) =>
-      !silent && console.log(`${c.cyan}[INFO]${c.reset} ${msg}`),
-    ok: (msg: string) =>
-      !silent && console.log(`${c.green}[OK]${c.reset} ${msg}`),
-    warn: (msg: string) =>
-      !silent && console.log(`${c.yellow}[WARN]${c.reset} ${msg}`),
-    error: (msg: string) => console.error(`${c.red}[ERR]${c.reset} ${msg}`),
-    section: (msg: string) => !silent && console.log(`\n==> ${msg}`),
-    dim: (msg: string) => !silent && console.log(`${c.dim}${msg}${c.reset}`),
-  };
-};
 
 // =============================================================================
 // Environment
@@ -104,7 +79,7 @@ const loadEnv = async (): Promise<void> => {
 const updateEnvFile = async (
   key: string,
   value: string,
-  log: ReturnType<typeof createLogger>,
+  log: Logger,
 ): Promise<void> => {
   const envPath = `${PROJECT_ROOT}/.env`;
   let lines: string[] = [];
@@ -200,7 +175,7 @@ const getExtension = async (
 const deleteExtension = async (
   id: string,
   apiKey: string,
-  log: ReturnType<typeof createLogger>,
+  log: Logger,
 ): Promise<void> => {
   const res = await fetch(`${API_BASE}/v1/extensions/${id}`, {
     method: "DELETE",

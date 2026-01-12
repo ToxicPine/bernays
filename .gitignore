@@ -2,8 +2,7 @@
 secret-sauce/
 
 # build artifacts
-packages/browser/dist/
-packages/browser/extension-zips/
+.build/
 
 # Deno cache
 .deno/

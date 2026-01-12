@@ -2,6 +2,7 @@
 // Browser configuration storage
 
 import { Context, Effect, Layer, Option } from "effect";
+import postgres from "postgres";
 import {
   BrowserConfigId,
   type BrowserConfigId as BrowserConfigIdType,
@@ -101,12 +102,27 @@ export interface PostgresConfigStoreOptions {
   readonly connectionString: string;
 }
 
+const ensureConfigTable = async (sql: postgres.Sql): Promise<void> => {
+  await sql`
+    CREATE TABLE IF NOT EXISTS browser_configs (
+      id TEXT PRIMARY KEY,
+      context TEXT NOT NULL,
+      extension_ids TEXT[] NOT NULL DEFAULT '{}',
+      proxy_server TEXT,
+      proxy_username TEXT,
+      proxy_password TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+};
+
 export const createPostgresConfigStore = async (
   options: PostgresConfigStoreOptions,
 ): Promise<ConfigStoreService> => {
-  // Import postgres dynamically
-  const postgres = await import("postgres").then((m) => m.default);
   const sql = postgres(options.connectionString);
+
+  await ensureConfigTable(sql);
 
   return {
     get: (id) =>

@@ -2,7 +2,18 @@ FROM denoland/deno:2.6.0
 
 WORKDIR /app
 
+# Copy workspace configuration
 COPY deno.json deno.lock ./
-COPY packages ./packages
 
-RUN deno cache -r packages/commandline/src/main.ts
+# Copy all workspace members
+COPY backend ./backend
+COPY plugins ./plugins
+COPY agents ./agents
+COPY tests ./tests
+COPY scripts ./scripts
+
+# Cache dependencies
+RUN deno cache agents/src/main.ts
+
+# Default command (can be overridden)
+CMD ["deno", "run", "--allow-all", "agents/src/main.ts"]

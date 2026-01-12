@@ -19,15 +19,17 @@
 // =============================================================================
 
 import { encodeBase32 } from "@std/encoding/base32";
-import { parseArgs } from "jsr:@std/cli@^1.0.14/parse-args";
+import { parseArgs } from "@std/cli";
+import { createLogger, type Logger } from "./lib/log.ts";
 
 // =============================================================================
 // Config
 // =============================================================================
 
-const PACKAGE_DIR = new URL("..", import.meta.url).pathname;
-const DIST_DIR = "extensions";
-const ZIP_DIR = "injectables";
+const PROJECT_ROOT = new URL("..", import.meta.url).pathname;
+const BROWSER_PKG = new URL("../backend/browser", import.meta.url).pathname;
+const DIST_DIR = `${PROJECT_ROOT}/.build/extensions`;
+const ZIP_DIR = `${PROJECT_ROOT}/.build/injectables`;
 
 const ESBUILD = Deno.env.get("ESBUILD") || "esbuild";
 const ZIP_TOOL = Deno.env.get("ZIP_TOOL") || "deterministic-zip";
@@ -65,30 +67,6 @@ interface BuildConfig {
 }
 
 // =============================================================================
-// Logger
-// =============================================================================
-
-const createLogger = (silent: boolean) => {
-  const c = {
-    cyan: "\x1b[36m",
-    green: "\x1b[32m",
-    red: "\x1b[31m",
-    magenta: "\x1b[35m",
-    reset: "\x1b[0m",
-  };
-
-  return {
-    info: (msg: string) =>
-      !silent && console.log(`${c.cyan}[INFO]${c.reset} ${msg}`),
-    ok: (msg: string) =>
-      !silent && console.log(`${c.green}[OK]${c.reset} ${msg}`),
-    error: (msg: string) => console.error(`${c.red}[ERR]${c.reset} ${msg}`),
-    section: (msg: string) =>
-      !silent && console.log(`\n${c.magenta}==>${c.reset} ${msg}`),
-  };
-};
-
-// =============================================================================
 // Handlers
 // =============================================================================
 
@@ -102,6 +80,11 @@ const HANDLERS: Handler[] = [
     name: "x",
     src: "src/handlers/x/handlers.ts",
     matches: ["https://www.x.com/*", "https://twitter.com/*"],
+  },
+  {
+    name: "reddit",
+    src: "src/handlers/reddit/handlers.ts",
+    matches: ["https://www.reddit.com/*", "https://old.reddit.com/*"],
   },
 ];
 
@@ -162,8 +145,11 @@ const generateManifest = (handlers: Handler[]): Manifest => {
     host_permissions: [...allMatches],
     content_scripts: [
       {
+        // loader.js runs in isolated world and injects content.js into MAIN world
+        // This is required because MV3 content scripts can't directly modify
+        // the page's window object, but Playwright needs to access __bridgeHandler
         matches: [...allMatches],
-        js: ["content.js"],
+        js: ["loader.js"],
         run_at: "document_start",
         all_frames: false,
       },
@@ -171,6 +157,7 @@ const generateManifest = (handlers: Handler[]): Manifest => {
     background: { service_worker: "background.js" },
     web_accessible_resources: [
       {
+        // content.js must be web-accessible so loader.js can inject it via script tag
         resources: ["content.js", "bridge.js", ...handlerFiles],
         matches: [...allMatches],
       },
@@ -185,7 +172,7 @@ const generateManifest = (handlers: Handler[]): Manifest => {
 const compileFile = async (
   src: string,
   out: string,
-  log: ReturnType<typeof createLogger>,
+  log: Logger,
 ): Promise<void> => {
   log.info(`Compiling ${src}`);
   const result = await runCommand([
@@ -204,7 +191,7 @@ const compileFile = async (
   log.ok(out);
 };
 
-const buildJs = async (log: ReturnType<typeof createLogger>): Promise<void> => {
+const buildJs = async (log: Logger): Promise<void> => {
   log.section("Building TypeScript → JavaScript");
   await Deno.mkdir(DIST_DIR, { recursive: true });
 
@@ -212,6 +199,7 @@ const buildJs = async (log: ReturnType<typeof createLogger>): Promise<void> => {
   const coreFiles = [
     { src: "src/core/bridge.ts", out: `${DIST_DIR}/bridge.js` },
     { src: "src/background.ts", out: `${DIST_DIR}/background.js` },
+    { src: "src/loader.ts", out: `${DIST_DIR}/loader.js` },
     { src: "src/content.ts", out: `${DIST_DIR}/content.js` },
   ];
 
@@ -231,7 +219,6 @@ const buildJs = async (log: ReturnType<typeof createLogger>): Promise<void> => {
     );
   }
 
-  // Manifest
   log.info("Generating manifest.json");
   const manifest = generateManifest(HANDLERS);
   await Deno.writeTextFile(
@@ -241,9 +228,7 @@ const buildJs = async (log: ReturnType<typeof createLogger>): Promise<void> => {
   log.ok(`${DIST_DIR}/manifest.json`);
 };
 
-const buildZip = async (
-  log: ReturnType<typeof createLogger>,
-): Promise<string> => {
+const buildZip = async (log: Logger): Promise<string> => {
   log.section("Creating Extension Zip");
   await Deno.mkdir(ZIP_DIR, { recursive: true });
 
@@ -251,7 +236,9 @@ const buildZip = async (
   await Deno.remove(zipFile);
 
   log.info(`Using ${ZIP_TOOL}`);
-  const result = await runCommand([ZIP_TOOL, zipFile, DIST_DIR]);
+  const result = await runCommand([ZIP_TOOL, "-r", zipFile, "."], {
+    cwd: DIST_DIR,
+  });
 
   if (!result.success) {
     throw new Error(
@@ -259,7 +246,6 @@ const buildZip = async (
     );
   }
 
-  // Hash and rename
   const data = await Deno.readFile(zipFile);
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
   const hash = encodeBase32(new Uint8Array(hashBuffer)).toLowerCase();
@@ -293,7 +279,7 @@ export const build = async (config: BuildConfig): Promise<void> => {
 // =============================================================================
 
 if (import.meta.main) {
-  Deno.chdir(PACKAGE_DIR);
+  Deno.chdir(BROWSER_PKG);
 
   const args = parseArgs(Deno.args, {
     boolean: ["zip", "silent", "help"],

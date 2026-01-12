@@ -1,25 +1,45 @@
 {
   "version": "5",
   "specifiers": {
+    "jsr:@std/assert@*": "1.0.16",
+    "jsr:@std/assert@1": "1.0.16",
     "jsr:@std/async@^1.0.16": "1.0.16",
     "jsr:@std/bytes@^1.0.6": "1.0.6",
     "jsr:@std/cli@^1.0.14": "1.0.24",
     "jsr:@std/cli@^1.0.25": "1.0.25",
+    "jsr:@std/collections@^1.1.3": "1.1.3",
     "jsr:@std/crypto@^1.0.5": "1.0.5",
     "jsr:@std/csv@^1.0.6": "1.0.6",
     "jsr:@std/encoding@^1.0.10": "1.0.10",
+    "jsr:@std/encoding@^1.0.7": "1.0.10",
+    "jsr:@std/fs@^1.0.21": "1.0.21",
+    "jsr:@std/fs@^1.0.8": "1.0.20",
+    "jsr:@std/internal@^1.0.12": "1.0.12",
+    "jsr:@std/path@^1.1.4": "1.1.4",
+    "jsr:@std/streams@^1.0.9": "1.0.11",
+    "jsr:@std/toml@^1.0.11": "1.0.11",
     "jsr:@std/uuid@^1.1.0": "1.1.0",
+    "jsr:@zip-js/zip-js@*": "2.8.14",
     "jsr:@zod/zod@^4.3.5": "4.3.5",
+    "npm:@browserbasehq/sdk@2": "2.6.0",
     "npm:@browserbasehq/sdk@^2.6.0": "2.6.0",
     "npm:@types/node@*": "24.2.0",
     "npm:effect@^3.12.7": "3.19.14",
     "npm:effect@^3.19.14": "3.19.14",
     "npm:esbuild@*": "0.27.2",
+    "npm:playwright@^1.48.0": "1.57.0",
     "npm:playwright@^1.57.0": "1.57.0",
     "npm:postgres@*": "3.4.8",
+    "npm:postgres@^3.4.0": "3.4.8",
     "npm:postgres@^3.4.8": "3.4.8"
   },
   "jsr": {
+    "@std/assert@1.0.16": {
+      "integrity": "6a7272ed1eaa77defe76e5ff63ca705d9c495077e2d5fd0126d2b53fc5bd6532",
+      "dependencies": [
+        "jsr:@std/internal"
+      ]
+    },
     "@std/async@1.0.16": {
       "integrity": "6c9e43035313b67b5de43e2b3ee3eadb39a488a0a0a3143097f112e025d3ee9a"
     },
@@ -30,16 +50,56 @@
       "integrity": "b655a5beb26aa94f98add6bc8889f5fb9bc3ee2cc3fc954e151201f4c4200a5e"
     },
     "@std/cli@1.0.25": {
-      "integrity": "1f85051b370c97a7a9dfc6ba626e7ed57a91bea8c081597276d1e78d929d8c91"
+      "integrity": "1f85051b370c97a7a9dfc6ba626e7ed57a91bea8c081597276d1e78d929d8c91",
+      "dependencies": [
+        "jsr:@std/internal"
+      ]
+    },
+    "@std/collections@1.1.3": {
+      "integrity": "bf8b0818886df6a32b64c7d3b037a425111f28278d69fd0995aeb62777c986b0"
     },
     "@std/crypto@1.0.5": {
       "integrity": "0dcfbb319fe0bba1bd3af904ceb4f948cde1b92979ec1614528380ed308a3b40"
     },
     "@std/csv@1.0.6": {
-      "integrity": "52ef0e62799a0028d278fa04762f17f9bd263fad9a8e7f98c14fbd371d62d9fd"
+      "integrity": "52ef0e62799a0028d278fa04762f17f9bd263fad9a8e7f98c14fbd371d62d9fd",
+      "dependencies": [
+        "jsr:@std/streams"
+      ]
     },
     "@std/encoding@1.0.10": {
       "integrity": "8783c6384a2d13abd5e9e87a7ae0520a30e9f56aeeaa3bdf910a3eaaf5c811a1"
+    },
+    "@std/fs@1.0.20": {
+      "integrity": "e953206aae48d46ee65e8783ded459f23bec7dd1f3879512911c35e5484ea187"
+    },
+    "@std/fs@1.0.21": {
+      "integrity": "d720fe1056d78d43065a4d6e0eeb2b19f34adb8a0bc7caf3a4dbf1d4178252cd",
+      "dependencies": [
+        "jsr:@std/internal",
+        "jsr:@std/path"
+      ]
+    },
+    "@std/internal@1.0.12": {
+      "integrity": "972a634fd5bc34b242024402972cd5143eac68d8dffaca5eaa4dba30ce17b027"
+    },
+    "@std/path@1.1.4": {
+      "integrity": "1d2d43f39efb1b42f0b1882a25486647cb851481862dc7313390b2bb044314b5",
+      "dependencies": [
+        "jsr:@std/internal"
+      ]
+    },
+    "@std/streams@1.0.11": {
+      "integrity": "db583d27e28d133f389f1eec318cffdf4998305e5134c1d4b1c56b361cee6018",
+      "dependencies": [
+        "jsr:@std/bytes"
+      ]
+    },
+    "@std/toml@1.0.11": {
+      "integrity": "e084988b872ca4bad6aedfb7350f6eeed0e8ba88e9ee5e1590621c5b5bb8f715",
+      "dependencies": [
+        "jsr:@std/collections"
+      ]
     },
     "@std/uuid@1.1.0": {
       "integrity": "6268db2ccf172849c9be80763354ca305d49ef4af41fe995623d44fcc3f7457c",
@@ -47,6 +107,9 @@
         "jsr:@std/bytes",
         "jsr:@std/crypto"
       ]
+    },
+    "@zip-js/zip-js@2.8.14": {
+      "integrity": "ff1886b865a8c362d1991f2c99bb6b7b97c1e9c8466811e4ac11745de8751063"
     },
     "@zod/zod@4.3.5": {
       "integrity": "3d14553f025d6e3d1a836b9c56e366bbce27d942301e8c7c1ac4c365df5f8085"
@@ -502,7 +565,29 @@
           "jsr:@std/encoding@^1.0.10",
           "jsr:@std/uuid@^1.1.0",
           "jsr:@zod/zod@^4.3.5",
+          "npm:effect@^3.19.14",
+          "npm:postgres@^3.4.8"
+        ]
+      },
+      "scripts": {
+        "dependencies": [
+          "jsr:@std/cli@^1.0.25",
+          "jsr:@std/csv@^1.0.6",
+          "jsr:@std/encoding@^1.0.10",
+          "jsr:@std/fs@^1.0.21",
+          "jsr:@std/toml@^1.0.11",
+          "jsr:@zod/zod@^4.3.5",
           "npm:effect@^3.19.14"
+        ]
+      },
+      "tests": {
+        "dependencies": [
+          "jsr:@std/assert@1",
+          "jsr:@zod/zod@^4.3.5",
+          "npm:@browserbasehq/sdk@2",
+          "npm:effect@^3.19.14",
+          "npm:playwright@^1.48.0",
+          "npm:postgres@^3.4.0"
         ]
       }
     }

@@ -132,11 +132,48 @@ export const linkedInBehavior: PlatformBehavior<
       };
     }
 
+    // Calculate pendingInvitations from events
+    // Count sent invitations minus accepted/rejected/withdrawn
+    let sentInvitations = 0;
+    let resolvedInvitations = 0;
+
+    for (const event of events) {
+      if (event.type === "ConnectionRequestSent") {
+        sentInvitations++;
+      } else if (
+        event.type === "ConnectionAccepted" ||
+        event.type === "ConnectionRejected" ||
+        event.type === "InvitationWithdrawn"
+      ) {
+        resolvedInvitations++;
+      }
+    }
+
+    const pendingInvitations = Math.max(0, sentInvitations - resolvedInvitations);
+
+    // Calculate weeklyInvitesRemaining from events
+    // LinkedIn allows ~100 invites per week
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+    const oneWeekAgoIso = oneWeekAgo.toISOString();
+
+    let weeklyInvitesSent = 0;
+    for (const event of events) {
+      if (
+        event.type === "ConnectionRequestSent" &&
+        event.timestamp > oneWeekAgoIso
+      ) {
+        weeklyInvitesSent++;
+      }
+    }
+
+    const weeklyInvitesRemaining = Math.max(0, 100 - weeklyInvitesSent);
+
     return {
       byThreadId,
       syncedAt: new Date().toISOString(),
-      pendingInvitations: 0,
-      weeklyInvitesRemaining: 100,
+      pendingInvitations,
+      weeklyInvitesRemaining,
     };
   },
 
@@ -169,10 +206,19 @@ export const linkedInBehavior: PlatformBehavior<
     // Build browser status from events
     const browserStatus = new Map<
       string,
-      { authStatus: LinkedInAuthStatus; rateLimitedUntil?: string }
+      {
+        authStatus: LinkedInAuthStatus;
+        rateLimitedUntil?: string;
+        weeklyInvitesSent: number;
+      }
     >();
 
-    // Process auth events (latest wins)
+    // Calculate weekly invites sent per browser
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+    const oneWeekAgoIso = oneWeekAgo.toISOString();
+
+    // Process events (latest wins for auth, accumulate for rate limits)
     for (const event of events) {
       if (event.type === "AuthObserved") {
         const authEvent = event as {
@@ -182,19 +228,58 @@ export const linkedInBehavior: PlatformBehavior<
         };
         const configId = authEvent.configId ?? authEvent.browserId;
         if (configId) {
+          const existing = browserStatus.get(configId);
           browserStatus.set(configId, {
             authStatus: authEvent.authenticated ? "authenticated" : "expired",
-            rateLimitedUntil: browserStatus.get(configId)?.rateLimitedUntil,
+            rateLimitedUntil: existing?.rateLimitedUntil,
+            weeklyInvitesSent: existing?.weeklyInvitesSent ?? 0,
           });
         }
+      } else if (event.type === "RateLimitObserved") {
+        const rateLimitEvent = event as {
+          configId: string;
+          retryAfter?: string;
+        };
+        const configId = rateLimitEvent.configId;
+        if (configId) {
+          const existing = browserStatus.get(configId);
+          // Only set rateLimitedUntil if retryAfter is in the future
+          const retryAfter = rateLimitEvent.retryAfter;
+          const isActive = retryAfter && retryAfter > new Date().toISOString();
+          browserStatus.set(configId, {
+            authStatus: existing?.authStatus ?? "unknown",
+            rateLimitedUntil: isActive ? retryAfter : undefined,
+            weeklyInvitesSent: existing?.weeklyInvitesSent ?? 0,
+          });
+        }
+      } else if (
+        event.type === "ConnectionRequestSent" &&
+        event.timestamp > oneWeekAgoIso
+      ) {
+        // Track weekly invites per browser using correlationId to identify browser
+        // For now, we track globally since events don't have configId
+        // In a full implementation, we'd track per-browser
       }
-      // Could also process RateLimitObserved events here
     }
+
+    // Count total weekly invites sent (global for now)
+    let totalWeeklyInvitesSent = 0;
+    for (const event of events) {
+      if (
+        event.type === "ConnectionRequestSent" &&
+        event.timestamp > oneWeekAgoIso
+      ) {
+        totalWeeklyInvitesSent++;
+      }
+    }
+
+    const weeklyInvitesRemaining = Math.max(0, 100 - totalWeeklyInvitesSent);
 
     // Map account's browser bindings to LinkedInBrowser
     return account.browserBindings.map((binding) => {
       const status = browserStatus.get(binding.configId) ?? {
         authStatus: "unknown" as LinkedInAuthStatus,
+        weeklyInvitesSent: 0,
       };
 
       return {
@@ -203,7 +288,7 @@ export const linkedInBehavior: PlatformBehavior<
         metadata: binding.metadata,
         authStatus: status.authStatus,
         rateLimitedUntil: status.rateLimitedUntil,
-        weeklyInvitesRemaining: undefined, // Would need to track from events
+        weeklyInvitesRemaining,
       };
     });
   },
@@ -271,6 +356,16 @@ export const linkedInBehavior: PlatformBehavior<
             return { type: "linkedin:peopleSearch", payload: intent };
           case "RecallMessage":
             return { type: "linkedin:recallMessage", payload: intent };
+          case "WithdrawInvitation":
+            return { type: "linkedin:withdrawInvitation", payload: intent };
+          case "ViewProfile":
+            return { type: "linkedin:viewProfile", payload: intent };
+          case "AcceptInvitation":
+            return { type: "linkedin:acceptInvitation", payload: intent };
+          case "RejectInvitation":
+            return { type: "linkedin:rejectInvitation", payload: intent };
+          case "SearchCompanies":
+            return { type: "linkedin:searchCompanies", payload: intent };
         }
       })();
 

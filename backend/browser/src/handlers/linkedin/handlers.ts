@@ -387,4 +387,243 @@ window.__registerCommand<
   }
 });
 
+// ============================================================================
+// Withdraw Invitation
+// ============================================================================
+
+window.__registerCommand<
+  { invitationId: string; targetUserId: string },
+  { success: boolean }
+>("linkedin:withdrawInvitation", async (payload) => {
+  try {
+    const response = await fetch(
+      `https://www.linkedin.com/voyager/api/relationships/invitations/${payload.invitationId}`,
+      {
+        method: "DELETE",
+        headers: {
+          "csrf-token": extractCsrfToken(),
+        },
+        credentials: "include",
+      },
+    );
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        return {
+          ok: false,
+          error: {
+            code: "RateLimited",
+            message: "LinkedIn rate limit exceeded",
+            details: { status: response.status },
+          },
+        };
+      }
+
+      return {
+        ok: false,
+        error: {
+          code: "NetworkTransient",
+          message: `HTTP ${response.status}`,
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      value: { success: true },
+    };
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    return {
+      ok: false,
+      error: {
+        code: "Unknown",
+        message: error.message,
+        details: error,
+      },
+    };
+  }
+});
+
+// ============================================================================
+// View Profile
+// ============================================================================
+
+window.__registerCommand<
+  { targetUserId: string; profileUrl?: string; fetchData?: boolean },
+  { success: boolean; profileData?: unknown }
+>("linkedin:viewProfile", async (payload) => {
+  try {
+    const profileUrl =
+      payload.profileUrl ||
+      `https://www.linkedin.com/in/${payload.targetUserId}/`;
+
+    // Navigate to profile to register view
+    window.location.href = profileUrl;
+
+    // If fetchData is requested, fetch profile data via API
+    if (payload.fetchData) {
+      const response = await fetch(
+        `https://www.linkedin.com/voyager/api/identity/profiles/${payload.targetUserId}`,
+        {
+          method: "GET",
+          headers: {
+            "csrf-token": extractCsrfToken(),
+          },
+          credentials: "include",
+        },
+      );
+
+      if (!response.ok) {
+        return {
+          ok: false,
+          error: {
+            code: "NetworkTransient",
+            message: `HTTP ${response.status}`,
+          },
+        };
+      }
+
+      const profileData = await response.json();
+      return {
+        ok: true,
+        value: { success: true, profileData },
+      };
+    }
+
+    return {
+      ok: true,
+      value: { success: true },
+    };
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    return {
+      ok: false,
+      error: {
+        code: "Unknown",
+        message: error.message,
+        details: error,
+      },
+    };
+  }
+});
+
+// ============================================================================
+// Accept Invitation
+// ============================================================================
+
+window.__registerCommand<
+  { invitationId: string; userId: string },
+  { success: boolean }
+>("linkedin:acceptInvitation", async (payload) => {
+  try {
+    const response = await fetch(
+      `https://www.linkedin.com/voyager/api/relationships/invitations/${payload.invitationId}?action=accept`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "csrf-token": extractCsrfToken(),
+        },
+        credentials: "include",
+      },
+    );
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        return {
+          ok: false,
+          error: {
+            code: "RateLimited",
+            message: "LinkedIn rate limit exceeded",
+            details: { status: response.status },
+          },
+        };
+      }
+
+      return {
+        ok: false,
+        error: {
+          code: "NetworkTransient",
+          message: `HTTP ${response.status}`,
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      value: { success: true },
+    };
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    return {
+      ok: false,
+      error: {
+        code: "Unknown",
+        message: error.message,
+        details: error,
+      },
+    };
+  }
+});
+
+// ============================================================================
+// Reject Invitation
+// ============================================================================
+
+window.__registerCommand<
+  { invitationId: string; userId: string },
+  { success: boolean }
+>("linkedin:rejectInvitation", async (payload) => {
+  try {
+    const response = await fetch(
+      `https://www.linkedin.com/voyager/api/relationships/invitations/${payload.invitationId}?action=ignore`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "csrf-token": extractCsrfToken(),
+        },
+        credentials: "include",
+      },
+    );
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        return {
+          ok: false,
+          error: {
+            code: "RateLimited",
+            message: "LinkedIn rate limit exceeded",
+            details: { status: response.status },
+          },
+        };
+      }
+
+      return {
+        ok: false,
+        error: {
+          code: "NetworkTransient",
+          message: `HTTP ${response.status}`,
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      value: { success: true },
+    };
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    return {
+      ok: false,
+      error: {
+        code: "Unknown",
+        message: error.message,
+        details: error,
+      },
+    };
+  }
+});
+
 export {};

@@ -27,6 +27,7 @@ declare namespace chrome {
       removeListener(callback: (details: InstalledDetails) => void): void;
     }
 
+    const getURL: (path: string) => string;
     const onInstalled: OnInstalledEvent;
   }
 }

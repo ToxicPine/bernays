@@ -7,6 +7,8 @@ import { tty } from "./logger.ts";
 import { initializeStores } from "./stores.ts";
 import { createBrowserLayer, runWithSockpuppet } from "./runtime.ts";
 import { Journal, Platform } from "@bernays/server/runtime";
+import { sleep } from "effect/Clock";
+import { seconds } from "effect/Duration";
 
 export const sockpuppet = Effect.gen(function* () {
   const platform = yield* Platform;
@@ -15,7 +17,9 @@ export const sockpuppet = Effect.gen(function* () {
   const inbox = yield* platform.inbox;
   const threads = Object.keys(inbox.byThreadId);
 
-  yield* Effect.log(`Found ${threads.length} threads`);
+  yield* Effect.log(`Found ${threads.length} Threads`);
+
+  yield* sleep(seconds(1));
 
   yield* journal.record({
     kind: "checked_inbox",
@@ -26,15 +30,7 @@ export const sockpuppet = Effect.gen(function* () {
 });
 
 async function main() {
-  tty.info("SOCIAL AUTOMATION FRAMEWORK\n");
-
-  if (!config.browserbaseApiKey) {
-    tty.warn("BROWSERBASE_API_KEY not set");
-  }
-  if (!config.databaseUrl) {
-    tty.error("DATABASE_URL is required");
-    Deno.exit(1);
-  }
+  tty.info("BERNAYS\n");
 
   const { configStore, eventStore, account } = await initializeStores();
   const browserLayer = createBrowserLayer(configStore);

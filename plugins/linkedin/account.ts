@@ -2,6 +2,7 @@
 // LinkedIn account type and storage
 
 import { Context, Effect, Layer, Option } from "effect";
+import postgres from "postgres";
 import {
   AccountId,
   type AccountId as AccountIdType,
@@ -76,6 +77,20 @@ export interface PostgresLinkedInAccountStoreOptions {
   readonly connectionString: string;
 }
 
+const ensureAccountTable = async (sql: postgres.Sql): Promise<void> => {
+  await sql`
+    CREATE TABLE IF NOT EXISTS linkedin_accounts (
+      id TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      profile_url TEXT NOT NULL,
+      weekly_invite_limit INTEGER NOT NULL DEFAULT 100,
+      browser_bindings JSONB NOT NULL DEFAULT '[]',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+};
+
 /**
  * PostgreSQL-backed LinkedIn account store.
  *
@@ -95,8 +110,9 @@ export interface PostgresLinkedInAccountStoreOptions {
 export const createPostgresLinkedInAccountStore = async (
   options: PostgresLinkedInAccountStoreOptions,
 ): Promise<LinkedInAccountStoreService> => {
-  const postgres = await import("npm:postgres").then((m) => m.default);
   const sql = postgres(options.connectionString);
+
+  await ensureAccountTable(sql);
 
   return {
     get: (id) =>

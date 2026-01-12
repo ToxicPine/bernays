@@ -1,0 +1,8 @@
+FROM tailscale/tailscale:latest
+
+COPY start-tailscale.sh /start-tailscale.sh
+RUN chmod +x /start-tailscale.sh
+
+RUN mkdir -p /var/lib/tailscale /var/run/tailscale
+
+ENTRYPOINT ["/start-tailscale.sh"]

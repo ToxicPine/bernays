@@ -3,11 +3,16 @@
 // Core Bridge Infrastructure
 import "./core/bridge.ts";
 
-// Platform Handlers (Command Execution)
+// Command Execution
 import "./handlers/linkedin/handlers.ts";
 import "./handlers/x/handlers.ts";
+import "./handlers/reddit/handlers.ts";
 
-// Platform Observers (Hybrid Observation Pattern)
+// Utility Handlers
+import "./handlers/proxy/handlers.ts";
+
+// Platform Observers
 import "./observers/core.ts";
 import "./observers/linkedin.ts";
 import "./observers/x.ts";
+import "./observers/reddit.ts";

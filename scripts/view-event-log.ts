@@ -1,30 +1,44 @@
 #!/usr/bin/env -S deno run -A
-// =============================================================================
-// events.ts — Query the event log
-// =============================================================================
-//
-// Usage:
-//   just events                           # all events (piped to csvlens if tty)
-//   just events --since 2026-01-09        # events since date
-//   just events --correlation <uuid>      # events by correlation ID
-//   just events --intent <uuid>           # events by intent ID
-//   just events --type linkedin           # filter by type substring
-//   just events --format json             # JSON output
-//   just events --limit 50                # limit results
-//
-// Environment:
-//   DATABASE_URL    Postgres connection string (required)
-//
-// =============================================================================
 
-import { parseArgs } from "jsr:@std/cli@^1.0.25/parse-args";
-import { stringify } from "jsr:@std/csv@^1.0.6/stringify";
+import { parseArgs } from "@std/cli";
+import { stringify } from "@std/csv";
 import {
   createPostgresEventStore,
   type EventStore,
   type EventStoreQuery,
   type StorableEvent,
 } from "@bernays/server/store";
+import { bold, createLogger } from "./lib/log.ts";
+
+// =============================================================================
+// Interactive Viewer
+// =============================================================================
+
+const isInteractive = (): boolean =>
+  Deno.stdout.isTerminal() && Deno.stdin.isTerminal();
+
+const hasCsvlens = async (): Promise<boolean> => {
+  try {
+    const cmd = new Deno.Command("which", { args: ["csvlens"], stderr: "null", stdout: "null" });
+    const { success } = await cmd.output();
+    return success;
+  } catch {
+    return false;
+  }
+};
+
+const pipeToViewer = async (output: string): Promise<void> => {
+  const cmd = new Deno.Command("csvlens", {
+    stdin: "piped",
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  const child = cmd.spawn();
+  const writer = child.stdin.getWriter();
+  await writer.write(new TextEncoder().encode(output));
+  await writer.close();
+  await child.status;
+};
 
 // =============================================================================
 // Types
@@ -57,22 +71,6 @@ interface Config {
   storeProvider: StoreProvider;
   silent: boolean;
 }
-
-// =============================================================================
-// Logger
-// =============================================================================
-
-const createLogger = (silent: boolean) => {
-  const red = (s: string) => `\x1b[31m${s}\x1b[0m`;
-  const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
-
-  return {
-    red,
-    bold,
-    error: (msg: string) => console.error(`${red("[ERROR]")} ${msg}`),
-    info: (msg: string) => !silent && console.error(`[INFO] ${msg}`),
-  };
-};
 
 // =============================================================================
 // Store Providers
@@ -153,8 +151,7 @@ const formatOutput = (events: StorableEvent[], format: Format): string => {
 // CLI
 // =============================================================================
 
-const HELP = (bold: (s: string) => string) =>
-  `
+const HELP = `
 ${bold("events.ts")} — Query the Postgres-backed event log
 
 ${bold("USAGE")}
@@ -179,7 +176,7 @@ ${bold("EXAMPLES")}
 
 ${bold("NOTES")}
   Query precedence: correlation > intent > since > all
-  CSV output is piped to csvlens when running interactively via just.
+  CSV output is piped to csvlens automatically when running interactively.
 `.trim();
 
 interface CliArgs {
@@ -260,7 +257,7 @@ export const run = async (config: Config): Promise<void> => {
   const log = createLogger(config.silent || args.silent);
 
   if (args.help) {
-    console.log(HELP(log.bold));
+    console.log(HELP);
     return;
   }
 
@@ -271,7 +268,12 @@ export const run = async (config: Config): Promise<void> => {
   log.info(`Found ${events.length} events`);
 
   const output = formatOutput(events, options.format);
-  Deno.stdout.writeSync(new TextEncoder().encode(output));
+
+  if (options.format === "csv" && isInteractive() && await hasCsvlens()) {
+    await pipeToViewer(output);
+  } else {
+    Deno.stdout.writeSync(new TextEncoder().encode(output));
+  }
 };
 
 // =============================================================================
@@ -287,7 +289,7 @@ if (import.meta.main) {
 
 To set up the database, run:
 
-    ${log.bold("bernays deploy")}
+    ${bold("bernays deploy")}
 
 This will create a managed Postgres database and write DATABASE_URL to .env.
 Alternatively, pass --database-url <url> directly.

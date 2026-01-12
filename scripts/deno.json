@@ -1,0 +1,23 @@
+{
+  "version": "0.1.0",
+  "imports": {
+    "@std/cli": "jsr:@std/cli@^1.0.25",
+    "@std/csv": "jsr:@std/csv@^1.0.6",
+    "@std/encoding": "jsr:@std/encoding@^1.0.10",
+    "@std/fs": "jsr:@std/fs@^1.0.21",
+    "@std/toml": "jsr:@std/toml@^1.0.11",
+    "@zod/zod": "jsr:@zod/zod@^4.3.5",
+    "effect": "npm:effect@^3.19.14"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "paths": {
+      "$/*": ["./*"]
+    }
+  }
+}

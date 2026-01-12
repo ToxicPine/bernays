@@ -1,38 +1,9 @@
 // src/platforms/x/mod.ts
-// X (Twitter) platform definition - stub implementation
+// X (Twitter) platform definition
 
 import type { PlatformDefinition } from "@bernays/server/platforms";
 
-// Re-export from split files
-export {
-  X_SCOPE,
-  type XAnchor,
-  XAnchorSchema,
-  type XScope,
-} from "./schemas.ts";
-export {
-  type XAuthObserved,
-  XAuthObservedSchema,
-  type XEvent,
-  XEventSchema,
-} from "./schemas.ts";
-export {
-  type XIntent,
-  XIntentSchema,
-  type XSendMessage,
-  XSendMessageSchema,
-} from "./schemas.ts";
-export { type XInbox, type XIndexMeta, type XThread } from "./views.ts";
-export { type XAuthStatus, type XBrowser } from "./browser.ts";
-export {
-  makeInMemoryXAccountStoreLayer,
-  type XAccount,
-  XAccountStore,
-  type XAccountStoreService,
-} from "./account.ts";
-export { xBehavior } from "./behavior.ts";
-
-// Local imports for platform definition
+// Schemas
 import {
   X_SCOPE,
   type XAnchor,
@@ -43,13 +14,19 @@ import {
   XIntentSchema,
   type XScope,
 } from "./schemas.ts";
+
+// Views
 import type { XInbox, XThread } from "./views.ts";
-import type { XBrowser } from "./browser.ts";
+
+// Account & Browser
 import type { XAccount } from "./account.ts";
+import type { XBrowser } from "./browser.ts";
+
+// Behavior
 import { xBehavior } from "./behavior.ts";
 
 // ============================================================================
-// X Platform Definition
+// Platform Definition
 // ============================================================================
 
 export const xPlatform: PlatformDefinition<
@@ -68,3 +45,93 @@ export const xPlatform: PlatformDefinition<
   anchorSchema: XAnchorSchema,
   behavior: xBehavior,
 };
+
+// ============================================================================
+// Re-exports
+// ============================================================================
+
+// Scope
+export { X_SCOPE } from "./schemas.ts";
+
+// Schemas (events)
+export {
+  type XAccountSuspended,
+  XAccountSuspendedSchema,
+  type XAnchor,
+  type XAnchorMessageObserved,
+  XAnchorMessageObservedSchema,
+  XAnchorSchema,
+  type XAuthObserved,
+  XAuthObservedSchema,
+  type XConversationsSynced,
+  XConversationsSyncedSchema,
+  type XEvent,
+  XEventSchema,
+  type XFollowObserved,
+  XFollowObservedSchema,
+  type XLikeObserved,
+  XLikeObservedSchema,
+  type XMessageObserved,
+  XMessageObservedSchema,
+  type XMessageSent,
+  XMessageSentSchema,
+  type XRateLimitObserved,
+  XRateLimitObservedSchema,
+  type XRetweetObserved,
+  XRetweetObservedSchema,
+  type XScope,
+  type XTweetObserved,
+  XTweetObservedSchema,
+  type XTweetSent,
+  XTweetSentSchema,
+} from "./schemas.ts";
+
+// Schemas (intents)
+export {
+  type XBookmarkTweet,
+  XBookmarkTweetSchema,
+  type XDeleteTweet,
+  XDeleteTweetSchema,
+  type XFollow,
+  XFollowSchema,
+  type XIntent,
+  XIntentSchema,
+  type XLike,
+  XLikeSchema,
+  type XPostTweet,
+  XPostTweetSchema,
+  type XReplyToTweet,
+  XReplyToTweetSchema,
+  type XRetweet,
+  XRetweetSchema,
+  type XSearchTweets,
+  XSearchTweetsSchema,
+  type XSendMessage,
+  XSendMessageSchema,
+  type XSyncConversations,
+  XSyncConversationsSchema,
+  type XUnfollow,
+  XUnfollowSchema,
+  type XUnlike,
+  XUnlikeSchema,
+} from "./schemas.ts";
+
+// Views
+export type { XInbox, XIndexMeta, XThread } from "./views.ts";
+
+// Browser
+export type { XAuthStatus, XBrowser } from "./browser.ts";
+
+// Account
+export {
+  createPostgresXAccountStore,
+  makeInMemoryXAccountStoreLayer,
+  type PostgresXAccountStoreOptions,
+  type XAccount,
+  XAccountStore,
+  type XAccountStoreService,
+  type XApiTier,
+} from "./account.ts";
+
+// Behavior
+export { xBehavior } from "./behavior.ts";

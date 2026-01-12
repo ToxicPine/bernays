@@ -11,17 +11,25 @@ import type { XAnchor } from "./schemas.ts";
 
 export interface XThread extends BaseThreadView<XAnchor> {
   readonly unreadCount: number;
+  readonly lastActivity: string;
+  readonly isArchived: boolean;
+}
+
+// ============================================================================
+// X Inbox Index Metadata
+// ============================================================================
+
+export interface XIndexMeta {
+  readonly lastActivity: string;
+  readonly unreadCount: number;
+  readonly participantCount: number;
 }
 
 // ============================================================================
 // X Inbox View
 // ============================================================================
 
-export interface XIndexMeta {
-  readonly lastActivity: string;
-  readonly unreadCount: number;
-}
-
 export interface XInbox extends BaseInboxView<XIndexMeta> {
   readonly syncedAt: string;
+  readonly totalUnread: number;
 }
