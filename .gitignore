@@ -1,6 +1,9 @@
 # secret sauce projects
 secret-sauce/
 
+# deployment artifacts
+.deploy/
+
 # build artifacts
 .build/
 

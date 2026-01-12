@@ -24,6 +24,7 @@
 
 import { parseArgs } from "@std/cli";
 import { createLogger, type Logger } from "./lib/log.ts";
+import { loadDotenv, writeDotenv } from "./lib/env.ts";
 
 // =============================================================================
 // Config
@@ -56,58 +57,17 @@ interface SyncConfig {
 // Environment
 // =============================================================================
 
-const loadEnv = async (): Promise<void> => {
-  const envPath = `${PROJECT_ROOT}/.env`;
-  try {
-    const content = await Deno.readTextFile(envPath);
-    for (const line of content.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eqIdx = trimmed.indexOf("=");
-      if (eqIdx === -1) continue;
-      const key = trimmed.slice(0, eqIdx).trim();
-      const value = trimmed.slice(eqIdx + 1).replace(/^["']|["']$/g, "");
-      if (key && !Deno.env.get(key)) {
-        Deno.env.set(key, value);
-      }
-    }
-  } catch {
-    // .env doesn't exist
-  }
-};
-
-const updateEnvFile = async (
+const updateEnvFile = (
   key: string,
   value: string,
   log: Logger,
-): Promise<void> => {
+): void => {
   const envPath = `${PROJECT_ROOT}/.env`;
-  let lines: string[] = [];
-
-  try {
-    lines = (await Deno.readTextFile(envPath)).split("\n");
-  } catch {
-    // File doesn't exist
+  if (writeDotenv(key, value, envPath)) {
+    log.ok(`Updated ${key} in .env`);
+  } else {
+    log.dim(`${key} unchanged in .env`);
   }
-
-  let found = false;
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim().startsWith(`${key}=`)) {
-      lines[i] = `${key}=${value}`;
-      found = true;
-      break;
-    }
-  }
-  if (!found) {
-    lines.push(`${key}="${value}"`);
-  }
-
-  while (lines.length > 0 && lines[lines.length - 1].trim() === "") {
-    lines.pop();
-  }
-
-  await Deno.writeTextFile(envPath, lines.join("\n") + "\n");
-  log.ok(`Updated ${key} in .env`);
 };
 
 // =============================================================================
@@ -220,7 +180,7 @@ const uploadExtension = async (
 export const sync = async (config: SyncConfig): Promise<void> => {
   const log = createLogger(config.silent);
 
-  await loadEnv();
+  loadDotenv(`${PROJECT_ROOT}/.env`);
 
   const apiKey = Deno.env.get("BROWSERBASE_API_KEY");
   if (!apiKey) {
@@ -273,7 +233,7 @@ export const sync = async (config: SyncConfig): Promise<void> => {
   log.ok(`Uploaded: ${uploaded.id}`);
 
   if (uploaded.id !== existingId) {
-    await updateEnvFile("BROWSERBASE_EXTENSION_ID", uploaded.id, log);
+    updateEnvFile("BROWSERBASE_EXTENSION_ID", uploaded.id, log);
   }
 
   log.section("Done");

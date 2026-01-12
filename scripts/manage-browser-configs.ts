@@ -29,6 +29,7 @@ import {
 import { BrowserConfigId, ExtensionId } from "@bernays/server/core";
 import type { BrowserConfig, ProxyConfig } from "@bernays/server/backend";
 import { bold, createLogger, cyan, dim, green, red, yellow } from "./lib/log.ts";
+import { boxHeader, clearScreen, confirm, hr, readLine, readSecret, waitForEnter, writeln } from "./lib/tui.ts";
 
 // =============================================================================
 // Types
@@ -41,53 +42,6 @@ type Command =
   | { type: "create" }
   | { type: "edit"; id: string }
   | { type: "delete"; id: string };
-
-// =============================================================================
-// Terminal Utilities
-// =============================================================================
-
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-
-const write = (s: string): void => {
-  Deno.stdout.writeSync(encoder.encode(s));
-};
-
-const writeln = (s: string = ""): void => {
-  write(s + "\n");
-};
-
-const readLine = async (prompt: string): Promise<string> => {
-  write(prompt);
-  const buf = new Uint8Array(1024);
-  const n = await Deno.stdin.read(buf);
-  if (n === null) return "";
-  return decoder.decode(buf.subarray(0, n)).trim();
-};
-
-const readSecret = async (prompt: string): Promise<string> => {
-  write(prompt);
-  try {
-    await new Deno.Command("stty", { args: ["-echo"], stdin: "inherit" }).output();
-    const buf = new Uint8Array(1024);
-    const n = await Deno.stdin.read(buf);
-    await new Deno.Command("stty", { args: ["echo"], stdin: "inherit" }).output();
-    writeln();
-    if (n === null) return "";
-    return decoder.decode(buf.subarray(0, n)).trim();
-  } catch {
-    return readLine("");
-  }
-};
-
-const confirm = async (prompt: string): Promise<boolean> => {
-  const answer = await readLine(`${prompt} [y/N] `);
-  return answer.toLowerCase() === "y" || answer.toLowerCase() === "yes";
-};
-
-const clearScreen = (): void => {
-  write("\x1b[2J\x1b[H");
-};
 
 // =============================================================================
 // Display Helpers
@@ -148,13 +102,13 @@ const listConfigs = async (store: ConfigStoreService): Promise<void> => {
   }
 
   writeln(bold("\nBrowser Configs\n"));
-  writeln(dim("─".repeat(80)));
+  writeln(dim(hr(80)));
 
   for (let i = 0; i < result.length; i++) {
     writeln(formatConfigRow(result[i], i));
   }
 
-  writeln(dim("─".repeat(80)));
+  writeln(dim(hr(80)));
   writeln(dim(`\nTotal: ${result.length} config(s)`));
 };
 
@@ -167,14 +121,14 @@ const viewConfig = async (store: ConfigStoreService, id: string): Promise<void> 
   }
 
   writeln(bold("\nBrowser Config\n"));
-  writeln(dim("─".repeat(50)));
+  writeln(dim(hr(50)));
   writeln(formatConfig(result.value, true));
-  writeln(dim("─".repeat(50)));
+  writeln(dim(hr(50)));
 };
 
 const createConfig = async (store: ConfigStoreService): Promise<void> => {
   writeln(bold("\nCreate Browser Config\n"));
-  writeln(dim("─".repeat(50)));
+  writeln(dim(hr(50)));
 
   // ID
   const id = await readLine(`${bold("ID")} (unique identifier): `);
@@ -229,7 +183,7 @@ const createConfig = async (store: ConfigStoreService): Promise<void> => {
     proxy,
   };
 
-  writeln(dim("\n─".repeat(50)));
+  writeln(dim("\n" + hr(50)));
   writeln(bold("\nReview:\n"));
   writeln(formatConfig(config, true));
   writeln();
@@ -253,9 +207,9 @@ const editConfig = async (store: ConfigStoreService, id: string): Promise<void> 
   const config = result.value;
 
   writeln(bold("\nEdit Browser Config\n"));
-  writeln(dim("─".repeat(50)));
+  writeln(dim(hr(50)));
   writeln(formatConfig(config, true));
-  writeln(dim("─".repeat(50)));
+  writeln(dim(hr(50)));
   writeln(dim("\nPress Enter to keep current value.\n"));
 
   // Context
@@ -319,7 +273,7 @@ const editConfig = async (store: ConfigStoreService, id: string): Promise<void> 
     proxy,
   };
 
-  writeln(dim("\n─".repeat(50)));
+  writeln(dim("\n" + hr(50)));
   writeln(bold("\nUpdated config:\n"));
   writeln(formatConfig(updated, true));
   writeln();
@@ -341,9 +295,9 @@ const deleteConfig = async (store: ConfigStoreService, id: string): Promise<void
   }
 
   writeln(bold("\nDelete Browser Config\n"));
-  writeln(dim("─".repeat(50)));
+  writeln(dim(hr(50)));
   writeln(formatConfig(result.value));
-  writeln(dim("─".repeat(50)));
+  writeln(dim(hr(50)));
 
   if (await confirm(`\n${red("Delete this config?")} This cannot be undone.`)) {
     const deleted = await Effect.runPromise(store.remove(BrowserConfigId(id)));
@@ -361,12 +315,46 @@ const deleteConfig = async (store: ConfigStoreService, id: string): Promise<void
 // Interactive TUI
 // =============================================================================
 
+/**
+ * Resolve a config ID from user input (can be index number or actual ID).
+ */
+const resolveConfigId = async (
+  configs: readonly BrowserConfig[],
+  prompt: string,
+): Promise<string | null> => {
+  const input = await readLine(prompt);
+  if (!input) return null;
+
+  const idx = parseInt(input) - 1;
+  if (idx >= 0 && idx < configs.length) {
+    return configs[idx].id;
+  }
+  return input;
+};
+
+/**
+ * Execute an action on a config with common error handling.
+ */
+const withConfigAction = async (
+  configs: readonly BrowserConfig[],
+  emptyMessage: string,
+  action: (id: string) => Promise<void>,
+): Promise<void> => {
+  if (configs.length === 0) {
+    writeln(yellow(`\n${emptyMessage}`));
+    return;
+  }
+
+  const id = await resolveConfigId(configs, "  Enter config number or ID: ");
+  if (id) {
+    await action(id);
+  }
+};
+
 const interactiveMenu = async (store: ConfigStoreService): Promise<void> => {
   while (true) {
     clearScreen();
-    writeln(bold("╔════════════════════════════════════════════════════════════╗"));
-    writeln(bold("║           Browser Config Manager                           ║"));
-    writeln(bold("╚════════════════════════════════════════════════════════════╝"));
+    writeln(boxHeader("Browser Config Manager", 62));
     writeln();
 
     // List configs
@@ -382,7 +370,7 @@ const interactiveMenu = async (store: ConfigStoreService): Promise<void> => {
       writeln();
     }
 
-    writeln(dim("─".repeat(62)));
+    writeln(dim(hr(62)));
     writeln();
     writeln("  " + bold("[c]") + " Create new config");
     if (configs.length > 0) {
@@ -405,62 +393,36 @@ const interactiveMenu = async (store: ConfigStoreService): Promise<void> => {
       case "c":
       case "create":
         await createConfig(store);
-        await readLine(dim("\nPress Enter to continue..."));
+        await waitForEnter();
         break;
 
       case "v":
       case "view":
-        if (configs.length === 0) {
-          writeln(yellow("\nNo configs to view."));
-        } else {
-          const viewNum = await readLine("  Enter config number or ID: ");
-          const viewIdx = parseInt(viewNum) - 1;
-          const viewId = viewIdx >= 0 && viewIdx < configs.length
-            ? configs[viewIdx].id
-            : viewNum;
-          await viewConfig(store, viewId);
-        }
-        await readLine(dim("\nPress Enter to continue..."));
+        await withConfigAction(configs, "No configs to view.", (id) => viewConfig(store, id));
+        await waitForEnter();
         break;
 
       case "e":
       case "edit":
-        if (configs.length === 0) {
-          writeln(yellow("\nNo configs to edit."));
-        } else {
-          const editNum = await readLine("  Enter config number or ID: ");
-          const editIdx = parseInt(editNum) - 1;
-          const editId = editIdx >= 0 && editIdx < configs.length
-            ? configs[editIdx].id
-            : editNum;
-          await editConfig(store, editId);
-        }
-        await readLine(dim("\nPress Enter to continue..."));
+        await withConfigAction(configs, "No configs to edit.", (id) => editConfig(store, id));
+        await waitForEnter();
         break;
 
       case "d":
       case "delete":
-        if (configs.length === 0) {
-          writeln(yellow("\nNo configs to delete."));
-        } else {
-          const delNum = await readLine("  Enter config number or ID: ");
-          const delIdx = parseInt(delNum) - 1;
-          const delId = delIdx >= 0 && delIdx < configs.length
-            ? configs[delIdx].id
-            : delNum;
-          await deleteConfig(store, delId);
-        }
-        await readLine(dim("\nPress Enter to continue..."));
+        await withConfigAction(configs, "No configs to delete.", (id) => deleteConfig(store, id));
+        await waitForEnter();
         break;
 
-      default:
+      default: {
         // Check if it's a number to view directly
         const num = parseInt(choice) - 1;
         if (num >= 0 && num < configs.length) {
           await viewConfig(store, configs[num].id);
-          await readLine(dim("\nPress Enter to continue..."));
+          await waitForEnter();
         }
         break;
+      }
     }
   }
 };

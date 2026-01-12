@@ -53,7 +53,6 @@
 // =============================================================================
 
 import { parseArgs } from "@std/cli";
-import { existsSync } from "@std/fs";
 import { encodeHex } from "@std/encoding";
 import { parse as parseToml } from "@std/toml";
 import { z } from "@zod/zod";
@@ -66,6 +65,9 @@ import {
   statusOk,
   statusWarn,
 } from "./lib/log.ts";
+import { loadDotenv, writeDotenv } from "./lib/env.ts";
+import { commandExists, fileExistsSync, runCommand, runWithSpinner } from "./lib/shell.ts";
+import { confirm, readSecret } from "./lib/tui.ts";
 
 // =============================================================================
 // Fly CLI Response Schemas
@@ -183,151 +185,18 @@ const err = statusErr;
 
 const spinner = new Spinner();
 
-// =============================================================================
-// Shell Utilities
-// =============================================================================
-
-interface CommandResult {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
-
-const runCommand = async (command: string[]): Promise<CommandResult> => {
-  const proc = new Deno.Command(command[0], {
-    args: command.slice(1),
-    stdout: "piped",
-    stderr: "piped",
-  });
-  const { code, stdout, stderr } = await proc.output();
-  return {
-    code,
-    stdout: new TextDecoder().decode(stdout),
-    stderr: new TextDecoder().decode(stderr),
-  };
-};
-
+/**
+ * Wrapper around runWithSpinner that returns a simplified result.
+ */
 const runQuiet = async (
   label: string,
   command: string[],
 ): Promise<{ success: boolean; output: string }> => {
-  spinner.start(label);
-  try {
-    const { code, stdout, stderr } = await runCommand(command);
-    const output = stdout + stderr;
-    spinner.stop();
-
-    if (code === 0) {
-      ok(label);
-      return { success: true, output };
-    } else {
-      console.error(output);
-      err(label);
-      return { success: false, output };
-    }
-  } catch (error) {
-    spinner.stop();
-    const output = error instanceof Error ? error.message : String(error);
-    console.error(output);
-    err(label);
-    return { success: false, output };
-  }
-};
-
-const commandExists = async (cmd: string): Promise<boolean> => {
-  try {
-    const proc = new Deno.Command("which", {
-      args: [cmd],
-      stdout: "null",
-      stderr: "null",
-    });
-    const { code } = await proc.output();
-    return code === 0;
-  } catch {
-    return false;
-  }
-};
-
-const confirm = async (prompt: string): Promise<boolean> => {
-  const buf = new Uint8Array(100);
-  Deno.stdout.writeSync(new TextEncoder().encode(`${prompt} [y/N] `));
-  const n = await Deno.stdin.read(buf);
-  if (n === null) return false;
-  const answer = new TextDecoder().decode(buf.subarray(0, n)).trim().toLowerCase();
-  return answer === "y" || answer === "yes";
-};
-
-const readSecret = async (prompt: string): Promise<string> => {
-  Deno.stdout.writeSync(new TextEncoder().encode(prompt));
-
-  const rawMode = new Deno.Command("stty", { args: ["-echo"], stdin: "inherit" });
-  await rawMode.output();
-
-  const buf = new Uint8Array(1000);
-  const n = await Deno.stdin.read(buf);
-
-  const echoMode = new Deno.Command("stty", { args: ["echo"], stdin: "inherit" });
-  await echoMode.output();
-
-  console.log();
-
-  if (n === null) return "";
-  return new TextDecoder().decode(buf.subarray(0, n)).trim();
-};
-
-// =============================================================================
-// .env Handling
-// =============================================================================
-
-const loadDotenv = (): void => {
-  const envPath = ".env";
-  if (!existsSync(envPath)) return;
-
-  const content = Deno.readTextFileSync(envPath);
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-
-    const eqIndex = trimmed.indexOf("=");
-    if (eqIndex === -1) continue;
-
-    const key = trimmed.slice(0, eqIndex);
-    let value = trimmed.slice(eqIndex + 1);
-
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-
-    if (Deno.env.get(key) === undefined) {
-      Deno.env.set(key, value);
-    }
-  }
-};
-
-const writeDotenv = (key: string, value: string): void => {
-  if (!value) return;
-
-  const envPath = ".env";
-  let content = "";
-
-  if (existsSync(envPath)) {
-    content = Deno.readTextFileSync(envPath);
-    const lines = content.split("\n").filter((line) => {
-      const trimmed = line.trim();
-      return !trimmed.startsWith(`${key}=`);
-    });
-    content = lines.join("\n");
-    if (content && !content.endsWith("\n")) {
-      content += "\n";
-    }
-  }
-
-  content += `${key}=${value}\n`;
-  Deno.writeTextFileSync(envPath, content);
-  console.log(dim(`Wrote ${key} to .env`));
+  const result = await runWithSpinner(label, command);
+  return {
+    success: result.success,
+    output: result.stdout + result.stderr,
+  };
 };
 
 // =============================================================================
@@ -340,7 +209,7 @@ const FlyTomlSchema = z.object({
 }).loose();
 
 const readFlyToml = (filePath: string): z.infer<typeof FlyTomlSchema> | undefined => {
-  if (!existsSync(filePath)) return undefined;
+  if (!fileExistsSync(filePath)) return undefined;
   const content = Deno.readTextFileSync(filePath);
   const parsed = FlyTomlSchema.safeParse(parseToml(content));
   return parsed.success ? parsed.data : undefined;
@@ -423,7 +292,7 @@ const recordDeploy = async (app: string): Promise<void> => {
 // =============================================================================
 
 const requireRepoRoot = (): void => {
-  if (!existsSync("deno.json")) die("deno.json Not Found \u2014 Run from Repo Root");
+  if (!fileExistsSync("deno.json")) die("deno.json Not Found \u2014 Run from Repo Root");
 };
 
 const requireGit = async (): Promise<void> => {
@@ -456,8 +325,8 @@ const createFlyExecutionProvider = (): ExecutionProvider<FlyInstanceConfig> => {
 
     async prepare(config: FlyInstanceConfig): Promise<void> {
       _config = config;
-      if (!existsSync("fly.toml")) die("fly.toml Not Found \u2014 Run from Repo Root");
-      if (!existsSync("Dockerfile")) die("Dockerfile Not Found \u2014 Run from Repo Root");
+      if (!fileExistsSync("fly.toml")) die("fly.toml Not Found \u2014 Run from Repo Root");
+      if (!fileExistsSync("Dockerfile")) die("Dockerfile Not Found \u2014 Run from Repo Root");
       if (!(await commandExists("fly"))) {
         die("flyctl Not Found \u2014 Install from https://fly.io/docs/flyctl/");
       }
@@ -805,18 +674,19 @@ const setupDatabase = async (ctx: FlyDeployContext): Promise<void> => {
 
   await database.attach();
   const url = await database.waitForReady();
-  writeDotenv("DATABASE_URL", url);
+  if (writeDotenv("DATABASE_URL", url)) {
+    console.log(dim("Wrote DATABASE_URL to .env"));
+  }
   console.log();
 };
 
 const configureSecrets = async (ctx: FlyDeployContext): Promise<void> => {
   const { execution, secrets } = ctx;
 
-  console.log(bold("Configuring Agent..."));
-
   const collector = new SecretsCollector();
   collector.add("RUN_SOCKPUPPET", secrets.runSockpuppet);
   collector.add("ACCOUNT_ID", secrets.accountId);
+  await collector.promptAndAdd("DATABASE_URL", secrets.databaseUrl);
   await collector.promptAndAdd("BROWSERBASE_API_KEY", secrets.browserbaseApiKey);
   await collector.promptAndAdd("BROWSERBASE_CONTEXT_ID", secrets.browserbaseContextId);
   await collector.promptAndAdd("BROWSERBASE_PROJECT_ID", secrets.browserbaseProjectId);
@@ -844,9 +714,7 @@ const runDeploy = async (ctx: FlyDeployContext): Promise<void> => {
   if (flags.skipDatabase) {
     console.log(dim("Skipping Database Setup (SKIP_DATABASE=1)"));
   } else if (secrets.databaseUrl) {
-    // DATABASE_URL already set - just ensure it's in secrets
-    ok("DATABASE_URL already configured");
-    await execution.setSecrets({ DATABASE_URL: secrets.databaseUrl });
+    // DATABASE_URL already set
   } else if (flags.useManagedDatabase && database) {
     await setupDatabase(ctx);
   }

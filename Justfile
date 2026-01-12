@@ -20,9 +20,9 @@ help:
     @printf '  just %-20s %s\n' "logs" "Tail Application Logs"
     @printf '  just %-20s %s\n' "status" "Show Application Status"
     @printf '\n'
-    @printf '\033[1m%s\033[0m\n' "TESTING"
-    @printf '  just %-20s %s\n' "test" "Run E2E Tests"
-    @printf '  just %-20s %s\n' "ssh" "SSH into Production Instance"
+    @printf '\033[1m%s\033[0m\n' "DEBUG"
+    @printf '  just %-20s %s\n' "ssh" "SSH into Production"
+    @printf '  just %-20s %s\n' "test-ssh" "SSH into Test Machine"
     @printf '\n'
     @printf '\033[1m%s\033[0m\n' "EXTENSION"
     @printf '  just %-20s %s\n' "ext-build" "Build Browser Extension"
@@ -55,25 +55,8 @@ status:
     @fly status -a {{app}}
 
 # =============================================================================
-# Backend Testing
+# Secrets & SSH
 # =============================================================================
-# HACKABLE: Replace these recipes for your deployment target
-#
-# Note: Tests spawn a separate machine with access to private network.
-# They do NOT run on the production instance.
-#
-# Current backend: Fly.io
-# =============================================================================
-
-dispatch-backend-test *args: sync
-    @echo "Spawning test machine..."
-    @fly machine run . -a {{app}} --rm --vm-memory 1024 -- deno task test:e2e:all {{args}}
-
-dispatch-backend-test-db: sync
-    @fly machine run . -a {{app}} --rm -- deno eval "const p = (await import('postgres')).default; const sql = p(Deno.env.get('DATABASE_URL')); await sql\`SELECT 1\`; console.log('DB OK'); await sql.end()"
-
-read-backend-test-logs:
-    @fly logs -a {{app}}
 
 sync:
     @if [ ! -f .env ]; then echo "Error: .env File Not Found"; exit 1; fi
@@ -85,17 +68,72 @@ sync:
     done
     @echo "Secrets Synced Successfully"
 
-test: dispatch-backend-test dispatch-backend-test-db
-    read-backend-test-logs
-
-ssh *args: sync
+ssh *args:
     @fly ssh console -a {{app}} {{args}}
 
-event-logs *args:
-    fly ssh console -a {{app}} -C 'deno run -A scripts/view-event-log.ts {{args}}'
+event-logs *args: _start-test-machine
+    #!/usr/bin/env sh
+    id=$(just _test-machine-id)
+    fly ssh console -a {{app}} --machine $id -C 'deno run -A scripts/view-event-log.ts {{args}}'
+    just _stop-test-machine
 
-configure-browsers *args:
-    fly ssh console -a {{app}} -C 'deno run -A scripts/manage-browser-configs.ts {{args}}'
+configure-browsers *args: _start-test-machine
+    #!/usr/bin/env sh
+    id=$(just _test-machine-id)
+    fly ssh console -a {{app}} --machine $id -C 'deno run -A scripts/manage-browser-configs.ts {{args}}'
+    just _stop-test-machine
+
+# =============================================================================
+# Test Machine Setup
+# =============================================================================
+
+_test-machine-id:
+    @fly machine list -a {{app}} --json 2>/dev/null | jq -r '.[] | select(.name=="test-machine") | .id' || true
+
+_ensure-test-machine:
+    #!/usr/bin/env sh
+    id=$(just _test-machine-id)
+    if [ -z "$id" ]; then
+        fly machine create . -a {{app}} --name test-machine --vm-memory 1024 --region iad --autostop=stop --autostart=false
+    fi
+
+_prod-machine-image:
+    @fly machine list -a {{app}} --json 2>/dev/null | jq -r '[.[] | select(.name != "test-machine")][0].image_ref | .repository + ":" + .tag' || true
+
+_start-test-machine: _ensure-test-machine
+    #!/usr/bin/env sh
+    id=$(just _test-machine-id)
+    image=$(just _prod-machine-image)
+    if [ -n "$image" ] && [ "$image" != "null:null" ]; then
+        printf '\033[2mUpdating Machine to %s...\033[0m\n' "$image"
+        fly machine update $id -a {{app}} --image "$image" -y 2>/dev/null || true
+    fi
+    fly machine start $id -a {{app}} 2>/dev/null || true
+    for i in 1 2 3 4 5 6; do
+        state=$(fly machine list -a {{app}} --json 2>/dev/null | jq -r ".[] | select(.id==\"$id\") | .state")
+        [ "$state" = "started" ] && break
+        sleep 2
+    done
+
+_stop-test-machine:
+    #!/usr/bin/env sh
+    id=$(just _test-machine-id)
+    if [ -n "$id" ]; then fly machine stop $id -a {{app}} 2>/dev/null || true; fi
+
+test-ssh *args: _start-test-machine
+    #!/usr/bin/env sh
+    id=$(just _test-machine-id)
+    fly ssh console -a {{app}} --machine $id {{args}}
+    just _stop-test-machine
+
+test-machine-destroy:
+    #!/usr/bin/env sh
+    id=$(just _test-machine-id)
+    if [ -n "$id" ]; then
+        fly machine destroy $id -a {{app}} --force && echo "Test machine destroyed."
+    else
+        echo "Error: No Test Machine Defined."
+    fi
 
 # =============================================================================
 # Extensions

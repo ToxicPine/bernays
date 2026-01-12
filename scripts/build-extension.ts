@@ -21,6 +21,7 @@
 import { encodeBase32 } from "@std/encoding/base32";
 import { parseArgs } from "@std/cli";
 import { createLogger, type Logger } from "./lib/log.ts";
+import { fileExists, runCommand } from "./lib/shell.ts";
 
 // =============================================================================
 // Config
@@ -89,41 +90,6 @@ const HANDLERS: Handler[] = [
 ];
 
 // =============================================================================
-// Utilities
-// =============================================================================
-
-const fileExists = async (path: string): Promise<boolean> => {
-  try {
-    await Deno.stat(path);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const runCommand = async (
-  cmd: string[],
-  options?: Deno.CommandOptions,
-): Promise<{ success: boolean; error?: string }> => {
-  const command = new Deno.Command(cmd[0], {
-    args: cmd.slice(1),
-    stdout: "piped",
-    stderr: "piped",
-    ...options,
-  });
-
-  const { code, stdout, stderr } = await command.output();
-
-  if (code !== 0) {
-    const out = new TextDecoder().decode(stdout);
-    const err = new TextDecoder().decode(stderr);
-    return { success: false, error: err || out || `Exit code ${code}` };
-  }
-
-  return { success: true };
-};
-
-// =============================================================================
 // Manifest Generation
 // =============================================================================
 
@@ -186,7 +152,7 @@ const compileFile = async (
   ]);
 
   if (!result.success) {
-    throw new Error(`Failed to build ${src}: ${result.error}`);
+    throw new Error(`Failed to build ${src}: ${result.stderr || result.stdout || `Exit code ${result.code}`}`);
   }
   log.ok(out);
 };
@@ -242,7 +208,7 @@ const buildZip = async (log: Logger): Promise<string> => {
 
   if (!result.success) {
     throw new Error(
-      `Zip failed: ${result.error}\nMake sure ${ZIP_TOOL} is available.`,
+      `Zip failed: ${result.stderr || result.stdout}\nMake sure ${ZIP_TOOL} is available.`,
     );
   }
 

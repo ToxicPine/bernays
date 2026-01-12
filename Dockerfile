@@ -14,6 +14,8 @@ COPY scripts ./scripts
 
 # Cache dependencies
 RUN deno cache agents/src/main.ts
+RUN deno cache scripts/view-event-log.ts
+RUN deno cache scripts/manage-browser-configs.ts
 
 # Default command (can be overridden)
 CMD ["deno", "run", "--allow-all", "agents/src/main.ts"]
