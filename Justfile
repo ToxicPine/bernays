@@ -26,7 +26,8 @@ help:
     @printf '\n'
     @printf '\033[1m%s\033[0m\n' "EXTENSION"
     @printf '  just %-20s %s\n' "ext-build" "Build Browser Extension"
-    @printf '  just %-20s %s\n' "ext-sync" "Sync Extension to Browserbase"
+    @printf '  just %-20s %s\n' "ext-sync" "Sync Extension"
+    @printf '  just %-20s %s\n' "ext-transition" "Transition to New Extension"
     @printf '\n'
     @printf '\033[1m%s\033[0m\n' "LOCAL"
     @printf '  just %-20s %s\n' "inbox [platform]" "View Inbox (linkedin, x)"
@@ -46,8 +47,19 @@ help:
 # Current backend: Fly.io
 # =============================================================================
 
-deploy: (ext-sync "--silent")
-    @deno run -A scripts/deploy-application.ts
+deploy:
+    #!/usr/bin/env sh
+    set -e
+    old_ext_id=$(grep '^BROWSERBASE_EXTENSION_ID=' .env 2>/dev/null | cut -d'=' -f2 || true)
+    deno run -A scripts/sync-extension.ts --silent
+    new_ext_id=$(grep '^BROWSERBASE_EXTENSION_ID=' .env | cut -d'=' -f2)
+    deno run -A scripts/deploy-application.ts
+    if [ -n "$old_ext_id" ] && [ "$old_ext_id" != "$new_ext_id" ]; then
+        echo ""
+        echo "Extension ID Changed: $old_ext_id -> $new_ext_id"
+        echo "Switching Browsers to New Extension..."
+        deno run -A scripts/transition-extension.ts --from "$old_ext_id" --to "$new_ext_id"
+    fi
 
 logs *args:
     @fly logs -a {{app}} {{args}}
@@ -162,6 +174,10 @@ test-machine-destroy:
 ext-build *args:
     @deno run -A scripts/build-extension.ts --zip {{args}}
 
-# Sync Extension to Browserbase
+# Sync Extension to Browserbase (keeps old extension for graceful transition)
 ext-sync *args: (ext-build "--silent")
     @deno run -A scripts/sync-extension.ts {{args}}
+
+# Transition from old extension to new (updates DB configs, deletes old)
+ext-transition *args:
+    @deno run -A scripts/transition-extension.ts {{args}}

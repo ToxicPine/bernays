@@ -4,7 +4,7 @@
 
 This document provides **coding standards and design principles** for bernays. 
 For detailed architectural specifications, layer definitions, and implementation 
-patterns, see `EFFECT_ARCHITECTURE.md`.
+patterns, see `ARCHITECTURE.md`.
 
 **This document covers**:
 

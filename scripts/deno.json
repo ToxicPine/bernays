@@ -12,6 +12,7 @@
     "effect": "npm:effect@^3.19.14",
     "ink": "npm:ink@^6.6.0",
     "ink-text-input": "npm:ink-text-input@^6.0.0",
+    "postgres": "npm:postgres@^3.4.8",
     "react": "npm:react@^19.2.3"
   },
   "compilerOptions": {

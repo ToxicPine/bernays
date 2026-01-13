@@ -13,8 +13,12 @@
 // What it does:
 //   1. Finds the latest extension zip
 //   2. If no BROWSERBASE_EXTENSION_ID: uploads as new extension
-//   3. If extension exists: compares filename, updates if different
+//   3. If extension exists: compares filename, uploads new if different (keeps old)
 //   4. Writes BROWSERBASE_EXTENSION_ID to .env
+//
+// Note: This script does NOT delete old extensions. Old extensions are kept
+// for graceful transition. Use transition-extension.ts after deployment to
+// update browser configs and clean up old extensions.
 //
 // Environment:
 //   BROWSERBASE_API_KEY       Required
@@ -132,21 +136,6 @@ const getExtension = async (
   return res.json();
 };
 
-const deleteExtension = async (
-  id: string,
-  apiKey: string,
-  log: Logger,
-): Promise<void> => {
-  const res = await fetch(`${API_BASE}/v1/extensions/${id}`, {
-    method: "DELETE",
-    headers: { "X-BB-API-Key": apiKey },
-  });
-
-  if (res.status !== 204 && res.status !== 200 && res.status !== 404) {
-    log.warn(`Delete returned unexpected status: ${res.status}`);
-  }
-};
-
 const uploadExtension = async (
   zipPath: string,
   fileName: string,
@@ -220,15 +209,14 @@ export const sync = async (config: SyncConfig): Promise<void> => {
     return;
   }
 
-  // Upload
+  // Upload new extension (keep old for graceful transition)
   log.section("Syncing Extension");
 
   if (existingExt) {
-    log.info("Deleting old extension...");
-    await deleteExtension(existingExt.id, apiKey, log);
+    log.info(`Keeping old extension: ${existingExt.id}`);
   }
 
-  log.info("Uploading...");
+  log.info("Uploading new extension...");
   const uploaded = await uploadExtension(zip.path, zip.name, apiKey);
   log.ok(`Uploaded: ${uploaded.id}`);
 

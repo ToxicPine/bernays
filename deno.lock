@@ -806,6 +806,7 @@
           "npm:effect@^3.19.14",
           "npm:ink-text-input@6",
           "npm:ink@^6.6.0",
+          "npm:postgres@^3.4.8",
           "npm:react@^19.2.3"
         ]
       },
