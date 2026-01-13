@@ -33,11 +33,16 @@ These scripts depend on store/plugin implementations and may need updates when i
 
 | Script | Dependencies | Update When |
 |--------|--------------|-------------|
+| `scripts/transition-extension.ts` | `ConfigStore`, `ExtensionStore` | ConfigStore API changes (must have `replaceExtensionId`), ExtensionStore API changes (must have `remove`) |
 | `scripts/view-inbox.ts` | `plugins/*/` (account stores, behaviors) | New platform added, account store API changes |
 | `scripts/view-event-log.ts` | `backend/server/src/store/` (EventStore) | Event store API changes, new query types |
 | `scripts/manage-browser-configs.ts` | `backend/server/src/store/` (ConfigStore) | Config store API changes |
 
 When changing DB backends (e.g., PostgreSQL to SQLite), verify these scripts still work with the new store implementation.
+
+When changing browser backends (e.g., Browserbase to local Playwright):
+- Ensure `ExtensionStoreService.remove()` is implemented (Browserbase deletes via HTTP, local might delete files)
+- The `transitionExtension` utility in `backend/server/src/store/` is backend-agnostic
 
 # Hackable Structure
 

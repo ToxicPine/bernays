@@ -6,6 +6,12 @@ import type { ExtensionId as ExtensionIdType } from "$/core/branded.ts";
 import type { ExtensionMeta, ExtensionStoreService } from "../mod.ts";
 
 // ============================================================================
+// Constants
+// ============================================================================
+
+const API_BASE = "https://www.browserbase.com";
+
+// ============================================================================
 // Browserbase Extension Store
 // ============================================================================
 
@@ -14,7 +20,7 @@ import type { ExtensionMeta, ExtensionStoreService } from "../mod.ts";
  * Browserbase manages extension storage and distribution.
  */
 export const createBrowserbaseExtensionStore = (
-  _apiKey: string,
+  apiKey: string,
 ): ExtensionStoreService => {
   const cache = new Map<string, ExtensionMeta>();
 
@@ -43,9 +49,23 @@ export const createBrowserbaseExtensionStore = (
     });
 
   const remove = (id: ExtensionIdType): Effect.Effect<void> =>
-    Effect.sync(() => {
+    Effect.tryPromise(async () => {
+      // Delete from Browserbase API
+      const res = await fetch(`${API_BASE}/v1/extensions/${id}`, {
+        method: "DELETE",
+        headers: { "X-BB-API-Key": apiKey },
+      });
+
+      // 404 = already deleted, 200/204 = success
+      if (res.status !== 404 && res.status !== 200 && res.status !== 204) {
+        throw new Error(
+          `Failed to delete extension from Browserbase: ${res.status}`,
+        );
+      }
+
+      // Clear from local cache
       cache.delete(id);
-    });
+    }).pipe(Effect.orDie);
 
   return {
     list,

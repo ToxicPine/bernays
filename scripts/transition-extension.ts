@@ -25,7 +25,17 @@
 // =============================================================================
 
 import { parseArgs } from "@std/cli";
-import postgres from "postgres";
+import { Effect, Layer } from "effect";
+import { ExtensionId } from "@bernays/server/core";
+import {
+  ConfigStore,
+  createPostgresConfigStore,
+  transitionExtension,
+} from "@bernays/server/store";
+import {
+  BrowserBackendLive,
+  makeBrowserbaseBackend,
+} from "@bernays/server/backend";
 import { createLogger, type Logger } from "./lib/log.ts";
 import { loadDotenv } from "./lib/env.ts";
 
@@ -34,7 +44,6 @@ import { loadDotenv } from "./lib/env.ts";
 // =============================================================================
 
 const PROJECT_ROOT = new URL("..", import.meta.url).pathname;
-const API_BASE = "https://www.browserbase.com";
 
 // =============================================================================
 // Types
@@ -51,89 +60,6 @@ interface TransitionResult {
   configsUpdated: number;
   extensionDeleted: boolean;
 }
-
-// =============================================================================
-// Database Operations
-// =============================================================================
-
-const updateExtensionIds = async (
-  sql: postgres.Sql,
-  fromId: string,
-  toId: string,
-  log: Logger,
-  dryRun: boolean,
-): Promise<number> => {
-  // Find configs that have the old extension ID
-  const configs = await sql`
-    SELECT id, extension_ids
-    FROM browser_configs
-    WHERE ${fromId} = ANY(extension_ids)
-  `;
-
-  if (configs.length === 0) {
-    log.info("No Browser Configs Found with the Old Extension ID");
-    return 0;
-  }
-
-  log.info(`Found ${configs.length} Config(s) with Old Extension ID`);
-
-  if (dryRun) {
-    for (const config of configs) {
-      log.dim(`  Would Update: ${config.id}`);
-    }
-    return configs.length;
-  }
-
-  for (const config of configs) {
-    const oldIds = config.extension_ids as string[];
-    const newIds = oldIds.map((id) => (id === fromId ? toId : id));
-
-    await sql`
-      UPDATE browser_configs
-      SET extension_ids = ${newIds},
-          updated_at = NOW()
-      WHERE id = ${config.id}
-    `;
-
-    log.dim(`  Updated: ${config.id}`);
-  }
-
-  return configs.length;
-};
-
-// =============================================================================
-// Browserbase API
-// =============================================================================
-
-const deleteExtension = async (
-  id: string,
-  apiKey: string,
-  log: Logger,
-  dryRun: boolean,
-): Promise<boolean> => {
-  if (dryRun) {
-    log.info(`Would delete extension: ${id}`);
-    return true;
-  }
-
-  const res = await fetch(`${API_BASE}/v1/extensions/${id}`, {
-    method: "DELETE",
-    headers: { "X-BB-API-Key": apiKey },
-  });
-
-  if (res.status === 404) {
-    log.warn(`Extension ${id} not found in Browserbase (already deleted?)`);
-    return false;
-  }
-
-  if (res.status !== 204 && res.status !== 200) {
-    log.warn(`Delete returned unexpected status: ${res.status}`);
-    return false;
-  }
-
-  log.ok(`Deleted extension: ${id}`);
-  return true;
-};
 
 // =============================================================================
 // Main
@@ -164,50 +90,82 @@ export const transition = async (
     log.warn("DRY RUN - No changes will be made");
   }
 
-  // Connect to database
+  // Create services
   log.section("Connecting to Database");
-  const sql = postgres(databaseUrl, {
-    onnotice: () => {}, // Suppress NOTICE/WARNING messages
+  const configStore = await createPostgresConfigStore({
+    connectionString: databaseUrl,
   });
 
-  let configsUpdated = 0;
-  let extensionDeleted = false;
+  const fromId = ExtensionId(config.fromId);
+  const toId = ExtensionId(config.toId);
 
-  try {
-    // Update browser configs
-    log.section("Updating Browser Configs");
-    log.info(`Replacing: ${config.fromId}`);
-    log.info(`With:      ${config.toId}`);
-    configsUpdated = await updateExtensionIds(
-      sql,
-      config.fromId,
-      config.toId,
-      log,
-      config.dryRun,
-    );
-
-    if (configsUpdated > 0) {
-      log.ok(`Updated ${configsUpdated} config(s)`);
-    }
-
-    // Delete old extension from Browserbase
-    log.section("Cleaning Up Old Extension");
-    extensionDeleted = await deleteExtension(
-      config.fromId,
-      apiKey,
-      log,
-      config.dryRun,
-    );
-
-    log.section("Done");
-    if (config.dryRun) {
-      log.dim("  (Dry run - no changes were made)");
-    }
-  } finally {
-    await sql.end();
+  // For dry-run, just list what would be affected
+  if (config.dryRun) {
+    return await dryRun(configStore, fromId, toId, log);
   }
 
-  return { configsUpdated, extensionDeleted };
+  // Create layers for the Effect
+  const ConfigStoreLive = Layer.succeed(ConfigStore, configStore);
+  const backend = makeBrowserbaseBackend(apiKey, configStore);
+  const BackendLive = BrowserBackendLive(backend);
+
+  // Run the transition
+  log.section("Updating Browser Configs");
+  log.info(`Replacing: ${config.fromId}`);
+  log.info(`With:      ${config.toId}`);
+
+  const result = await Effect.runPromise(
+    transitionExtension(fromId, toId).pipe(
+      Effect.provide(ConfigStoreLive),
+      Effect.provide(BackendLive),
+    ),
+  );
+
+  log.ok(`Updated ${result.configsUpdated} config(s)`);
+
+  log.section("Cleaning Up Old Extension");
+  if (result.extensionDeleted) {
+    log.ok(`Deleted extension: ${config.fromId}`);
+  }
+
+  log.section("Done");
+
+  return result;
+};
+
+// =============================================================================
+// Dry Run
+// =============================================================================
+
+const dryRun = async (
+  configStore: Awaited<ReturnType<typeof createPostgresConfigStore>>,
+  fromId: ReturnType<typeof ExtensionId>,
+  toId: ReturnType<typeof ExtensionId>,
+  log: Logger,
+): Promise<TransitionResult> => {
+  log.section("Checking Browser Configs");
+  log.info(`Would replace: ${fromId}`);
+  log.info(`With:          ${toId}`);
+
+  const configs = await Effect.runPromise(configStore.list());
+  const affected = configs.filter((c) => c.extensionIds.includes(fromId));
+
+  if (affected.length === 0) {
+    log.info("No browser configs found with the old extension ID");
+  } else {
+    log.info(`Found ${affected.length} config(s) with old extension ID`);
+    for (const c of affected) {
+      log.dim(`  Would update: ${c.id}`);
+    }
+  }
+
+  log.section("Would Clean Up Old Extension");
+  log.dim(`  Would delete extension: ${fromId}`);
+
+  log.section("Done");
+  log.dim("  (Dry run - no changes were made)");
+
+  return { configsUpdated: affected.length, extensionDeleted: false };
 };
 
 // =============================================================================

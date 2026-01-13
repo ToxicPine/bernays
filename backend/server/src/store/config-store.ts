@@ -7,6 +7,7 @@ import {
   BrowserConfigId,
   type BrowserConfigId as BrowserConfigIdType,
   ExtensionId,
+  type ExtensionId as ExtensionIdType,
 } from "$/core/branded.ts";
 import { createInMemoryStore } from "$/core/store-factory.ts";
 import type { BrowserConfig, ProxyConfig } from "$/backend/types.ts";
@@ -54,6 +55,15 @@ export interface ConfigStoreService {
   readonly remove: (
     id: BrowserConfigIdType,
   ) => Effect.Effect<boolean, ConfigStoreError>;
+
+  /**
+   * Replace an extension ID with a new one across all configs.
+   * Returns the number of configs that were updated.
+   */
+  readonly replaceExtensionId: (
+    oldId: ExtensionIdType,
+    newId: ExtensionIdType,
+  ) => Effect.Effect<number, ConfigStoreError>;
 }
 
 export class ConfigStore extends Context.Tag("ConfigStore")<
@@ -67,11 +77,37 @@ export class ConfigStore extends Context.Tag("ConfigStore")<
 
 /**
  * Create an in-memory config store.
- * Uses the generic createInMemoryStore factory.
+ * Wraps the generic store factory and adds ConfigStore-specific methods.
  */
 export const createInMemoryConfigStore = (
   initial: readonly BrowserConfig[] = [],
-): ConfigStoreService => createInMemoryStore<BrowserConfig>(initial);
+): ConfigStoreService => {
+  const baseStore = createInMemoryStore<BrowserConfig>(initial);
+
+  return {
+    ...baseStore,
+
+    replaceExtensionId: (oldId, newId) =>
+      Effect.gen(function* () {
+        const configs = yield* baseStore.list();
+        let count = 0;
+
+        for (const config of configs) {
+          if (config.extensionIds.includes(oldId)) {
+            yield* baseStore.upsert({
+              ...config,
+              extensionIds: config.extensionIds.map((id) =>
+                id === oldId ? newId : id
+              ),
+            });
+            count++;
+          }
+        }
+
+        return count;
+      }),
+  };
+};
 
 export const makeInMemoryConfigStoreLayer = (
   initial: readonly BrowserConfig[] = [],
@@ -241,6 +277,25 @@ export const createPostgresConfigStore = async (
           configStoreError(
             "PersistenceError",
             `Failed to remove config: ${err}`,
+            err,
+          ),
+      }),
+
+    replaceExtensionId: (oldId, newId) =>
+      Effect.tryPromise({
+        try: async () => {
+          const result = await sql`
+            UPDATE browser_configs
+            SET extension_ids = array_replace(extension_ids, ${oldId}, ${newId}),
+                updated_at = NOW()
+            WHERE ${oldId} = ANY(extension_ids)
+          `;
+          return result.count;
+        },
+        catch: (err) =>
+          configStoreError(
+            "PersistenceError",
+            `Failed to replace extension ID: ${err}`,
             err,
           ),
       }),

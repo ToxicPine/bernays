@@ -58,7 +58,7 @@ deploy:
         echo ""
         echo "Extension ID Changed: $old_ext_id -> $new_ext_id"
         echo "Switching Browsers to New Extension..."
-        deno run -A scripts/transition-extension.ts --from "$old_ext_id" --to "$new_ext_id"
+        deno run -A scripts/transition-extension.ts --silent --from "$old_ext_id" --to "$new_ext_id"
     fi
 
 logs *args:

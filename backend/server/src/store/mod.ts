@@ -132,3 +132,9 @@ export {
   makeInMemoryConfigStoreLayer,
   type PostgresConfigStoreOptions as PostgresConfigStoreOpts,
 } from "./config-store.ts";
+
+// Extension Transition
+export {
+  transitionExtension,
+  type TransitionResult,
+} from "./extension-transition.ts";

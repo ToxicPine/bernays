@@ -868,6 +868,10 @@ interface ConfigStoreService {
   readonly upsert: (
     config: BrowserConfig,
   ) => Effect.Effect<void, ConfigStoreError>;
+  readonly replaceExtensionId: (
+    oldId: ExtensionId,
+    newId: ExtensionId,
+  ) => Effect.Effect<number, ConfigStoreError>;
 }
 class ConfigStore
   extends Context.Tag("ConfigStore")<ConfigStore, ConfigStoreService>() {}
@@ -880,6 +884,24 @@ queries push filtering to the database layer for efficiency.
 **Note**: Account storage is provider-specific. Each provider defines its own
 account service (e.g., `LinkedInAccountStore`, `XAccountStore`) with
 platform-appropriate fields and storage.
+
+### Extension Transition Utility
+
+The `transitionExtension` utility in `store/extension-transition.ts` handles
+replacing one extension ID with another across all browser configs, then
+cleaning up the old extension from the extension store. It uses the service
+interfaces, so it works with any ConfigStore + ExtensionStore implementation
+combination (Postgres+Browserbase, in-memory+local, etc.).
+
+```typescript
+export const transitionExtension = (
+  fromId: ExtensionId,
+  toId: ExtensionId,
+): Effect.Effect<TransitionResult, ConfigStoreError, ConfigStore | ExtensionStore>
+```
+
+This pattern—operational utilities that compose services—keeps implementation
+details out of scripts while maintaining testability with in-memory stores.
 
 ---
 

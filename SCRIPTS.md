@@ -58,7 +58,25 @@ scripts/
 
 **Deploy Provider Pattern**: `deploy-application.ts` uses `ExecutionProvider` and `DatabaseProvider` interfaces. Current implementations: Fly.io execution, Fly Managed Postgres.
 
+**Extension Transition**: `transition-extension.ts` uses the `transitionExtension` utility from `backend/server/src/store/`. This utility composes `ConfigStore` and `ExtensionStore` services, making it implementation-agnostic. When the script runs:
+1. `ConfigStore.replaceExtensionId()` updates browser configs (Postgres uses `array_replace`, in-memory uses list+upsert)
+2. `ExtensionStore.remove()` deletes the old extension (Browserbase uses HTTP DELETE, local would delete from filesystem)
+
 ## Switching Providers
+
+When switching store implementations (database, browser backend), keep these scripts in mind:
+
+| Script | Service Dependencies | Impact of Change |
+|--------|---------------------|------------------|
+| `transition-extension.ts` | `ConfigStore`, `ExtensionStore` | Must implement `replaceExtensionId()` on ConfigStore, `remove()` on ExtensionStore |
+| `manage-browser-configs.tsx` | `ConfigStore` | CRUD operations must work with new implementation |
+| `view-inbox.tsx` | `EventStore`, platform projections | Event queries must support `byScope` filtering |
+| `view-event-log.tsx` | `EventStore` | All query types (since, byScope, byCorrelation) must work |
+
+The scripts use service interfaces, not direct database access. As long as new implementations satisfy the interfaces, scripts work unchanged. However, verify:
+- **Postgres-specific SQL** (like `array_replace`) has equivalent in new implementation
+- **API-specific calls** (like Browserbase DELETE) are implemented for the new backend
+- **Effect error types** match expectations (some methods use `Effect.orDie` for simplicity)
 
 ### Different Database (e.g., Neon, Supabase)
 
@@ -67,12 +85,29 @@ scripts/
 
 The app uses standard Postgres via `postgres` npm package. Any Postgres-compatible database works.
 
+When switching to non-Postgres (e.g., SQLite, DynamoDB), you'll need to implement:
+- `createSqliteConfigStore()` or equivalent with `replaceExtensionId()` method
+- `createSqliteEventStore()` with all query types
+
 ### Different Execution Platform (e.g., Railway, Render)
 
 1. Implement `ExecutionProvider` interface in `deploy-application.ts`:
    - `prepare()`, `ensureAuth()`, `instanceExists()`, `ensureInstance()`, `setSecrets()`, `deploy()`
 2. Wire provider selection in `main()` based on env vars
 3. Update Justfile backend recipes (`logs`, `status`, `ssh`)
+
+### Different Browser Backend (e.g., Local Playwright)
+
+The browser backend bundles `BrowserPool` + `ExtensionStore` together. When switching from Browserbase to local Playwright:
+
+1. Implement `makeLocalBackend()` returning `BrowserBackend`:
+   - `pool`: Local browser lifecycle via Playwright
+   - `extensions`: Filesystem-based extension store
+2. Ensure `ExtensionStoreService.remove()` cleans up appropriately (delete file, no-op, etc.)
+3. Update `scripts/sync-extension.ts` to handle local extension installation
+4. Update `scripts/transition-extension.ts` layer composition (or script detects backend from env)
+
+The `transitionExtension` utility works with any backend—it just calls `ConfigStore.replaceExtensionId()` and `ExtensionStore.remove()`.
 
 ### Adding a Platform Plugin
 
