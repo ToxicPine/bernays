@@ -25,10 +25,6 @@ import type { RedditBrowser } from "./browser.ts";
 // Behavior
 import { redditBehavior } from "./behavior.ts";
 
-// ============================================================================
-// Platform Definition
-// ============================================================================
-
 export const redditPlatform: PlatformDefinition<
   RedditScope,
   RedditEvent,
@@ -45,10 +41,6 @@ export const redditPlatform: PlatformDefinition<
   anchorSchema: RedditAnchorSchema,
   behavior: redditBehavior,
 };
-
-// ============================================================================
-// Re-exports
-// ============================================================================
 
 // Scope
 export { REDDIT_SCOPE } from "./schemas.ts";

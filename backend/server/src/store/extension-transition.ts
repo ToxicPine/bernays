@@ -6,18 +6,14 @@ import type { ExtensionId } from "$/core/branded.ts";
 import { ConfigStore, type ConfigStoreError } from "./config-store.ts";
 import { ExtensionStore } from "$/backend/mod.ts";
 
-// ============================================================================
 // Types
-// ============================================================================
 
 export interface TransitionResult {
   readonly configsUpdated: number;
   readonly extensionDeleted: boolean;
 }
 
-// ============================================================================
 // Transition Utility
-// ============================================================================
 
 /**
  * Transition from one extension ID to another.

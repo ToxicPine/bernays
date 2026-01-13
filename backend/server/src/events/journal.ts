@@ -9,9 +9,7 @@ import { JOURNAL_SCOPE } from "$/core/scope.ts";
 // Re-export for convenience
 export { JOURNAL_SCOPE };
 
-// ============================================================================
 // Journal Entry Event
-// ============================================================================
 
 /**
  * Journal entry - records what the sockpuppet decided and did.
@@ -30,9 +28,7 @@ export const JournalEntrySchema = CorrelationMetadataSchema.extend({
 
 export type JournalEntry = z.infer<typeof JournalEntrySchema>;
 
-// ============================================================================
 // Journal Event Union
-// ============================================================================
 
 export const JournalEventSchema = z.discriminatedUnion("type", [
   JournalEntrySchema,

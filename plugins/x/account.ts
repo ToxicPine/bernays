@@ -1,5 +1,5 @@
-// src/platforms/x/account.ts
-// X (Twitter) account type and storage
+// plugins/x/account.ts
+// X account binding - maps a persistent platform ID to browser sessions
 
 import { Context, Effect, Layer, Option } from "effect";
 import type postgres from "postgres";
@@ -14,40 +14,32 @@ import {
 } from "@bernays/server/views";
 import { createInMemoryStore } from "@bernays/server/core";
 
-// ============================================================================
-// API Tier
-// ============================================================================
-
-export type XApiTier = "free" | "basic" | "pro" | "enterprise";
-
-// ============================================================================
+// =============================================================================
 // X Account
-// ============================================================================
+// =============================================================================
 
 /**
- * X account - extends BaseAccount with X-specific fields.
+ * X account binding.
+ *
+ * Contains ONLY:
+ * - `id`: The persistent X user ID (doesn't change, even if handle changes)
+ * - `browserBindings`: Which browser sessions are logged into this account
+ *
+ * Everything else (handle, display name, verification status, follower counts,
+ * rate limits, etc.) is dynamic platform state that should be derived from
+ * events, not stored here.
  */
 export interface XAccount extends BaseAccount {
   readonly id: AccountIdType;
   readonly browserBindings: readonly BrowserBinding[];
-
-  // X-specific fields
-  readonly handle: string;
-  readonly displayName: string;
-  readonly isVerified: boolean;
-  readonly followerCount: number;
-  readonly followingCount: number;
-  readonly apiTier: XApiTier;
 }
 
-// ============================================================================
-// X Account Store
-// ============================================================================
+// =============================================================================
+// Account Store
+// =============================================================================
 
 export interface XAccountStoreService {
-  readonly get: (
-    id: AccountIdType,
-  ) => Effect.Effect<Option.Option<XAccount>>;
+  readonly get: (id: AccountIdType) => Effect.Effect<Option.Option<XAccount>>;
   readonly list: () => Effect.Effect<readonly XAccount[]>;
   readonly upsert: (account: XAccount) => Effect.Effect<void>;
   readonly remove: (id: AccountIdType) => Effect.Effect<boolean>;
@@ -58,14 +50,10 @@ export class XAccountStore extends Context.Tag("XAccountStore")<
   XAccountStoreService
 >() {}
 
-// ============================================================================
+// =============================================================================
 // In-Memory Implementation
-// ============================================================================
+// =============================================================================
 
-/**
- * Create an in-memory X account store.
- * Uses the generic createInMemoryStore factory.
- */
 const createInMemoryXAccountStore = (
   initial: readonly XAccount[] = [],
 ): XAccountStoreService => createInMemoryStore<XAccount>(initial);
@@ -75,9 +63,9 @@ export const makeInMemoryXAccountStoreLayer = (
 ): Layer.Layer<XAccountStore> =>
   Layer.succeed(XAccountStore, createInMemoryXAccountStore(initial));
 
-// ============================================================================
+// =============================================================================
 // PostgreSQL Implementation
-// ============================================================================
+// =============================================================================
 
 export interface PostgresXAccountStoreOptions {
   readonly connectionString: string;
@@ -87,12 +75,6 @@ const ensureAccountTable = async (sql: postgres.Sql): Promise<void> => {
   await sql`
     CREATE TABLE IF NOT EXISTS x_accounts (
       id TEXT PRIMARY KEY,
-      handle TEXT NOT NULL,
-      display_name TEXT NOT NULL,
-      is_verified BOOLEAN NOT NULL DEFAULT FALSE,
-      follower_count INTEGER NOT NULL DEFAULT 0,
-      following_count INTEGER NOT NULL DEFAULT 0,
-      api_tier TEXT NOT NULL DEFAULT 'free',
       browser_bindings JSONB NOT NULL DEFAULT '[]',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -100,15 +82,12 @@ const ensureAccountTable = async (sql: postgres.Sql): Promise<void> => {
   `;
 };
 
-/**
- * PostgreSQL-backed X account store.
- */
 export const createPostgresXAccountStore = async (
   options: PostgresXAccountStoreOptions,
 ): Promise<XAccountStoreService> => {
   const postgres = await import("npm:postgres").then((m) => m.default);
   const sql = postgres(options.connectionString, {
-    onnotice: () => {}, // Suppress NOTICE/WARNING messages
+    onnotice: () => {},
   });
 
   await ensureAccountTable(sql);
@@ -118,24 +97,12 @@ export const createPostgresXAccountStore = async (
       Effect.tryPromise({
         try: async () => {
           const rows = await sql`
-            SELECT id, handle, display_name, is_verified, follower_count, following_count, api_tier, browser_bindings
-            FROM x_accounts
-            WHERE id = ${id}
+            SELECT id, browser_bindings FROM x_accounts WHERE id = ${id}
           `;
-
-          if (rows.length === 0) {
-            return Option.none<XAccount>();
-          }
-
+          if (rows.length === 0) return Option.none<XAccount>();
           const row = rows[0];
           return Option.some({
             id: AccountId(row.id),
-            handle: row.handle,
-            displayName: row.display_name,
-            isVerified: row.is_verified,
-            followerCount: row.follower_count,
-            followingCount: row.following_count,
-            apiTier: row.api_tier as XApiTier,
             browserBindings: parseBrowserBindings(row.browser_bindings),
           });
         },
@@ -148,19 +115,10 @@ export const createPostgresXAccountStore = async (
       Effect.tryPromise({
         try: async () => {
           const rows = await sql`
-            SELECT id, handle, display_name, is_verified, follower_count, following_count, api_tier, browser_bindings
-            FROM x_accounts
-            ORDER BY handle
+            SELECT id, browser_bindings FROM x_accounts ORDER BY id
           `;
-
           return rows.map((row) => ({
             id: AccountId(row.id),
-            handle: row.handle,
-            displayName: row.display_name,
-            isVerified: row.is_verified,
-            followerCount: row.follower_count,
-            followingCount: row.following_count,
-            apiTier: row.api_tier as XApiTier,
             browserBindings: parseBrowserBindings(row.browser_bindings),
           }));
         },
@@ -173,25 +131,9 @@ export const createPostgresXAccountStore = async (
       Effect.tryPromise({
         try: async () => {
           await sql`
-            INSERT INTO x_accounts (id, handle, display_name, is_verified, follower_count, following_count, api_tier, browser_bindings, updated_at)
-            VALUES (
-              ${account.id},
-              ${account.handle},
-              ${account.displayName},
-              ${account.isVerified},
-              ${account.followerCount},
-              ${account.followingCount},
-              ${account.apiTier},
-              ${JSON.stringify(account.browserBindings)}::jsonb,
-              NOW()
-            )
+            INSERT INTO x_accounts (id, browser_bindings, updated_at)
+            VALUES (${account.id}, ${JSON.stringify(account.browserBindings)}::jsonb, NOW())
             ON CONFLICT (id) DO UPDATE SET
-              handle = EXCLUDED.handle,
-              display_name = EXCLUDED.display_name,
-              is_verified = EXCLUDED.is_verified,
-              follower_count = EXCLUDED.follower_count,
-              following_count = EXCLUDED.following_count,
-              api_tier = EXCLUDED.api_tier,
               browser_bindings = EXCLUDED.browser_bindings,
               updated_at = NOW()
           `;
@@ -204,9 +146,7 @@ export const createPostgresXAccountStore = async (
     remove: (id) =>
       Effect.tryPromise({
         try: async () => {
-          const result = await sql`
-            DELETE FROM x_accounts WHERE id = ${id}
-          `;
+          const result = await sql`DELETE FROM x_accounts WHERE id = ${id}`;
           return result.count > 0;
         },
         catch: (err) => {

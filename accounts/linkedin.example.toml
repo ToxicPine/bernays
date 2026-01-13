@@ -1,0 +1,33 @@
+# LinkedIn Account Bindings
+#
+# Each account maps a persistent LinkedIn member ID to browser sessions.
+# Dynamic platform state (display name, connection count, rate limits) is
+# derived from events, not stored here.
+
+[[accounts]]
+id = "alice-linkedin-id"
+
+  [[accounts.browserBindings]]
+  configId = "browser_alice"
+
+  [accounts.browserBindings.metadata]
+  deviceType = "desktop"
+
+[[accounts]]
+id = "bob-linkedin-id"
+
+  [[accounts.browserBindings]]
+  configId = "browser_bob_desktop"
+
+  [accounts.browserBindings.metadata]
+  deviceType = "desktop"
+
+  [[accounts.browserBindings]]
+  configId = "browser_bob_mobile"
+
+  [accounts.browserBindings.metadata]
+  deviceType = "mobile"
+
+# Minimal - just the ID, no browsers bound yet
+[[accounts]]
+id = "charlie-linkedin-id"

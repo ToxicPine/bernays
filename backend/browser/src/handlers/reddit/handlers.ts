@@ -14,9 +14,7 @@ declare global {
   }
 }
 
-// ============================================================================
 // Helpers
-// ============================================================================
 
 /**
  * Extract Reddit access token from cookies or localStorage.
@@ -118,9 +116,7 @@ const findInShadowRoot = (
   return shadowRoot.querySelector(selector);
 };
 
-// ============================================================================
 // Auth Check
-// ============================================================================
 
 window.__registerCommand<
   void,
@@ -164,9 +160,7 @@ window.__registerCommand<
   }
 });
 
-// ============================================================================
 // Send Message
-// ============================================================================
 
 window.__registerCommand<
   { threadId: string; content: string; recipientUsername?: string },
@@ -280,9 +274,7 @@ window.__registerCommand<
   }
 });
 
-// ============================================================================
 // Sync Conversations
-// ============================================================================
 
 window.__registerCommand<
   { since?: string; limit?: number },
@@ -370,9 +362,7 @@ window.__registerCommand<
   }
 });
 
-// ============================================================================
 // Discover Users (from thread or subreddit)
-// ============================================================================
 
 window.__registerCommand<
   { subreddit?: string; threadUrl?: string; limit?: number },

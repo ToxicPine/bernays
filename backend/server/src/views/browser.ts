@@ -8,9 +8,7 @@ import {
   type BrowserConfigId as BrowserConfigIdType,
 } from "$/core/branded.ts";
 
-// ============================================================================
 // Browser Binding
-// ============================================================================
 
 /**
  * Zod schema for BrowserBinding.
@@ -41,9 +39,7 @@ export const parseBrowserBindings = (
   return result.success ? result.data : [];
 };
 
-// ============================================================================
 // Base Account
-// ============================================================================
 
 /**
  * Minimum account structure required by the platform service.
@@ -54,9 +50,7 @@ export interface BaseAccount {
   readonly browserBindings: readonly BrowserBinding[];
 }
 
-// ============================================================================
 // Base Bound Browser
-// ============================================================================
 
 /**
  * Base browser view - extensible by platforms.

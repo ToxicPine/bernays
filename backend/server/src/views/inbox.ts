@@ -1,9 +1,7 @@
 // src/views/inbox.ts
 // Base inbox view type for platform-specific extension
 
-// ============================================================================
 // Base Inbox View
-// ============================================================================
 
 /**
  * Base inbox view - extensible index over threads.

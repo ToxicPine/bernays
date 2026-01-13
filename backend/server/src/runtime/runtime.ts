@@ -12,9 +12,7 @@ import { makePlatformLayer } from "./sockpuppet/platform-runtime.ts";
 import { makeJournalLayer } from "./sockpuppet/journal-runtime.ts";
 import { runSockpuppet as runSockpuppetEffect } from "./sockpuppet/compose.ts";
 
-// ============================================================================
 // Runtime Configuration
-// ============================================================================
 
 export interface RuntimeConfig {
   readonly eventStore: EventStore<StorableEvent>;
@@ -26,9 +24,7 @@ export interface RuntimeConfig {
   readonly accountLoader: (scope: ScopeType) => Promise<readonly BaseAccount[]>;
 }
 
-// ============================================================================
 // Runtime Service Interface
-// ============================================================================
 
 /**
  * Runtime service interface.
@@ -60,9 +56,7 @@ export class Runtime extends Context.Tag("automation/Runtime")<
   RuntimeService
 >() {}
 
-// ============================================================================
 // Runtime Implementation
-// ============================================================================
 
 /**
  * Create a Runtime service implementation from config.

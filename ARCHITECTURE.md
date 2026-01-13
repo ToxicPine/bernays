@@ -49,8 +49,8 @@ Everything else exists to make this possible.
 4. **Unified event model**: Bridge events use `scope` + `type`, same as stored
    events. Auth, messages, rate limits—all platform-scoped, all one flow.
 
-5. **Derive everything**: Inbox, threads, auth state, rate limits—all derived
-   from the same event stream by pure functions.
+5. **Derive everything**: Inbox, threads, auth state, rate limits, contact
+   info—all derived from the same event stream by pure functions.
 
 6. **Platform-agnostic core**: The runtime doesn't know about LinkedIn or X. It
    knows about scopes, events, projections, and platform definitions. Platforms
@@ -100,7 +100,8 @@ flowchart LR
    Shared infrastructure, not platform-specific.
 
 2. **Events** — Append-only log. The **single source of truth**. Everything
-   else—threads, inbox state, auth status—is derived by folding events.
+   else—threads, inbox state, auth status, contact info—is derived by folding
+   events.
 
 3. **Platform-specific account storage** — Each platform defines its own account
    type and storage. LinkedIn accounts have different fields than X accounts.
@@ -109,7 +110,7 @@ flowchart LR
 ```typescript
 // Each provider defines its own account type
 interface LinkedInAccount {
-  readonly id: AccountId;
+  readonly id: ParticipantId;
   readonly displayName: string;
   readonly browserBindings: readonly BrowserBinding[];
   readonly weeklyInviteLimit: number;
@@ -117,7 +118,7 @@ interface LinkedInAccount {
 }
 
 interface XAccount {
-  readonly id: AccountId;
+  readonly id: ParticipantId;
   readonly handle: string;
   readonly browserBindings: readonly BrowserBinding[];
   readonly isVerified: boolean;
@@ -141,7 +142,7 @@ Use branded types to prevent mixing up IDs and other stringly-typed values:
 type Brand<T, B extends string> = T & { readonly __brand: B };
 
 type Scope = Brand<string, "Scope">;
-type AccountId = Brand<string, "AccountId">;
+type ParticipantId = Brand<string, "ParticipantId">;
 type ThreadId = Brand<string, "ThreadId">;
 type EventId = Brand<string, "EventId">;
 type CorrelationId = Brand<string, "CorrelationId">;
@@ -151,7 +152,7 @@ type ExtensionId = Brand<string, "ExtensionId">;
 
 // Constructor functions
 const Scope = (value: string): Scope => value as Scope;
-const AccountId = (value: string): AccountId => value as AccountId;
+const ParticipantId = (value: string): ParticipantId => value as ParticipantId;
 const ExtensionId = (value: string): ExtensionId => value as ExtensionId;
 // ... etc
 ```
@@ -161,13 +162,26 @@ const ExtensionId = (value: string): ExtensionId => value as ExtensionId;
 | Type              | Why                                                                |
 | ----------------- | ------------------------------------------------------------------ |
 | `Scope`           | Extensible string—new platforms added without modifying core types |
-| `AccountId`       | Don't mix with user IDs or other identifiers                       |
+| `ParticipantId`   | Any user on a platform—owned accounts AND external contacts        |
 | `ThreadId`        | Prevent passing a message ID where thread ID expected              |
 | `EventId`         | Deduplication key—must not collide with correlation ID             |
 | `CorrelationId`   | Tracing—links related events across the system                     |
 | `CanonicalId`     | Message identity—distinct from platform's native ID                |
 | `BrowserConfigId` | Don't mix with browser instance IDs                                |
 | `ExtensionId`     | Don't mix extension IDs with other string identifiers              |
+
+### ParticipantId: Unified User Identity
+
+`ParticipantId` represents **any user on a platform**—whether it's one of our
+owned accounts or an external contact we're interacting with. This unified type
+enables:
+
+- **Comparison without casting**: `msg.senderId === platform.participantId`
+- **Consistent contact lookup**: Pass any `ParticipantId` to `deriveContact`
+- **Type safety across boundaries**: Prevent mixing user IDs with other strings
+
+The distinction between "our account" and "external contact" is expressed by
+context (e.g., `BaseAccount.id` vs `MessageView.senderId`), not separate types.
 
 `Scope` is a branded string, not a literal union, because the system must be
 extensible. New scopes (platforms, journal, core) can be added without modifying
@@ -236,7 +250,7 @@ extend templates with their scope and platform-specific fields:
 export const AnchorMessageObservedBase = CorrelatedEventSchema.extend({
   kind: z.literal("anchor"),
   canonicalId: z.string().transform(CanonicalId),
-  senderId: z.string(),
+  senderId: z.string().transform(ParticipantId),
   content: z.string().optional(),
   // scope, type, anchor: platforms add these
 });
@@ -245,7 +259,7 @@ export const AnchorMessageObservedBase = CorrelatedEventSchema.extend({
 export const ReplyMessageObservedBase = CorrelatedEventSchema.extend({
   kind: z.literal("reply"),
   canonicalId: z.string().transform(CanonicalId),
-  senderId: z.string(),
+  senderId: z.string().transform(ParticipantId),
   predecessorId: z.string().transform(CanonicalId),
   content: z.string().optional(),
   // scope, type: platforms add these
@@ -254,14 +268,14 @@ export const ReplyMessageObservedBase = CorrelatedEventSchema.extend({
 // templates/auth.ts
 export const AuthObservedBase = CorrelatedEventSchema.extend({
   configId: z.string().transform(BrowserConfigId),
-  accountId: z.string().transform(AccountId),
+  participantId: z.string().transform(ParticipantId),
   status: z.enum(["authenticated", "expired", "unknown"]),
 });
 
 // templates/rate-limit.ts
 export const RateLimitObservedBase = CorrelatedEventSchema.extend({
   configId: z.string().transform(BrowserConfigId),
-  accountId: z.string().transform(AccountId),
+  participantId: z.string().transform(ParticipantId),
   retryAfter: z.string().optional(),
 });
 ```
@@ -368,7 +382,7 @@ All messages, regardless of platform, must satisfy a minimal shape:
 ```typescript
 interface BaseMessage {
   readonly canonicalId: CanonicalId;
-  readonly senderId: string;
+  readonly senderId: ParticipantId;
   readonly content?: string;
 }
 ```
@@ -412,7 +426,7 @@ type Message<TAnchor> = AnchorMessage<TAnchor> | ReplyMessage;
   kind: "anchor",
   canonicalId: "abc123",
   anchor: { conversationId: "conv-1", participants: ["alice", "bob"] },
-  senderId: "alice",
+  senderId: "alice",  // ParticipantId
   content: "Hey!",
 }
 
@@ -423,7 +437,7 @@ type Message<TAnchor> = AnchorMessage<TAnchor> | ReplyMessage;
   kind: "reply",
   canonicalId: "def456",
   predecessorId: "abc123",
-  senderId: "bob",
+  senderId: "bob",  // ParticipantId
   content: "Hi there!",
 }
 ```
@@ -506,13 +520,13 @@ interface LinkedInInbox extends BaseInboxView<LinkedInThreadSummary> {
 
 ```typescript
 interface Participant {
-  readonly id: string;
+  readonly id: ParticipantId;
   readonly name?: string;
 }
 
 interface MessageView {
   readonly id: CanonicalId;
-  readonly senderId: string;
+  readonly senderId: ParticipantId;
   readonly content?: string;
   readonly timestamp: string;
 }
@@ -527,7 +541,7 @@ interface BaseThreadView<TAnchor> {
 // Platform extends with specific fields
 interface LinkedInAnchor {
   readonly conversationId: string;
-  readonly participants: readonly string[];
+  readonly participants: readonly ParticipantId[];
 }
 
 interface LinkedInThread extends BaseThreadView<LinkedInAnchor> {
@@ -539,6 +553,37 @@ interface LinkedInThread extends BaseThreadView<LinkedInAnchor> {
 Threads are fetched via `deriveThread(threadId)` when the sockpuppet views a
 conversation. Platform-specific fields (like `isSponsored`) influence sockpuppet
 decisions.
+
+### Contact View
+
+Sockpuppets often need information about participants beyond just their ID. The
+contact view provides what we know about a participant from observed events:
+
+```typescript
+interface BaseContact {
+  readonly id: ParticipantId;
+  readonly name?: string;
+}
+
+// Platform extends with specific fields
+interface LinkedInContact extends BaseContact {
+  readonly headline?: string;
+  readonly profileUrl?: string;
+  readonly connectionDegree?: "1st" | "2nd" | "3rd" | "out";
+  readonly lastInteraction?: string;
+}
+
+interface XContact extends BaseContact {
+  readonly handle?: string;
+  readonly isVerified?: boolean;
+  readonly followerCount?: number;
+  readonly followingCount?: number;
+}
+```
+
+Contact info is derived from events like `ProfileViewed`, `SearchResultsRetrieved`,
+`ConnectionRequestSent`, etc. The behavior folds these events to build a picture
+of each participant.
 
 ---
 
@@ -556,7 +601,7 @@ interface BaseIntent<TScope extends Scope = Scope> {
 }
 
 interface BaseAccount {
-  readonly id: AccountId;
+  readonly id: ParticipantId;
   readonly browserBindings: readonly BrowserBinding[];
 }
 
@@ -564,6 +609,11 @@ interface BaseBoundBrowser {
   readonly configId: BrowserConfigId;
   readonly isRunning: boolean;
   readonly metadata: Record<string, unknown>;
+}
+
+interface BaseContact {
+  readonly id: ParticipantId;
+  readonly name?: string;
 }
 
 interface PlatformBehavior<
@@ -577,16 +627,17 @@ interface PlatformBehavior<
   // this account can use, with metadata like device type, geo, etc.)
   TAccount extends BaseAccount,
   TBrowser extends BaseBoundBrowser = BaseBoundBrowser,
+  TContact extends BaseContact = BaseContact,
 > {
   readonly scope: TScope;
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Derivation — fold events into views (pure functions)
+  // Derivation — fold events into views
   // ─────────────────────────────────────────────────────────────────────────
 
   readonly deriveInbox: (
     events: readonly TEvent[],
-    accountId: AccountId,
+    participantId: ParticipantId,
   ) => TInbox;
 
   readonly deriveThread: (
@@ -599,6 +650,16 @@ interface PlatformBehavior<
     account: TAccount,
     runningConfigIds: ReadonlySet<BrowserConfigId>,
   ) => readonly TBrowser[];
+
+  /**
+   * Derive contact info from events for a participant.
+   * Returns what we know about this user from observed events.
+   * Optional—platforms without rich contact info can omit this.
+   */
+  readonly deriveContact?: (
+    events: readonly TEvent[],
+    participantId: ParticipantId,
+  ) => TContact | undefined;
 
   // ─────────────────────────────────────────────────────────────────────────
   // Execution — run intents via browser (behavior owns browser selection)
@@ -622,6 +683,11 @@ session freshness, etc. The behavior's `deriveBrowsers` attaches
 platform-specific status to each browser, and `execute` picks the best one based
 on platform logic. No hardcoded universal assumptions about auth or rate limits.
 
+**Why deriveContact exists**: Sockpuppets need to make decisions based on who
+they're talking to. The `deriveContact` method folds events to build a picture
+of each participant—name, profile URL, connection degree, etc. This is derived
+from the same event stream as everything else.
+
 ---
 
 ## PlatformDefinition
@@ -633,6 +699,7 @@ A **PlatformDefinition** is the registration unit for a platform. It bundles:
   intents
 - **Account type** — platform-specific account structure
 - **Browser type** — platform-specific browser view (extends BaseBoundBrowser)
+- **Contact type** — platform-specific contact view (extends BaseContact)
 
 The type parameters enforce that the behavior operates on events matching the
 declared scope.
@@ -647,6 +714,7 @@ interface PlatformDefinition<
   TInbox extends BaseInboxView<unknown>,
   TAccount extends BaseAccount,
   TBrowser extends BaseBoundBrowser = BaseBoundBrowser,
+  TContact extends BaseContact = BaseContact,
 > {
   readonly scope: TScope;
 
@@ -664,7 +732,8 @@ interface PlatformDefinition<
     TThread,
     TInbox,
     TAccount,
-    TBrowser
+    TBrowser,
+    TContact
   >;
 }
 
@@ -677,7 +746,8 @@ type AnyPlatform = PlatformDefinition<
   BaseThreadView<unknown>,
   BaseInboxView<unknown>,
   BaseAccount,
-  BaseBoundBrowser
+  BaseBoundBrowser,
+  BaseContact
 >;
 ```
 
@@ -688,6 +758,7 @@ wrong scope literal.
 The `TAccount` constraint requires `id` and `browserBindings` (shared structure
 needed by the platform service), but allows platform-specific fields. The
 `TBrowser` constraint ensures browsers have at least `configId` and `isRunning`.
+The `TContact` constraint ensures contacts have at least `id`.
 
 ### Example Definition
 
@@ -701,7 +772,8 @@ export const linkedInPlatform: PlatformDefinition<
   LinkedInThread,
   LinkedInInbox,
   LinkedInAccount,
-  LinkedInBrowser
+  LinkedInBrowser,
+  LinkedInContact
 > = {
   scope: LINKEDIN_SCOPE,
   eventSchema: LinkedInEventSchema,
@@ -717,9 +789,17 @@ interface LinkedInBrowser extends BaseBoundBrowser {
   readonly weeklyInvitesRemaining: number | undefined;
 }
 
+// plugins/linkedin/contact.ts
+interface LinkedInContact extends BaseContact {
+  readonly headline?: string;
+  readonly profileUrl?: string;
+  readonly connectionDegree?: "1st" | "2nd" | "3rd" | "out";
+  readonly lastInteraction?: string;
+}
+
 // plugins/linkedin/account.ts
 interface LinkedInAccount {
-  readonly id: AccountId;
+  readonly id: ParticipantId;
   readonly displayName: string;
   readonly browserBindings: readonly BrowserBinding[];
   readonly weeklyInviteLimit: number;
@@ -728,7 +808,7 @@ interface LinkedInAccount {
 
 // Each platform has its own account store
 interface LinkedInAccountStoreService {
-  readonly get: (id: AccountId) => Effect.Effect<Option<LinkedInAccount>>;
+  readonly get: (id: ParticipantId) => Effect.Effect<Option<LinkedInAccount>>;
   readonly list: () => Effect.Effect<readonly LinkedInAccount[]>;
   readonly upsert: (account: LinkedInAccount) => Effect.Effect<void>;
 }
@@ -1129,7 +1209,7 @@ Events that fail validation are filtered out with a warning.
 
 The platform service combines projection, behavior, and browser pool into what
 sockpuppets actually use. It's **generic over the platform definition's types**,
-including the platform-specific browser type.
+including the platform-specific browser and contact types.
 
 ```typescript
 interface PlatformService<
@@ -1140,15 +1220,17 @@ interface PlatformService<
   TInbox extends BaseInboxView<unknown>,
   TAccount extends BaseAccount,
   TBrowser extends BaseBoundBrowser,
+  TContact extends BaseContact,
 > {
   readonly scope: Scope;
-  readonly accountId: AccountId;
+  readonly participantId: ParticipantId;
   readonly account: TAccount;
 
   // The world - all derived from one event stream
   readonly inbox: Effect.Effect<TInbox>;
   readonly thread: (id: ThreadId) => Effect.Effect<Option<TThread>>;
   readonly browsers: Effect.Effect<readonly TBrowser[]>; // platform-specific browser type
+  readonly contact: (id: ParticipantId) => Effect.Effect<Option<TContact>>; // contact lookup
 
   // How I act - behavior owns browser selection
   readonly execute: (
@@ -1160,8 +1242,9 @@ interface PlatformService<
 
 ### Implementation
 
-The platform service delegates browser derivation and selection entirely to the
-behavior. No hardcoded assumptions about auth or rate limits.
+The platform service delegates browser derivation, contact lookup, and browser
+selection entirely to the behavior. No hardcoded assumptions about auth, rate
+limits, or contact info structure.
 
 ```typescript
 const makePlatformService = <
@@ -1173,6 +1256,7 @@ const makePlatformService = <
   TInbox extends BaseInboxView<unknown>,
   TAccount extends BaseAccount,
   TBrowser extends BaseBoundBrowser,
+  TContact extends BaseContact,
 >(
   platform: PlatformDefinition<
     TScope,
@@ -1182,7 +1266,8 @@ const makePlatformService = <
     TThread,
     TInbox,
     TAccount,
-    TBrowser
+    TBrowser,
+    TContact
   >,
   account: TAccount,
   projection: Projection<TEvent>,
@@ -1194,7 +1279,8 @@ const makePlatformService = <
     TThread,
     TInbox,
     TAccount,
-    TBrowser
+    TBrowser,
+    TContact
   >,
   never,
   BrowserPool
@@ -1229,7 +1315,7 @@ const makePlatformService = <
 
     return {
       scope: platform.scope,
-      accountId: account.id,
+      participantId: account.id,
       account,
 
       browsers: getBrowsers,
@@ -1243,6 +1329,17 @@ const makePlatformService = <
         Effect.gen(function* () {
           const events = yield* queryEvents;
           return Option.fromNullable(behavior.deriveThread(events, threadId));
+        }),
+
+      contact: (participantId) =>
+        Effect.gen(function* () {
+          if (!behavior.deriveContact) {
+            return Option.none();
+          }
+          const events = yield* queryEvents;
+          return Option.fromNullable(
+            behavior.deriveContact(events, participantId),
+          );
         }),
 
       // Behavior owns browser selection and execution
@@ -1268,7 +1365,7 @@ come from bridges).
 interface JournalEntry extends StorableEvent {
   readonly scope: typeof JOURNAL_SCOPE;
   readonly type: "Entry";
-  readonly accountId: AccountId;
+  readonly participantId: ParticipantId;
   readonly kind: string;
   readonly [key: string]: unknown;
 }
@@ -1283,7 +1380,7 @@ interface JournalService {
 }
 class Journal extends Context.Tag("Journal")<Journal, JournalService>() {}
 
-const makeJournalLive = (accountId: AccountId) =>
+const makeJournalLive = (participantId: ParticipantId) =>
   Layer.effect(
     Journal,
     Effect.gen(function* () {
@@ -1298,7 +1395,7 @@ const makeJournalLive = (accountId: AccountId) =>
               type: "Entry",
               eventId: EventId(crypto.randomUUID()),
               timestamp: new Date().toISOString(),
-              accountId,
+              participantId,
             },
           ]),
 
@@ -1312,7 +1409,7 @@ const makeJournalLive = (accountId: AccountId) =>
             return all.filter(
               (e): e is JournalEntry =>
                 e.scope === JOURNAL_SCOPE &&
-                (e as JournalEntry).accountId === accountId,
+                (e as JournalEntry).participantId === participantId,
             );
           }),
       };
@@ -1383,7 +1480,13 @@ const myBot = Effect.gen(function* () {
     if (Option.isNone(thread)) continue;
 
     const lastMsg = thread.value.messages.at(-1);
-    if (!lastMsg || lastMsg.senderId === platform.accountId) continue;
+    if (!lastMsg || lastMsg.senderId === platform.participantId) continue;
+
+    // Look up who sent the message
+    const sender = yield* platform.contact(lastMsg.senderId);
+    if (Option.isSome(sender)) {
+      yield* Effect.log(`Message from: ${sender.value.name ?? "unknown"}`);
+    }
 
     yield* platform.execute(
       {
@@ -1521,6 +1624,8 @@ const spawnSockpuppet = <
   TThread extends BaseThreadView<TAnchor>,
   TInbox extends BaseInboxView<unknown>,
   TAccount extends BaseAccount,
+  TBrowser extends BaseBoundBrowser,
+  TContact extends BaseContact,
 >(
   platform: PlatformDefinition<
     TScope,
@@ -1529,14 +1634,16 @@ const spawnSockpuppet = <
     TAnchor,
     TThread,
     TInbox,
-    TAccount
+    TAccount,
+    TBrowser,
+    TContact
   >,
   account: TAccount,
 ) =>
   Effect.gen(function* () {
     yield* Effect.log(`Starting sockpuppet`, {
       scope: platform.scope,
-      accountId: account.id,
+      participantId: account.id,
     });
 
     // Create projection for this scope
@@ -1563,7 +1670,7 @@ const spawnSockpuppet = <
       Effect.retry(Schedule.exponential("1 second").pipe(Schedule.jittered)),
       Effect.catchAll((e) =>
         Effect.logError("Sockpuppet crashed", {
-          accountId: account.id,
+          participantId: account.id,
           error: e,
         })
       ),
@@ -1593,7 +1700,7 @@ Effect.runPromise(
 │       ↓                                                                 │
 │  BrowserPool receives, tags with configId                               │
 │       ↓                                                                 │
-│  EventIngestion looks up schema by scope, validates, stores                │
+│  EventIngestion looks up schema by scope, validates, stores             │
 │       ↓                                                                 │
 │  EventStore                                                             │
 │       ↓                                                                 │
@@ -1602,7 +1709,8 @@ Effect.runPromise(
 │  Platform service uses behavior to derive EVERYTHING:                   │
 │       ├── behavior.deriveInbox(events)      → inbox view                │
 │       ├── behavior.deriveThread(events)     → thread view               │
-│       └── behavior.deriveBrowsers(events)   → browser status (platform-specific) │
+│       ├── behavior.deriveBrowsers(events)   → browser status            │
+│       └── behavior.deriveContact(events)    → contact info              │
 │       ↓                                                                 │
 │  behavior.execute() owns browser selection and execution                │
 │       ↓                                                                 │
@@ -1624,6 +1732,7 @@ plugins/                         # Platform plugins (separate package)
 │   ├── behavior.ts              # linkedInBehavior implementation
 │   ├── views.ts                 # LinkedInInbox, LinkedInThread, LinkedInAnchor
 │   ├── browser.ts               # LinkedInBrowser (extends BaseBoundBrowser)
+│   ├── contact.ts               # LinkedInContact (extends BaseContact)
 │   └── account.ts               # LinkedInAccount, LinkedInAccountStore
 └── x/
     ├── mod.ts                   # xPlatform export
@@ -1631,6 +1740,7 @@ plugins/                         # Platform plugins (separate package)
     ├── behavior.ts              # xBehavior implementation
     ├── views.ts                 # XInbox, XThread, XAnchor
     ├── browser.ts               # XBrowser (extends BaseBoundBrowser)
+    ├── contact.ts               # XContact (extends BaseContact)
     └── account.ts               # XAccount, XAccountStore
 
 backend/server/src/
@@ -1658,8 +1768,9 @@ backend/server/src/
 ├── views/                       # View type definitions
 │   ├── mod.ts                   # Barrel exports
 │   ├── inbox.ts                 # BaseInboxView<TThreadSummary>
-│   ├── thread.ts                # BaseThreadView<TAnchor>, MessageView
-│   └── browser.ts               # BaseBoundBrowser (platforms extend this)
+│   ├── thread.ts                # BaseThreadView<TAnchor>, MessageView, Participant
+│   ├── browser.ts               # BaseBoundBrowser (platforms extend this)
+│   └── contact.ts               # BaseContact (platforms extend this)
 │
 ├── store/                       # Storage layer (core infrastructure)
 │   ├── mod.ts                   # EventStore, ConfigStore interfaces
@@ -1732,11 +1843,12 @@ platform defines and manages its own.
    `PlatformBehavior`, `Projection`. It doesn't know about LinkedIn or X.
 
 3. **Platform definitions bundle schemas + behavior**: Each platform defines its
-   types (events, intents, anchor, views) and behavior (derivation, execution).
+   types (events, intents, anchor, views, contacts) and behavior (derivation,
+   execution).
 
 4. **Platform-specific account storage**: Each platform defines its own account
    type and store. LinkedIn accounts have different fields than X accounts. The
-   core doesn't impose a monolithic `OwnedAccount` type.
+   core doesn't impose a monolithic account type.
 
 5. **Projections for type safety**: Platform service gets typed events from the
    projection—guaranteed. No manual filtering or validation.
@@ -1755,3 +1867,9 @@ platform defines and manages its own.
 
 10. **Sockpuppets are isolated**: They see `Platform` and `Journal`. Everything
     else is hidden.
+
+11. **Unified ParticipantId**: One type for all users—owned accounts and external
+    contacts. Context distinguishes them, not separate branded types.
+
+12. **Contact derivation**: `deriveContact` folds events to build a picture of
+    each participant. Sockpuppets can look up who they're talking to.

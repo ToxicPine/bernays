@@ -2,7 +2,7 @@
 // Type-safe, filtered access to the event store
 
 import { Effect } from "effect";
-import { z } from "@zod/zod";
+import type { z } from "@zod/zod";
 import type { Scope } from "$/core/branded.ts";
 import type {
   EventStore,
@@ -10,9 +10,7 @@ import type {
   StorableEvent,
 } from "$/store/mod.ts";
 
-// ============================================================================
 // Projection Interface
-// ============================================================================
 
 /**
  * Projection provides type-safe, filtered access to the event store.
@@ -36,9 +34,7 @@ export interface Projection<TEvent extends StorableEvent> {
   ) => Effect.Effect<readonly TEvent[], EventStoreError>;
 }
 
-// ============================================================================
 // Projection Factory
-// ============================================================================
 
 /**
  * Creates a projection for a specific scope.
@@ -92,9 +88,7 @@ export const makeProjection = <TEvent extends StorableEvent>(
     }),
 });
 
-// ============================================================================
 // Effect-based Projection Factory
-// ============================================================================
 
 /**
  * Creates a projection using the EventStore Effect service.
@@ -144,9 +138,7 @@ export const makeProjectionEffect = <TEvent extends StorableEvent>(
     };
   });
 
-// ============================================================================
-// EventStore Effect Service (re-export from ingestion)
-// ============================================================================
+// EventStore Effect Service
 
 import { Context } from "effect";
 import type { EventStoreQuery } from "$/store/mod.ts";

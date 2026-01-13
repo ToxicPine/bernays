@@ -754,7 +754,7 @@ const main = async (): Promise<void> => {
     console.log(`manage-browser-configs.tsx — Browser Config Manager
 
 USAGE
-  just configure-browsers [COMMAND]
+  bernays configure-browsers [COMMAND]
 
 COMMANDS
   (none)        Interactive TUI

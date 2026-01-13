@@ -3,9 +3,7 @@
 
 import type { StorableEvent } from "./mod.ts";
 
-// ============================================================================
 // Metadata Extraction Helpers
-// ============================================================================
 
 /**
  * Safely extract correlationId from an event.
@@ -29,9 +27,7 @@ export const getIntentId = (event: StorableEvent): string | undefined => {
   return undefined;
 };
 
-// ============================================================================
 // Index Types
-// ============================================================================
 
 /**
  * In-memory index structure for fast lookups by correlation and intent ID.

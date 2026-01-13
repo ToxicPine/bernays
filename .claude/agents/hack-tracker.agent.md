@@ -86,7 +86,10 @@ When documenting infrastructure changes, note impact on scripts:
 | Change Type | Affected Scripts | Action |
 |-------------|------------------|--------|
 | New platform plugin | `scripts/view-inbox.ts` | Add platform adapter and menu option |
-| Store API change | `scripts/view-event-log.ts`, `scripts/manage-browser-configs.ts` | Update store usage |
+| Store API change | `scripts/view-event-log.ts`, `scripts/manage-browser-configs.ts`, `scripts/transition-extension.ts` | Update store usage |
+| ConfigStore change | `scripts/transition-extension.ts` | Must have `replaceExtensionId()` method |
+| ExtensionStore change | `scripts/transition-extension.ts` | Must have `remove()` that cleans up backend |
 | Account store change | `scripts/view-inbox.ts` | Update account listing |
+| Browser backend change | `scripts/sync-extension.ts`, `scripts/transition-extension.ts` | Update layer composition |
 
 Always check if infrastructure changes require script updates and document in HACKS.md under `## Scripts` section.

@@ -31,6 +31,7 @@ Scripts                  - scripts/ (operational tooling, can import any layer)
 - `view-inbox.ts` depends on `plugins/*/` (behaviors, account stores)
 - `view-event-log.ts` depends on `store/` (EventStore)
 - `manage-browser-configs.ts` depends on `store/` (ConfigStore)
+- `transition-extension.ts` depends on `store/` (ConfigStore.replaceExtensionId) and `backend/` (ExtensionStore.remove)
 
 # Import Discipline
 

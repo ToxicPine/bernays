@@ -254,11 +254,10 @@ if (import.meta.main) {
 
   if (args.help) {
     console.log(`
-build.ts — Build browser extension
+build.ts — Build Browser Extension
 
 USAGE
-  deno task build [OPTIONS]
-  just ext-build [OPTIONS]
+  bernays build [OPTIONS]
 
 OPTIONS
   --zip, -z      Create extension zip after building

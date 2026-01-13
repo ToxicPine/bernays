@@ -10,10 +10,6 @@ import {
 } from "$/core/branded.ts";
 import { CorrelationMetadataSchema } from "$/events/metadata.ts";
 
-// ============================================================================
-// Rate Limit Observed Base
-// ============================================================================
-
 /**
  * Base schema for rate limit observation events.
  * Platforms extend this with their scope and type literals.
@@ -36,9 +32,7 @@ export const RateLimitObservedBase = CorrelationMetadataSchema.extend({
 
 export type RateLimitObservedBase = z.infer<typeof RateLimitObservedBase>;
 
-// ============================================================================
-// Type-safe accessors (for use in platform behaviors)
-// ============================================================================
+/** Type-safe accessors for use in platform behaviors. */
 
 export interface RateLimitObservedFields {
   readonly configId: BrowserConfigIdType;

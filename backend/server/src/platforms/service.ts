@@ -20,9 +20,7 @@ import type {
   PlatformDefinition,
 } from "$/platforms/mod.ts";
 
-// ============================================================================
 // Platform Service Interface
-// ============================================================================
 
 /**
  * PlatformService is what sockpuppets use to interact with a platform.
@@ -68,9 +66,7 @@ export interface PlatformService<
   >;
 }
 
-// ============================================================================
 // Platform Service Factory
-// ============================================================================
 
 /**
  * Creates a PlatformService for a specific platform and account.
@@ -79,7 +75,6 @@ export interface PlatformService<
  * @param account - The account to create the service for
  * @param projection - Type-safe projection for this platform's events
  */
-// deno-lint-ignore no-unused-vars
 export const makePlatformService = <
   TScope extends Scope,
   TEvent extends StorableEvent & { readonly scope: TScope },
@@ -174,9 +169,7 @@ export const makePlatformService = <
     };
   });
 
-// ============================================================================
 // Platform Context Tag
-// ============================================================================
 
 /**
  * Platform service context tag.

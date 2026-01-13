@@ -25,10 +25,6 @@ import type { XBrowser } from "./browser.ts";
 // Behavior
 import { xBehavior } from "./behavior.ts";
 
-// ============================================================================
-// Platform Definition
-// ============================================================================
-
 export const xPlatform: PlatformDefinition<
   XScope,
   XEvent,
@@ -45,10 +41,6 @@ export const xPlatform: PlatformDefinition<
   anchorSchema: XAnchorSchema,
   behavior: xBehavior,
 };
-
-// ============================================================================
-// Re-exports
-// ============================================================================
 
 // Scope
 export { X_SCOPE } from "./schemas.ts";
@@ -130,7 +122,6 @@ export {
   type XAccount,
   XAccountStore,
   type XAccountStoreService,
-  type XApiTier,
 } from "./account.ts";
 
 // Behavior

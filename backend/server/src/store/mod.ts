@@ -6,10 +6,6 @@ import type { Result } from "$/core/result.ts";
 import { type Scope, Scope as makeScope } from "$/core/branded.ts";
 import type { EventId } from "$/core/branded.ts";
 
-// ============================================================================
-// Error Types
-// ============================================================================
-
 export type EventStoreErrorCode =
   | "AppendFailed"
   | "QueryFailed"
@@ -30,9 +26,7 @@ export const createEventStoreError = (
   cause?: unknown,
 ): EventStoreError => ({ code, message, cause });
 
-// ============================================================================
 // Storable Event Schema
-// ============================================================================
 
 /**
  * Minimum shape for event storage.
@@ -52,10 +46,6 @@ export const StorableEventSchema = z.object({
 
 export type StorableEvent = z.infer<typeof StorableEventSchema>;
 
-// ============================================================================
-// Query Types
-// ============================================================================
-
 export type EventStoreQuery =
   | { type: "all" }
   | { type: "since"; timestamp: string }
@@ -63,10 +53,6 @@ export type EventStoreQuery =
   | { type: "byScope"; scope: Scope; since: string }
   | { type: "byCorrelation"; correlationId: string }
   | { type: "byIntent"; intentId: string };
-
-// ============================================================================
-// Base EventStore Interface
-// ============================================================================
 
 /**
  * Core EventStore interface - minimum contract for event persistence.
@@ -98,10 +84,6 @@ export interface EventStore<TEvent extends StorableEvent = StorableEvent> {
   ) => Promise<Result<readonly TEvent[], EventStoreError>>;
 }
 
-// ============================================================================
-// Implementations
-// ============================================================================
-
 export { createInMemoryEventStore } from "./memory.ts";
 
 export { createFileEventStore, type FileEventStoreOptions } from "./file.ts";
@@ -112,7 +94,6 @@ export {
   type PostgresEventStoreOptions,
 } from "./postgres.ts";
 
-// Utilities
 export {
   createEventIndex,
   type EventIndex,
@@ -121,7 +102,6 @@ export {
   indexEvent,
 } from "./utils.ts";
 
-// Config Store
 export {
   ConfigStore,
   type ConfigStoreError,
@@ -133,7 +113,6 @@ export {
   type PostgresConfigStoreOptions as PostgresConfigStoreOpts,
 } from "./config-store.ts";
 
-// Extension Transition
 export {
   transitionExtension,
   type TransitionResult,

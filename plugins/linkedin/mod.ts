@@ -25,10 +25,6 @@ import type { LinkedInBrowser } from "./browser.ts";
 // Behavior
 import { linkedInBehavior } from "./behavior.ts";
 
-// ============================================================================
-// Platform Definition
-// ============================================================================
-
 export const linkedInPlatform: PlatformDefinition<
   LinkedInScope,
   LinkedInEvent,
@@ -45,10 +41,6 @@ export const linkedInPlatform: PlatformDefinition<
   anchorSchema: LinkedInAnchorSchema,
   behavior: linkedInBehavior,
 };
-
-// ============================================================================
-// Re-exports
-// ============================================================================
 
 // Scope
 export { LINKEDIN_SCOPE } from "./schemas.ts";

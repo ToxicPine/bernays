@@ -15,15 +15,11 @@ import type { BaseThreadView } from "$/views/thread.ts";
 import type { BaseAccount, BaseBoundBrowser } from "$/views/browser.ts";
 import type { BaseIntent, ExecuteError } from "$/platforms/mod.ts";
 
-// ============================================================================
 // Re-export JournalEntry from events for convenience
-// ============================================================================
 
 export type { JournalEntry };
 
-// ============================================================================
 // Journal Entry Input
-// ============================================================================
 
 /**
  * Input for recording a journal entry.
@@ -35,9 +31,7 @@ export interface JournalEntryInput {
   readonly [key: string]: unknown;
 }
 
-// ============================================================================
 // Platform Service Interface (for sockpuppets)
-// ============================================================================
 
 /**
  * Platform service for sockpuppets.
@@ -81,9 +75,7 @@ export class Platform extends Context.Tag("sockpuppet/Platform")<
   PlatformServiceInterface
 >() {}
 
-// ============================================================================
 // Journal Service
-// ============================================================================
 
 /**
  * Service for the sockpuppet's chronological log.

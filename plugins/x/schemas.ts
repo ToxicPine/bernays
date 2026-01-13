@@ -19,18 +19,14 @@ import {
   SyncConversationsBase,
 } from "@bernays/server/intents";
 
-// ============================================================================
 // Scope
-// ============================================================================
 
 export const X_SCOPE = Scope("x");
 export type XScope = typeof X_SCOPE;
 
 const xScopeSchema = z.literal("x").transform(() => X_SCOPE);
 
-// ============================================================================
 // X Anchor (for DM conversations)
-// ============================================================================
 
 export const XAnchorSchema = z.object({
   conversationId: z.string(),
@@ -39,9 +35,7 @@ export const XAnchorSchema = z.object({
 
 export type XAnchor = z.infer<typeof XAnchorSchema>;
 
-// ============================================================================
 // Event Schemas
-// ============================================================================
 
 // 1. XAuthObservedSchema - extends AuthObservedBase with X-specific fields
 export const XAuthObservedSchema = CorrelationMetadataSchema.extend({
@@ -209,9 +203,7 @@ export const XEventSchema = z.discriminatedUnion("type", [
 
 export type XEvent = z.infer<typeof XEventSchema>;
 
-// ============================================================================
 // Intent Schemas
-// ============================================================================
 
 const XIntentBase = z.object({
   scope: xScopeSchema,

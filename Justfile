@@ -33,6 +33,12 @@ help:
     @printf '  just %-20s %s\n' "inbox [platform]" "View Inbox (linkedin, x)"
     @printf '  just %-20s %s\n' "event-logs" "Query Event Log"
     @printf '  just %-20s %s\n' "configure-browsers" "Manage Browser Configs"
+    @printf '\n'
+    @printf '\033[1m%s\033[0m\n' "ACCOUNTS"
+    @printf '  just %-20s %s\n' "accounts <cmd> <args>" "Manage Accounts from TOML"
+    @printf '  just %-20s %s\n' "" "  validate <platform> <file>"
+    @printf '  just %-20s %s\n' "" "  import <platform> <file>"
+    @printf '  just %-20s %s\n' "" "  export <platform>"
 
 # =============================================================================
 # Backend Operations
@@ -181,3 +187,14 @@ ext-sync *args: (ext-build "--silent")
 # Transition from old extension to new (updates DB configs, deletes old)
 ext-transition *args:
     @deno run -A scripts/transition-extension.ts {{args}}
+
+# =============================================================================
+# Accounts
+# =============================================================================
+
+# Manage accounts from TOML files
+# Usage: just accounts validate linkedin accounts/linkedin.toml
+#        just accounts import linkedin accounts/linkedin.toml
+#        just accounts export linkedin
+accounts *args:
+    @deno run -A scripts/load-accounts.ts {{args}}

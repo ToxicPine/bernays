@@ -10,16 +10,8 @@ import {
 } from "$/core/branded.ts";
 import { CorrelationMetadataSchema } from "$/events/metadata.ts";
 
-// ============================================================================
-// Auth Status
-// ============================================================================
-
 export const AuthStatusSchema = z.enum(["authenticated", "expired", "unknown"]);
 export type AuthStatus = z.infer<typeof AuthStatusSchema>;
-
-// ============================================================================
-// Auth Observed Base
-// ============================================================================
 
 /**
  * Base schema for auth observation events.
@@ -41,9 +33,7 @@ export const AuthObservedBase = CorrelationMetadataSchema.extend({
 
 export type AuthObservedBase = z.infer<typeof AuthObservedBase>;
 
-// ============================================================================
-// Type-safe accessors (for use in platform behaviors)
-// ============================================================================
+/** Type-safe accessors for use in platform behaviors. */
 
 export interface AuthObservedFields {
   readonly configId: BrowserConfigIdType;

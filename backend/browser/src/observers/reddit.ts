@@ -16,9 +16,7 @@ declare global {
   }
 }
 
-// ============================================================================
 // Helpers
-// ============================================================================
 
 /**
  * Extract Reddit access token from cookies or localStorage.
@@ -158,9 +156,7 @@ const hasAuthToken = (): boolean => {
   return extractAccessToken() !== undefined;
 };
 
-// ============================================================================
 // Auth Observer
-// ============================================================================
 
 interface RedditAuthParams {
   platform: string;
@@ -316,9 +312,7 @@ window.__registerCommand<RedditAuthParams, RedditAuthResult>(
   },
 );
 
-// ============================================================================
 // Messages Observer
-// ============================================================================
 
 interface RedditMessagesParams {
   platform: string;
@@ -453,9 +447,7 @@ window.__registerCommand<RedditMessagesParams, RedditMessagesResult>(
   },
 );
 
-// ============================================================================
 // Proactive Auth Monitoring
-// ============================================================================
 
 // Set up monitoring for auth state changes
 const setupAuthMonitor = (): void => {

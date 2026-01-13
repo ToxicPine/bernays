@@ -3,18 +3,14 @@
 
 import type { CanonicalId, ThreadId } from "$/core/branded.ts";
 
-// ============================================================================
 // Participant
-// ============================================================================
 
 export interface Participant {
   readonly id: string;
   readonly name?: string;
 }
 
-// ============================================================================
 // Message View
-// ============================================================================
 
 export interface MessageView {
   readonly id: CanonicalId;
@@ -23,9 +19,7 @@ export interface MessageView {
   readonly timestamp: string;
 }
 
-// ============================================================================
 // Base Thread View
-// ============================================================================
 
 /**
  * Base thread view - extensible by platforms.
@@ -42,9 +36,7 @@ export interface BaseThreadView<TAnchor> {
   readonly anchor: TAnchor;
 }
 
-// ============================================================================
 // Helper Functions
-// ============================================================================
 
 /**
  * Calculate unread count from messages.

@@ -40,15 +40,11 @@ import type { LinkedInAccount } from "./account.ts";
 import type { LinkedInAuthStatus, LinkedInBrowser } from "./browser.ts";
 import { LINKEDIN_SCOPE } from "./schemas.ts";
 
-// ============================================================================
 // Type Alias
-// ============================================================================
 
 type LinkedInScope = typeof LINKEDIN_SCOPE;
 
-// ============================================================================
 // Helper Functions
-// ============================================================================
 
 /**
  * Convert graph nodes to MessageView format
@@ -90,9 +86,7 @@ const toLinkedInThread = (
   };
 };
 
-// ============================================================================
 // LinkedIn Behavior
-// ============================================================================
 
 export const linkedInBehavior: PlatformBehavior<
   LinkedInScope,

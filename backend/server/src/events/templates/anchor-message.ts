@@ -8,8 +8,8 @@ import type { CanonicalId, CorrelationId, EventId } from "$/core/branded.ts";
  * Base schema for anchor message events.
  * An anchor message establishes a thread - it's the root message.
  *
- * Platforms extend this and override `type` with their namespaced version.
- * They also define their own `anchor` shape.
+ * Platforms extend this and override `type` with their namespaced version
+ * (e.g., `linkedin:AnchorMessageObserved`) and define their own `anchor` shape.
  */
 export const AnchorMessageObservedBase = z.object({
   kind: z.literal("anchor"),
@@ -19,8 +19,6 @@ export const AnchorMessageObservedBase = z.object({
   canonicalId: z.string().transform((val) => val as CanonicalId),
   senderId: z.string(),
   content: z.string().optional(),
-  // type: platforms add their namespaced literal (e.g., "linkedin:AnchorMessageObserved")
-  // anchor: platforms define their own shape
 });
 
 export type AnchorMessageObservedBase = z.infer<

@@ -6,9 +6,7 @@ import type { BrowserBackend } from "../mod.ts";
 import { createBrowserbasePool } from "./pool.ts";
 import { createBrowserbaseExtensionStore } from "./extensions.ts";
 
-// ============================================================================
 // Browserbase Backend Factory
-// ============================================================================
 
 /**
  * Creates a Browserbase-backed browser backend.

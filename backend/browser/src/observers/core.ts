@@ -29,9 +29,7 @@ type CommandResult<T> =
   | { ok: true; value: T }
   | { ok: false; error: { code: string; message: string; details?: unknown } };
 
-// ============================================================================
 // Observer Context
-// ============================================================================
 
 export interface ObserverContext {
   browserId: string;
@@ -44,9 +42,7 @@ window.__observerContext = {
   tabId: "unknown",
 };
 
-// ============================================================================
 // Proactive Event Emission
-// ============================================================================
 
 /**
  * Emit an observation event proactively.
@@ -71,9 +67,7 @@ window.__emitObservation = (type: string, payload: unknown): void => {
   });
 };
 
-// ============================================================================
 // Observer Commands (Nudge Pattern)
-// ============================================================================
 
 export interface AuthObserveParams {
   platform: string;
@@ -122,9 +116,7 @@ window.__registerCommand<MessagesObserveParams, MessagesObserveResult>(
   },
 );
 
-// ============================================================================
 // Context Setter Command
-// ============================================================================
 
 window.__registerCommand<ObserverContext, void>(
   "observe:setContext",

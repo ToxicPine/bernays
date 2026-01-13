@@ -3,9 +3,7 @@
 
 import { Effect, Option } from "effect";
 
-// ============================================================================
 // Generic Store Interface
-// ============================================================================
 
 /**
  * Entity with an ID field.
@@ -29,9 +27,7 @@ export interface StoreService<T extends Identifiable, E = never> {
   readonly remove: (id: string) => Effect.Effect<boolean, E>;
 }
 
-// ============================================================================
 // In-Memory Store Factory
-// ============================================================================
 
 /**
  * Create a generic in-memory store.

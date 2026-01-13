@@ -743,30 +743,28 @@ const HELP = `
 ${bold("deploy.ts")} \u2014 Deploy Your Bernays Bot
 
 ${bold("USAGE")}
-  deno run -A scripts/deploy.ts [OPTIONS]
-  just deploy [OPTIONS]
+  bernays deploy [OPTIONS]
 
 ${bold("OPTIONS")}
-  --app <name>           App name (default: from fly.toml or APP_NAME env)
-  --region <code>        Deploy region (default: from fly.toml or "iad")
-  --org <slug>           Organization slug
-  --force                Deploy even if no changes detected
-  --allow-dirty          Deploy with uncommitted changes
-  --skip-database        Skip database setup
-  --skip-secrets         Skip secret configuration
-  --help                 Show this help
-
+  --app <name>           App Name (default: from fly.toml or APP_NAME env)
+  --region <code>        Deploy Region (default: from fly.toml or "iad")
+  --org <slug>           Organization Slug
+  --force                Deploy Even if No Changes Detected
+  --allow-dirty          Deploy With Uncommitted Changes
+  --skip-database        Skip Database Setup
+  --skip-secrets         Skip Secret Configuration
+  --help                 Show This Help
 ${bold("PROVIDERS")}
   Execution:  Fly.io (default)
   Database:   Fly Managed Postgres (when USE_FLY_POSTGRES=1)
 
 ${bold("ENVIRONMENT")}
-  See script header for full list of environment variables.
+  See Script Header for Full List of Environment Variables.
 
 ${bold("EXAMPLES")}
-  just deploy
-  just deploy --force
-  USE_FLY_POSTGRES=1 just deploy
+  bernays deploy
+  bernays deploy --force
+  USE_FLY_POSTGRES=1 bernays deploy
 `.trim();
 
 interface CliArgs {

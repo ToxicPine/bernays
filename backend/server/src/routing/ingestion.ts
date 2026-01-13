@@ -12,9 +12,7 @@ import {
   type StorableEvent,
 } from "$/store/mod.ts";
 
-// ============================================================================
 // Event Ingestion Service
-// ============================================================================
 
 /**
  * EventIngestion is an active service - it starts consuming the event stream
@@ -29,9 +27,7 @@ export class EventIngestion extends Context.Tag("EventIngestion")<
   EventIngestionService
 >() {}
 
-// ============================================================================
 // Implementation
-// ============================================================================
 
 /**
  * Creates an EventIngestion layer.
@@ -124,9 +120,7 @@ export const makeEventIngestion = (
     }),
   );
 
-// ============================================================================
 // EventStore Effect Service
-// ============================================================================
 
 /**
  * EventStore as an Effect service tag.

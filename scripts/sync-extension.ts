@@ -211,12 +211,7 @@ export const sync = async (config: SyncConfig): Promise<void> => {
 
   // Upload new extension (keep old for graceful transition)
   log.section("Syncing Extension");
-
-  if (existingExt) {
-    log.info(`Keeping old extension: ${existingExt.id}`);
-  }
-
-  log.info("Uploading new extension...");
+  log.info("Uploading New Extension...");
   const uploaded = await uploadExtension(zip.path, zip.name, apiKey);
   log.ok(`Uploaded: ${uploaded.id}`);
 
@@ -241,12 +236,10 @@ if (import.meta.main) {
 
   if (args.help) {
     console.log(`
-sync.ts — Sync extension to Browserbase
+sync.ts — Sync Extension to Browserbase
 
 USAGE
-  deno task sync [OPTIONS]
-  just ext-sync [OPTIONS]
-
+  bernays sync [OPTIONS]
 OPTIONS
   --silent, -s   Suppress non-error output
   --help, -h     Show this help

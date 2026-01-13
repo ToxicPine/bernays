@@ -11,15 +11,11 @@ import type {
   TaggedBridgeEvent,
 } from "./types.ts";
 
-// ============================================================================
 // Re-exports
-// ============================================================================
 
 export * from "./types.ts";
 
-// ============================================================================
 // Browser Pool Service
-// ============================================================================
 
 /**
  * Manages browser lifecycle and communication.
@@ -56,9 +52,7 @@ export class BrowserPool extends Context.Tag("BrowserPool")<
   BrowserPoolService
 >() {}
 
-// ============================================================================
 // Extension Store Service
-// ============================================================================
 
 /**
  * Manages extension metadata.
@@ -79,9 +73,7 @@ export class ExtensionStore extends Context.Tag("ExtensionStore")<
   ExtensionStoreService
 >() {}
 
-// ============================================================================
 // Browser Backend
-// ============================================================================
 
 /**
  * Browser backend bundles pool and extension store together.
@@ -105,9 +97,7 @@ export const BrowserBackendLive = (
     Layer.succeed(ExtensionStore, backend.extensions),
   );
 
-// ============================================================================
 // Backend Implementations
-// ============================================================================
 
 export { makeBrowserbaseBackend } from "./browserbase/mod.ts";
 // Local backend is a placeholder for now

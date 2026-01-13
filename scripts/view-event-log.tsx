@@ -587,13 +587,13 @@ const main = async (): Promise<void> => {
     console.log(`view-event-log.tsx — Event Log Viewer
 
 USAGE
-  just event-logs [COMMAND]
+  bernays event-logs [OPTIONS]
 
 COMMANDS
-  (none)              Interactive TUI mode
-  list [--limit N]    List recent events
-  view <eventId>      View specific event
-  export <csv|json>   Export to stdout`);
+  (none)              Interactive TUI Mode
+  list [--limit N]    List Recent Events
+  view <eventId>      View Specific Event
+  export <csv|json>   Export to Stdout`);
     return;
   }
 

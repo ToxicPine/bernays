@@ -5,9 +5,7 @@ import { Ok } from "$/core/result.ts";
 import type { EventStore, EventStoreQuery, StorableEvent } from "./mod.ts";
 import { createEventIndex, indexEvent } from "./utils.ts";
 
-// ============================================================================
 // In-Memory Implementation
-// ============================================================================
 
 /**
  * Create an in-memory event store.

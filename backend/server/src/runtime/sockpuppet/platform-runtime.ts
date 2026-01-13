@@ -12,9 +12,7 @@ import type { BaseIntent, PlatformDefinition } from "$/platforms/mod.ts";
 import { makeProjection } from "$/projections/projection.ts";
 import { Platform, type PlatformServiceInterface } from "./services.ts";
 
-// ============================================================================
 // Platform Runtime Configuration
-// ============================================================================
 
 export interface PlatformRuntimeConfig<
   TScope extends Scope,
@@ -41,9 +39,7 @@ export interface PlatformRuntimeConfig<
   readonly browserPool: BrowserPoolService;
 }
 
-// ============================================================================
 // Platform Layer
-// ============================================================================
 
 /**
  * Create a Platform service implementation from config.

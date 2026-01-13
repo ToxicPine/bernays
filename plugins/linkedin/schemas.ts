@@ -19,9 +19,7 @@ import {
   SyncConversationsBase,
 } from "@bernays/server/intents";
 
-// ============================================================================
 // Scope
-// ============================================================================
 
 export const LINKEDIN_SCOPE = Scope("linkedin");
 export type LinkedInScope = typeof LINKEDIN_SCOPE;
@@ -30,9 +28,7 @@ const linkedInScopeSchema = z.literal("linkedin").transform(() =>
   LINKEDIN_SCOPE
 );
 
-// ============================================================================
 // LinkedIn Anchor
-// ============================================================================
 
 export const LinkedInAnchorSchema = z.object({
   conversationId: z.string(),
@@ -41,9 +37,7 @@ export const LinkedInAnchorSchema = z.object({
 
 export type LinkedInAnchor = z.infer<typeof LinkedInAnchorSchema>;
 
-// ============================================================================
 // Event Schemas
-// ============================================================================
 
 export const LinkedInAuthObservedSchema = CorrelationMetadataSchema.extend({
   scope: linkedInScopeSchema,
@@ -259,9 +253,7 @@ export const LinkedInEventSchema = z.discriminatedUnion("type", [
 
 export type LinkedInEvent = z.infer<typeof LinkedInEventSchema>;
 
-// ============================================================================
 // Intent Schemas
-// ============================================================================
 
 const LinkedInIntentBase = z.object({
   scope: linkedInScopeSchema,

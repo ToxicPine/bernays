@@ -10,18 +10,14 @@ import {
 } from "./mod.ts";
 import { createEventIndex, indexEvent } from "./utils.ts";
 
-// ============================================================================
 // File-Backed Implementation Options
-// ============================================================================
 
 export interface FileEventStoreOptions {
   readonly path: string;
   readonly flushIntervalMs?: number;
 }
 
-// ============================================================================
 // File-Backed Implementation
-// ============================================================================
 
 /**
  * Create a file-backed event store.

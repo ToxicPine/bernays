@@ -4,9 +4,7 @@
 import { z } from "@zod/zod";
 import type { BrowserConfigId, ExtensionId } from "$/core/branded.ts";
 
-// ============================================================================
 // Bridge Error
-// ============================================================================
 
 export const BridgeErrorSchema = z.object({
   code: z.string(),
@@ -16,9 +14,7 @@ export const BridgeErrorSchema = z.object({
 
 export type BridgeError = z.infer<typeof BridgeErrorSchema>;
 
-// ============================================================================
 // Bridge Message (for parsing incoming messages from extensions)
-// ============================================================================
 
 export const BridgeMessageSchema = z.object({
   v: z.literal(1),
@@ -31,9 +27,7 @@ export const BridgeMessageSchema = z.object({
 
 export type BridgeMessage = z.infer<typeof BridgeMessageSchema>;
 
-// ============================================================================
 // Bridge Event
-// ============================================================================
 
 /**
  * Event emitted by browser extensions.
@@ -54,9 +48,7 @@ export interface TaggedBridgeEvent {
   readonly event: BridgeEvent;
 }
 
-// ============================================================================
 // Browser Error
-// ============================================================================
 
 export type BrowserErrorCode =
   | "NotFound"
@@ -79,9 +71,7 @@ export const browserError = (
   cause?: unknown,
 ): BrowserError => ({ _tag: "BrowserError", code, message, cause });
 
-// ============================================================================
 // Extension Metadata
-// ============================================================================
 
 /**
  * Metadata about a registered extension.
@@ -94,9 +84,7 @@ export interface ExtensionMeta {
   readonly uri: string; // Where to load from (local path, URL, etc.)
 }
 
-// ============================================================================
 // Browser Config
-// ============================================================================
 
 /**
  * Browser configuration - how to connect to a persistent browser session.

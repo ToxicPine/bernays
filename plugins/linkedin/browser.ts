@@ -3,15 +3,11 @@
 
 import type { BaseBoundBrowser } from "@bernays/server/views";
 
-// ============================================================================
 // Auth Status
-// ============================================================================
 
 export type LinkedInAuthStatus = "authenticated" | "expired" | "unknown";
 
-// ============================================================================
 // LinkedIn Browser
-// ============================================================================
 
 /**
  * LinkedIn-specific browser view.

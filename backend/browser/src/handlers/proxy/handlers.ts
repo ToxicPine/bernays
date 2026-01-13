@@ -14,9 +14,7 @@ declare global {
   }
 }
 
-// ============================================================================
 // Check Current IP
-// ============================================================================
 
 interface IpCheckResult {
   ip: string;
@@ -114,9 +112,7 @@ window.__registerCommand<void, IpCheckResult>("proxy:checkIp", async () => {
   }
 });
 
-// ============================================================================
 // Verify Proxy Connectivity
-// ============================================================================
 
 interface ProxyVerifyResult {
   connected: boolean;
@@ -205,9 +201,7 @@ window.__registerCommand<
   }
 });
 
-// ============================================================================
 // Test Proxy for Platform Access
-// ============================================================================
 
 interface PlatformAccessResult {
   accessible: boolean;
@@ -283,9 +277,7 @@ window.__registerCommand<
   }
 });
 
-// ============================================================================
 // Get Network Fingerprint
-// ============================================================================
 
 interface NetworkFingerprint {
   userAgent: string;

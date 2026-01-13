@@ -17,9 +17,7 @@ declare global {
   }
 }
 
-// ============================================================================
 // Selectors
-// ============================================================================
 
 const SELECTORS = {
   // Auth Indicators
@@ -33,9 +31,7 @@ const SELECTORS = {
   dmMessage: '[data-testid="messageEntry"]',
 } as const;
 
-// ============================================================================
 // Helpers
-// ============================================================================
 
 const extractCurrentUserId = (): string | undefined => {
   const profileLink = document.querySelector(SELECTORS.profileLink);
@@ -53,9 +49,7 @@ const isLoggedIn = (): boolean => {
   );
 };
 
-// ============================================================================
 // Auth Observer
-// ============================================================================
 
 interface XAuthParams {
   platform: string;
@@ -174,9 +168,7 @@ window.__registerCommand<XAuthParams, XAuthResult>(
   },
 );
 
-// ============================================================================
 // Messages Observer
-// ============================================================================
 
 interface XMessagesParams {
   platform: string;
@@ -252,9 +244,7 @@ window.__registerCommand<XMessagesParams, XMessagesResult>(
   },
 );
 
-// ============================================================================
 // Proactive Auth Monitoring
-// ============================================================================
 
 const setupAuthMonitor = (): void => {
   let lastAuthState = isLoggedIn();

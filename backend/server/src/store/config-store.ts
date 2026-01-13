@@ -12,9 +12,7 @@ import {
 import { createInMemoryStore } from "$/core/store-factory.ts";
 import type { BrowserConfig, ProxyConfig } from "$/backend/types.ts";
 
-// ============================================================================
 // Error Types
-// ============================================================================
 
 export type ConfigStoreErrorCode =
   | "NotFound"
@@ -34,9 +32,7 @@ export const configStoreError = (
   cause?: unknown,
 ): ConfigStoreError => ({ _tag: "ConfigStoreError", code, message, cause });
 
-// ============================================================================
 // ConfigStore Service
-// ============================================================================
 
 export interface ConfigStoreService {
   readonly get: (
@@ -71,9 +67,7 @@ export class ConfigStore extends Context.Tag("ConfigStore")<
   ConfigStoreService
 >() {}
 
-// ============================================================================
 // In-Memory Implementation
-// ============================================================================
 
 /**
  * Create an in-memory config store.
@@ -114,9 +108,7 @@ export const makeInMemoryConfigStoreLayer = (
 ): Layer.Layer<ConfigStore> =>
   Layer.succeed(ConfigStore, createInMemoryConfigStore(initial));
 
-// ============================================================================
 // PostgreSQL Implementation
-// ============================================================================
 
 /**
  * PostgreSQL-backed config store.

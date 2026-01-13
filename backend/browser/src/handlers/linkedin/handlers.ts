@@ -14,9 +14,7 @@ declare global {
   }
 }
 
-// ============================================================================
 // Helpers
-// ============================================================================
 
 const extractCsrfToken = (): string => {
   const cookies = document.cookie.split("; ");
@@ -41,9 +39,7 @@ const extractCurrentUserId = (): string | undefined => {
   return undefined;
 };
 
-// ============================================================================
 // Auth Check
-// ============================================================================
 
 window.__registerCommand<
   void,
@@ -79,9 +75,7 @@ window.__registerCommand<
   }
 });
 
-// ============================================================================
 // Send Message
-// ============================================================================
 
 window.__registerCommand<
   { recipientId: string; content: string },
@@ -157,9 +151,7 @@ window.__registerCommand<
   }
 });
 
-// ============================================================================
 // Sync Conversations
-// ============================================================================
 
 window.__registerCommand<
   { memberId: string; since?: string; cursor?: string },
@@ -214,9 +206,7 @@ window.__registerCommand<
   }
 });
 
-// ============================================================================
 // People Search
-// ============================================================================
 
 window.__registerCommand<
   { query: string; filters?: Record<string, unknown>; cursor?: string },
@@ -275,9 +265,7 @@ window.__registerCommand<
   }
 });
 
-// ============================================================================
 // Follow
-// ============================================================================
 
 window.__registerCommand<
   { targetUserId: string },
@@ -326,9 +314,7 @@ window.__registerCommand<
   }
 });
 
-// ============================================================================
 // Connect
-// ============================================================================
 
 window.__registerCommand<
   { targetUserId: string; note?: string },
@@ -387,9 +373,7 @@ window.__registerCommand<
   }
 });
 
-// ============================================================================
 // Withdraw Invitation
-// ============================================================================
 
 window.__registerCommand<
   { invitationId: string; targetUserId: string },
@@ -445,9 +429,7 @@ window.__registerCommand<
   }
 });
 
-// ============================================================================
 // View Profile
-// ============================================================================
 
 window.__registerCommand<
   { targetUserId: string; profileUrl?: string; fetchData?: boolean },
@@ -508,9 +490,7 @@ window.__registerCommand<
   }
 });
 
-// ============================================================================
 // Accept Invitation
-// ============================================================================
 
 window.__registerCommand<
   { invitationId: string; userId: string },
@@ -567,9 +547,7 @@ window.__registerCommand<
   }
 });
 
-// ============================================================================
 // Reject Invitation
-// ============================================================================
 
 window.__registerCommand<
   { invitationId: string; userId: string },

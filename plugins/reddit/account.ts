@@ -14,9 +14,7 @@ import {
 } from "@bernays/server/views";
 import { createInMemoryStore } from "@bernays/server/core";
 
-// ============================================================================
 // Reddit Account
-// ============================================================================
 
 /**
  * Reddit account - extends BaseAccount with Reddit-specific fields.
@@ -31,9 +29,7 @@ export interface RedditAccount extends BaseAccount {
   readonly accountCreatedAt: string;
 }
 
-// ============================================================================
 // Reddit Account Store
-// ============================================================================
 
 export interface RedditAccountStoreService {
   readonly get: (
@@ -49,9 +45,7 @@ export class RedditAccountStore extends Context.Tag("RedditAccountStore")<
   RedditAccountStoreService
 >() {}
 
-// ============================================================================
 // In-Memory Implementation
-// ============================================================================
 
 /**
  * Create an in-memory Reddit account store.
@@ -69,9 +63,7 @@ export const makeInMemoryRedditAccountStoreLayer = (
     createInMemoryRedditAccountStore(initial),
   );
 
-// ============================================================================
 // PostgreSQL Implementation
-// ============================================================================
 
 export interface PostgresRedditAccountStoreOptions {
   readonly connectionString: string;

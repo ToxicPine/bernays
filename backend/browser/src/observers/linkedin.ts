@@ -16,9 +16,7 @@ declare global {
   }
 }
 
-// ============================================================================
 // Helpers
-// ============================================================================
 
 const extractCsrfToken = (): string => {
   const cookies = document.cookie.split("; ");
@@ -60,9 +58,7 @@ const checkAuthCookie = (): boolean => {
   return document.cookie.includes("li_at");
 };
 
-// ============================================================================
 // Auth Observer
-// ============================================================================
 
 interface LinkedInAuthParams {
   platform: string;
@@ -182,9 +178,7 @@ window.__registerCommand<LinkedInAuthParams, LinkedInAuthResult>(
   },
 );
 
-// ============================================================================
 // Messages Observer
-// ============================================================================
 
 interface LinkedInMessagesParams {
   platform: string;
@@ -282,9 +276,7 @@ window.__registerCommand<LinkedInMessagesParams, LinkedInMessagesResult>(
   },
 );
 
-// ============================================================================
 // Proactive Auth Monitoring
-// ============================================================================
 
 // Set up a MutationObserver to detect auth state changes
 const setupAuthMonitor = (): void => {

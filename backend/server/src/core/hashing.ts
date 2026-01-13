@@ -5,9 +5,7 @@
 import { encodeBase64Url } from "@std/encoding/base64url";
 import type { Scope } from "./branded.ts";
 
-// ============================================================================
 // Core Hash Function
-// ============================================================================
 
 /**
  * Generate a deterministic, URL-safe hash from parts.
@@ -26,9 +24,7 @@ export const hash = async (...parts: string[]): Promise<string> => {
   return base64.slice(0, 22);
 };
 
-// ============================================================================
 // Canonical Message ID
-// ============================================================================
 
 export interface MessageIdParams {
   readonly scope: Scope;
@@ -54,9 +50,7 @@ export const messageId = (params: MessageIdParams): Promise<string> =>
     params.timestamp,
   );
 
-// ============================================================================
 // Canonical Thread ID
-// ============================================================================
 
 export interface ThreadIdParams {
   readonly scope: Scope;
@@ -69,9 +63,7 @@ export interface ThreadIdParams {
 export const threadId = (params: ThreadIdParams): Promise<string> =>
   hash("thread", params.scope, params.anchor);
 
-// ============================================================================
 // Content Hash
-// ============================================================================
 
 /**
  * Hash message content for deduplication.
@@ -82,9 +74,7 @@ export const contentHash = async (content: string): Promise<string> => {
   return hash("content", normalized);
 };
 
-// ============================================================================
 // Action ID
-// ============================================================================
 
 /**
  * Generate a unique action ID for tracking action lifecycle.
@@ -92,9 +82,7 @@ export const contentHash = async (content: string): Promise<string> => {
  */
 export const actionId = (): string => crypto.randomUUID();
 
-// ============================================================================
 // Event ID
-// ============================================================================
 
 /**
  * Generate a unique event ID.
@@ -102,9 +90,7 @@ export const actionId = (): string => crypto.randomUUID();
  */
 export const eventId = (): string => crypto.randomUUID();
 
-// ============================================================================
 // Correlation ID
-// ============================================================================
 
 /**
  * Generate a new correlation ID for tracking related events.
@@ -112,9 +98,7 @@ export const eventId = (): string => crypto.randomUUID();
  */
 export const correlationId = (): string => crypto.randomUUID();
 
-// ============================================================================
 // Dedupe Key
-// ============================================================================
 
 /**
  * Generate a dedupe key for intent idempotency.

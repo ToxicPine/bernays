@@ -120,9 +120,7 @@ window.__bridgeEmit = async (
   await window.__bridgeEvent(event);
 };
 
-// ============================================================================
 // Observer Context and Emission
-// ============================================================================
 
 window.__observerContext = {
   browserId: "unknown",
@@ -156,9 +154,7 @@ window.__registerCommand<ObserverContext, void>(
   },
 );
 
-// ============================================================================
 // Test Command
-// ============================================================================
 
 interface TestEchoParams {
   echoId: string;

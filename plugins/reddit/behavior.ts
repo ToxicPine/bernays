@@ -40,15 +40,11 @@ import type { RedditAccount } from "./account.ts";
 import type { RedditAuthStatus, RedditBrowser } from "./browser.ts";
 import { REDDIT_SCOPE } from "./schemas.ts";
 
-// ============================================================================
 // Type Alias
-// ============================================================================
 
 type RedditScope = typeof REDDIT_SCOPE;
 
-// ============================================================================
 // Helper Functions
-// ============================================================================
 
 /**
  * Convert graph nodes to MessageView format
@@ -90,9 +86,7 @@ const toRedditThread = (
   };
 };
 
-// ============================================================================
 // Reddit Behavior
-// ============================================================================
 
 export const redditBehavior: PlatformBehavior<
   RedditScope,

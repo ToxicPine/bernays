@@ -5,10 +5,6 @@ import { z } from "@zod/zod";
 import { StorableEventSchema } from "$/store/mod.ts";
 import type { CausationId, CorrelationId, IntentId } from "$/core/branded.ts";
 
-// ============================================================================
-// Correlation Metadata Schema
-// ============================================================================
-
 /**
  * Extended event schema with correlation/causation for tracing.
  * All domain events should extend this schema.

@@ -19,18 +19,14 @@ import {
   SyncConversationsBase,
 } from "@bernays/server/intents";
 
-// ============================================================================
 // Scope
-// ============================================================================
 
 export const REDDIT_SCOPE = Scope("reddit");
 export type RedditScope = typeof REDDIT_SCOPE;
 
 const redditScopeSchema = z.literal("reddit").transform(() => REDDIT_SCOPE);
 
-// ============================================================================
 // Reddit Anchor
-// ============================================================================
 
 export const RedditAnchorSchema = z.object({
   roomId: z.string(),
@@ -39,9 +35,7 @@ export const RedditAnchorSchema = z.object({
 
 export type RedditAnchor = z.infer<typeof RedditAnchorSchema>;
 
-// ============================================================================
 // Event Schemas
-// ============================================================================
 
 export const RedditAuthObservedSchema = CorrelationMetadataSchema.extend({
   scope: redditScopeSchema,
@@ -153,9 +147,7 @@ export const RedditEventSchema = z.discriminatedUnion("type", [
 
 export type RedditEvent = z.infer<typeof RedditEventSchema>;
 
-// ============================================================================
 // Intent Schemas
-// ============================================================================
 
 const RedditIntentBase = z.object({
   scope: redditScopeSchema,

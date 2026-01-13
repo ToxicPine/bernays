@@ -1,25 +1,14 @@
 // src/events/mod.ts
 // Event sourcing definitions barrel
 
-// ============================================================================
-// Storage Types
-// ============================================================================
-
 export { type StorableEvent, StorableEventSchema } from "$/store/mod.ts";
-
-// ============================================================================
-// Metadata
-// ============================================================================
 
 export {
   type CorrelationMetadata,
   CorrelationMetadataSchema,
 } from "./metadata.ts";
 
-// ============================================================================
 // Core Events (scope: "core")
-// ============================================================================
-
 export {
   type AuthStatusChangedEvent,
   AuthStatusChangedEventSchema,
@@ -47,10 +36,7 @@ export {
   UIChangedEventSchema,
 } from "./core.ts";
 
-// ============================================================================
 // Journal Events (scope: "journal")
-// ============================================================================
-
 export {
   type JournalEntry,
   JournalEntrySchema,
@@ -58,10 +44,7 @@ export {
   JournalEventSchema,
 } from "./journal.ts";
 
-// ============================================================================
 // Event Templates
-// ============================================================================
-
 export {
   AnchorMessageObservedBase,
   type AnchorMessageObservedBaseType,

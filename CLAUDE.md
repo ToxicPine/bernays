@@ -321,11 +321,23 @@ const repliedThreads = new Set(
 );
 ```
 
-### 10. Platform-Specific Account Storage
+### 10. Accounts Are Bindings, Not Metadata
 
-Each platform defines its own account type and storage. LinkedIn accounts have
-different fields than X accounts. The core doesn't impose a monolithic
-`OwnedAccount` type.
+An account is a **binding** between a persistent platform ID and browser sessions.
+It contains only:
+
+- `id`: The platform's persistent identifier (LinkedIn member ID, X user ID)
+- `browserBindings`: Which browsers are logged into this account
+
+**Accounts do NOT store:**
+
+- Display names, handles, profile URLs (can change, observed from events)
+- Follower counts, verification status (dynamic, observed from events)
+- Rate limits, invite limits (platform-imposed, derived from rate limit events)
+- Any metadata the platform controls
+
+All dynamic platform state is derived from the event stream. The account store
+only tracks "this ID exists and uses these browsers."
 
 ---
 
@@ -355,7 +367,7 @@ Playwright loads from filesystem).
 | ------------------------- | ------------------------------------------------------------ |
 | `StorableEvent`           | Base event shape: `scope`, `type`, `eventId`, `timestamp`    |
 | `BaseIntent<TScope>`      | Base intent shape: `scope`, `type`                           |
-| `BaseAccount`             | Base account shape: `id`, `browserBindings`                  |
+| `BaseAccount`             | Complete account: `id` + `browserBindings` (no other fields) |
 | `BaseBoundBrowser`        | Base browser view: `configId`, `isRunning`, `metadata`       |
 | `Projection<TEvent>`      | Type-safe filtered access to events by scope                 |
 | `PlatformDefinition<...>` | Registration unit: schemas + behavior for a platform         |
@@ -460,11 +472,11 @@ They serve different purposes and must not be confused.
 
 ### Creating a New Platform Definition
 
-1. Define schemas in `platforms/{platform}/schemas.ts`
-2. Implement behavior in `platforms/{platform}/behavior.ts`
-3. Define views in `platforms/{platform}/views.ts`
-4. Define account type in `platforms/{platform}/account.ts`
-5. Export platform definition in `platforms/{platform}/mod.ts`
+1. Define schemas in `plugins/{platform}/schemas.ts`
+2. Implement behavior in `plugins/{platform}/behavior.ts`
+3. Define views in `plugins/{platform}/views.ts`
+4. Create account store in `plugins/{platform}/account.ts` (uses BaseAccount—no custom fields)
+5. Export platform definition in `plugins/{platform}/mod.ts`
 6. Register in `main.ts` PLATFORMS array
 
 ### Adding a New Event Type
@@ -480,3 +492,20 @@ They serve different purposes and must not be confused.
 2. Extend in platform's `schemas.ts`
 3. Add to platform's intent union schema
 4. Implement handling in behavior's `execute` function
+
+### Agents
+
+Specialized agents in `.claude/agents/` handle cross-cutting concerns:
+
+| Agent | Use When |
+|-------|----------|
+| `plugin-scaffold` | Creating new platform plugins |
+| `deploy-orchestrator` | Changing deployment backends, updating Justfile |
+| `hack-tracker` | Documenting deviations in HACKS.md |
+| `test-architect` | Writing tests for store, backend, projections |
+| `codebase-auditor` | Checking layer boundaries, import discipline |
+| `campaign-planner` | Planning sockpuppet campaigns |
+| `proxy-setup` | Configuring Tailscale proxy infrastructure |
+
+When changing infrastructure (DB, browser backend), check `deploy-orchestrator` and
+`hack-tracker` agents for script dependencies that may need updates.

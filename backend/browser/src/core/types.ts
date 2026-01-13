@@ -1,17 +1,13 @@
 // packages/browser/src/core/types.ts
 
-// ============================================================================
 // Observer Context
-// ============================================================================
 
 export interface ObserverContext {
   browserId: string;
   tabId: string;
 }
 
-// ============================================================================
 // Bridge Message Types
-// ============================================================================
 
 export type BridgeMessage = {
   v: 1;
@@ -28,9 +24,7 @@ export interface BridgeError {
   details?: unknown;
 }
 
-// ============================================================================
 // Command Types
-// ============================================================================
 
 export type CommandResult<T> =
   | { ok: true; value: T }
@@ -40,9 +34,7 @@ export type CommandHandler<TReq = unknown, TRes = unknown> = (
   payload: TReq,
 ) => Promise<CommandResult<TRes>>;
 
-// ============================================================================
 // Window Globals Declaration
-// ============================================================================
 
 declare global {
   interface Window {

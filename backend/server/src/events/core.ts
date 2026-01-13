@@ -12,19 +12,11 @@ export { CORE_SCOPE };
 // Helper for scope literal with transform
 const coreScopeSchema = z.literal("core").transform(() => CORE_SCOPE);
 
-// ============================================================================
-// Error Schema
-// ============================================================================
-
 export const ErrorSchema = z.object({
   code: z.string(),
   message: z.string(),
   details: z.unknown().optional(),
 });
-
-// ============================================================================
-// Intent Lifecycle Events
-// ============================================================================
 
 export const IntentReceivedEventSchema = CorrelationMetadataSchema.extend({
   scope: coreScopeSchema,
@@ -66,10 +58,6 @@ export const IntentAbandonedEventSchema = CorrelationMetadataSchema.extend({
   finalError: ErrorSchema.optional(),
 });
 
-// ============================================================================
-// Browser Command Events
-// ============================================================================
-
 export const BrowserCommandSentEventSchema = CorrelationMetadataSchema.extend({
   scope: coreScopeSchema,
   type: z.literal("BrowserCommandSent"),
@@ -98,10 +86,6 @@ export const BrowserCommandFailedEventSchema = CorrelationMetadataSchema.extend(
   },
 );
 
-// ============================================================================
-// Auth Status Events
-// ============================================================================
-
 export const AuthStatusChangedEventSchema = CorrelationMetadataSchema.extend({
   scope: coreScopeSchema,
   type: z.literal("AuthStatusChanged"),
@@ -109,10 +93,6 @@ export const AuthStatusChangedEventSchema = CorrelationMetadataSchema.extend({
   status: z.enum(["signed-in", "signed-out", "session-expired"]),
   userId: z.string().optional(),
 });
-
-// ============================================================================
-// Failure Observation Events
-// ============================================================================
 
 export const RateLimitDetectedEventSchema = CorrelationMetadataSchema.extend({
   scope: coreScopeSchema,
@@ -127,10 +107,6 @@ export const UIChangedEventSchema = CorrelationMetadataSchema.extend({
   selector: z.string(),
   description: z.string().optional(),
 });
-
-// ============================================================================
-// Discriminated Union
-// ============================================================================
 
 export const CoreEventSchema = z.discriminatedUnion("type", [
   IntentReceivedEventSchema,
@@ -147,10 +123,6 @@ export const CoreEventSchema = z.discriminatedUnion("type", [
 ]);
 
 export type CoreEvent = z.infer<typeof CoreEventSchema>;
-
-// ============================================================================
-// Type Exports
-// ============================================================================
 
 export type IntentReceivedEvent = z.infer<typeof IntentReceivedEventSchema>;
 export type IntentDispatchStartedEvent = z.infer<

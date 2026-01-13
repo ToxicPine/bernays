@@ -533,7 +533,14 @@ const App: FC<AppProps> = ({ initialPlatform, accountStores, eventStore }) => {
 
 const main = async (): Promise<void> => {
   if (Deno.args.includes("-h") || Deno.args.includes("--help")) {
-    console.log(`view-inbox.tsx — Inbox Viewer\n\nUsage: just inbox [linkedin|x]`);
+    console.log(`view-inbox.tsx — Inbox Viewer
+      
+USAGE: bernays inbox [PLATFORM]
+
+PLATFORMS:
+  linkedin                   LinkedIn
+  x                          X (Twitter)
+`);
     return;
   }
 
@@ -541,10 +548,11 @@ const main = async (): Promise<void> => {
 
   let initialPlatform: Platform | undefined;
   const arg = Deno.args[0]?.toLowerCase();
+  
   if (arg === "linkedin") initialPlatform = "linkedin";
-  else if (arg === "x" || arg === "twitter") initialPlatform = "x";
+  else if (arg === "x") initialPlatform = "x";
   else if (arg) {
-    console.error(`Unknown platform: ${arg}`);
+    console.error(`Unknown Platform: ${arg}`);
     Deno.exit(1);
   }
 

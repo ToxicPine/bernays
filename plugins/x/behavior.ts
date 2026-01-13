@@ -36,15 +36,11 @@ import type { XAccount } from "./account.ts";
 import type { XAuthStatus, XBrowser } from "./browser.ts";
 import { X_SCOPE } from "./schemas.ts";
 
-// ============================================================================
 // Type Alias
-// ============================================================================
 
 type XScope = typeof X_SCOPE;
 
-// ============================================================================
 // Helper Functions
-// ============================================================================
 
 /**
  * Convert graph nodes to MessageView format
@@ -86,9 +82,7 @@ const toXThread = (
   };
 };
 
-// ============================================================================
 // X Behavior
-// ============================================================================
 
 export const xBehavior: PlatformBehavior<
   XScope,

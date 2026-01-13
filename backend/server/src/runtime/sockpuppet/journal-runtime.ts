@@ -26,19 +26,11 @@ import {
   JournalEntrySchema,
 } from "$/events/journal.ts";
 
-// ============================================================================
-// Journal Runtime Configuration
-// ============================================================================
-
 export interface JournalRuntimeConfig {
   readonly accountId: AccountId;
   readonly eventStore: EventStore<StorableEvent>;
   readonly generateCorrelationId?: () => CorrelationId;
 }
-
-// ============================================================================
-// Journal Service Implementation
-// ============================================================================
 
 /**
  * Create a Journal service that uses the global event store.
@@ -61,9 +53,7 @@ const makeJournalService = (config: JournalRuntimeConfig): JournalService => {
           timestamp: new Date().toISOString(),
           accountId,
           kind: input.kind,
-          // Transform string threadId to branded ThreadId type
           ...(input.threadId ? { threadId: ThreadId(input.threadId) } : {}),
-          // Spread any additional fields from input
           ...Object.fromEntries(
             Object.entries(input).filter(
               ([key]) => key !== "kind" && key !== "threadId",
@@ -112,20 +102,12 @@ const makeJournalService = (config: JournalRuntimeConfig): JournalService => {
   };
 };
 
-// ============================================================================
-// Journal Layer
-// ============================================================================
-
 /**
  * Create a Layer that provides the Journal service using the global event store.
  */
 export const makeJournalLayer = (
   config: JournalRuntimeConfig,
 ): Layer.Layer<Journal> => Layer.succeed(Journal, makeJournalService(config));
-
-// ============================================================================
-// In-Memory Implementation (for testing)
-// ============================================================================
 
 /**
  * Create an in-memory Journal layer for testing.

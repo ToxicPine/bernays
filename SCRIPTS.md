@@ -31,6 +31,7 @@ scripts/
 ├── sync-extension.ts       # Upload extension to Browserbase
 ├── transition-extension.ts # Update browser configs, delete old extension
 ├── deploy-application.ts   # Full deployment orchestration
+├── load-accounts.ts        # CLI: Import/export accounts from TOML
 ├── view-inbox.tsx          # TUI: View platform inbox
 ├── view-event-log.tsx      # TUI: Query event log
 ├── manage-browser-configs.tsx  # TUI: CRUD for browser configs
@@ -40,6 +41,7 @@ scripts/
     ├── shell.ts            # Command execution
     ├── tui.ts              # Terminal I/O (secrets, confirm)
     ├── filters.ts          # Predicates for event filtering
+    ├── account-schemas.ts  # Zod schemas for TOML account validation
     ├── ink.tsx             # Ink components and hooks
     ├── hooks.tsx           # List navigation, pagination
     ├── keybindings.tsx     # Declarative keybinding system
@@ -49,6 +51,39 @@ scripts/
 **Two tiers:**
 - CLI scripts (`.ts`) use `lib/log`, `lib/env`, `lib/shell`, `lib/tui`
 - TUI scripts (`.tsx`) additionally use `lib/ink`, `lib/hooks`, `lib/keybindings`, `lib/providers`
+
+## Account Management
+
+The `load-accounts.ts` script manages account bindings via TOML files:
+
+```bash
+# Validate TOML structure
+just accounts validate linkedin accounts/linkedin.toml
+
+# Import accounts to database
+just accounts import linkedin accounts/linkedin.toml
+
+# Export accounts from database
+just accounts export linkedin > accounts/linkedin-backup.toml
+```
+
+**TOML Structure:**
+
+```toml
+# accounts/linkedin.toml
+[[accounts]]
+id = "alice-linkedin-member-id"
+
+  [[accounts.browserBindings]]
+  configId = "browser_alice"
+
+  [accounts.browserBindings.metadata]
+  deviceType = "desktop"
+```
+
+Accounts contain only `id` (persistent platform identifier) and `browserBindings` (which browsers are logged in). All dynamic platform state (display names, follower counts, rate limits, etc.) is derived from events, not stored in account definitions.
+
+Example files in `accounts/` directory.
 
 ## Key Architecture Points
 

@@ -11,9 +11,7 @@ import type { Result } from "$/core/result.ts";
 import { Err, Ok } from "$/core/result.ts";
 import { logger } from "$/logger.ts";
 
-// ============================================================================
 // Types
-// ============================================================================
 
 export type BridgeEventHandler = (event: BridgeEvent) => void;
 
@@ -36,9 +34,7 @@ interface PendingRequest {
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
-// ============================================================================
 // Implementation
-// ============================================================================
 
 export const createMasterBridge = async (page: Page): Promise<MasterBridge> => {
   const pendingRequests = new Map<string, PendingRequest>();

@@ -21,9 +21,7 @@ export {
   type PlatformService,
 } from "./service.ts";
 
-// ============================================================================
 // Base Intent
-// ============================================================================
 
 /**
  * Base intent shape - all platform intents must satisfy this.
@@ -33,9 +31,7 @@ export interface BaseIntent<TScope extends Scope = Scope> {
   readonly type: string;
 }
 
-// ============================================================================
 // Execute Error
-// ============================================================================
 
 export type ExecuteErrorCode = string & { readonly _brand: "ExecuteErrorCode" };
 
@@ -56,9 +52,7 @@ export const executeError = (
   cause?: unknown,
 ): ExecuteError => ({ _tag: "ExecuteError", code, message, cause });
 
-// ============================================================================
 // Platform Behavior
-// ============================================================================
 
 /**
  * PlatformBehavior encapsulates pure logic for a platform.
@@ -145,9 +139,7 @@ export interface PlatformBehavior<
   >;
 }
 
-// ============================================================================
 // Platform Definition
-// ============================================================================
 
 /**
  * PlatformDefinition is the registration unit for a platform.
@@ -188,9 +180,7 @@ export interface PlatformDefinition<
   >;
 }
 
-// ============================================================================
 // Type-Erased Platform
-// ============================================================================
 
 /**
  * Type-erased platform definition for schema collection.
@@ -207,9 +197,7 @@ export type AnyPlatform = PlatformDefinition<
   BaseBoundBrowser
 >;
 
-// ============================================================================
 // Platform Registry
-// ============================================================================
 
 /**
  * Collects platform definitions and provides schema lookup.

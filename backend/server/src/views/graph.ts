@@ -13,9 +13,7 @@ import { z } from "@zod/zod";
 import { type CanonicalId, type Scope, ThreadId } from "$/core/branded.ts";
 import { type StorableEvent, StorableEventSchema } from "$/store/mod.ts";
 
-// ============================================================================
 // Graph Message Schemas
-// ============================================================================
 
 /**
  * Schema for anchor messages in the graph.
@@ -83,9 +81,7 @@ export const GraphEventSchema = z.discriminatedUnion("kind", [
 ]);
 export type GraphEvent = z.infer<typeof GraphEventSchema>;
 
-// ============================================================================
 // Graph Node
-// ============================================================================
 
 /**
  * A node in the message graph.
@@ -97,9 +93,7 @@ export interface GraphNode<TMessage extends GraphMessage = GraphMessage> {
   readonly editedContent?: string;
 }
 
-// ============================================================================
 // Thread Graph
-// ============================================================================
 
 /**
  * A thread derived from the message graph.
@@ -119,9 +113,7 @@ export interface ThreadGraph<
   readonly lastActivity: string;
 }
 
-// ============================================================================
 // Graph State (internal)
-// ============================================================================
 
 interface NodeState {
   readonly message: GraphMessage;
@@ -135,9 +127,7 @@ interface GraphState {
   readonly children: Map<string, string[]>;
 }
 
-// ============================================================================
 // Graph Builder
-// ============================================================================
 
 /**
  * Build thread graphs from a sequence of events.
@@ -277,9 +267,7 @@ export function findThreadRoot(
   return walkToRoot(nodes, messageId, new Set());
 }
 
-// ============================================================================
 // Helpers for Converting Graph to Views
-// ============================================================================
 
 /**
  * Convert graph nodes to message views (for adapter use).
@@ -312,9 +300,7 @@ export interface GraphNodeView {
   readonly predecessorId?: CanonicalId;
 }
 
-// ============================================================================
 // Internal Helpers
-// ============================================================================
 
 const collectThreadNodes = (
   nodes: Map<string, NodeState>,

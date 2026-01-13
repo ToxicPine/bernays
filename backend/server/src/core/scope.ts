@@ -3,19 +3,11 @@
 
 import { Scope } from "./branded.ts";
 
-// ============================================================================
-// Known Scopes
-// ============================================================================
-
 /** Core framework scope - for runtime lifecycle events */
 export const CORE_SCOPE = Scope("core");
 
 /** Journal scope - for sockpuppet journal entries */
 export const JOURNAL_SCOPE = Scope("journal");
-
-// ============================================================================
-// Zod Schema for Scope
-// ============================================================================
 
 import { z } from "@zod/zod";
 

@@ -83,9 +83,13 @@ Deno.test("ModuleName - handles error case", async () => {
 - Memory store: append, query by scope, query by time range
 - Postgres store: same operations + connection handling
 - File store: persistence, recovery
-- Config store: CRUD operations
+- Config store: CRUD operations + `replaceExtensionId` (bulk update)
 
-**Note**: Scripts (`view-event-log.ts`, `manage-browser-configs.ts`) depend on store implementations. When store APIs change, verify scripts still work.
+**Note**: Scripts depend on store implementations:
+- `view-event-log.ts`, `manage-browser-configs.ts` use basic CRUD
+- `transition-extension.ts` requires `ConfigStore.replaceExtensionId()` and `ExtensionStore.remove()`
+
+When adding new store implementations (e.g., SQLite), ensure all required methods are implemented.
 
 ## Backend Tests (`tests/backend/`)
 - Pool: session lifecycle, connection state

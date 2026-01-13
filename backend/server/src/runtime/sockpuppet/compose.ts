@@ -4,9 +4,7 @@
 import { Effect, Layer } from "effect";
 import type { Journal, Platform } from "./services.ts";
 
-// ============================================================================
 // Layer Composition
-// ============================================================================
 
 /**
  * Compose Platform and Journal layers into a single layer.
@@ -16,9 +14,7 @@ export const makeSockpuppetLayer = (
   journalLayer: Layer.Layer<Journal>,
 ): Layer.Layer<Platform | Journal> => Layer.merge(platformLayer, journalLayer);
 
-// ============================================================================
 // Sockpuppet Execution
-// ============================================================================
 
 /**
  * Run a sockpuppet effect with the provided layer.

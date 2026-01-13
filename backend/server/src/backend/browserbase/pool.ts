@@ -24,9 +24,7 @@ import {
 import { logger } from "$/logger.ts";
 import { retry, type RetryOptions } from "@std/async";
 
-// ============================================================================
 // Internal Types
-// ============================================================================
 
 interface BrowserInstance {
   readonly configId: BrowserConfigIdType;
@@ -41,9 +39,7 @@ interface BrowserInstance {
 
 type BridgeEventHandler = (event: unknown) => void;
 
-// ============================================================================
 // Bridge Setup
-// ============================================================================
 
 const setupBridge = async (
   page: Page,
@@ -178,9 +174,7 @@ const setupBridge = async (
   return { cleanup, sendRequest };
 };
 
-// ============================================================================
 // Browserbase Pool Implementation
-// ============================================================================
 
 export const createBrowserbasePool = (
   apiKey: string,

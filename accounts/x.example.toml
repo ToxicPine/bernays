@@ -1,0 +1,27 @@
+# X Account Bindings
+#
+# Each account maps a persistent X user ID to browser sessions.
+# Dynamic platform state (handle, display name, verification, follower counts)
+# is derived from events, not stored here.
+
+[[accounts]]
+id = "alice-x-user-id"
+
+  [[accounts.browserBindings]]
+  configId = "browser_alice_x"
+
+  [accounts.browserBindings.metadata]
+  deviceType = "desktop"
+
+[[accounts]]
+id = "bob-x-user-id"
+
+  [[accounts.browserBindings]]
+  configId = "browser_bob_x"
+
+  [accounts.browserBindings.metadata]
+  deviceType = "mobile"
+
+# Minimal - just the ID, no browsers bound yet
+[[accounts]]
+id = "charlie-x-user-id"

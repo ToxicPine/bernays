@@ -181,22 +181,17 @@ if (import.meta.main) {
 
   if (args.help) {
     console.log(`
-transition-extension.ts — Transition from old extension ID to new
+transition-extension.ts — Transition From Old Extension ID to New
 
 USAGE
-  deno run -A scripts/transition-extension.ts --from <old-id> --to <new-id>
-  just ext-transition --from <old-id> --to <new-id>
+  bernays transition-extension [OPTIONS]
 
 OPTIONS
-  --from <id>     Old extension ID to replace (required)
-  --to <id>       New extension ID to use (required)
-  --silent, -s    Suppress non-error output
-  --dry-run       Show what would be done without making changes
-  --help, -h      Show this help
-
-ENVIRONMENT
-  DATABASE_URL              Database connection URL
-  BROWSERBASE_API_KEY       Browserbase API key
+  --from <id>     Old Extension ID to Replace (required)
+  --to <id>       New Extension ID to Use (required)
+  --silent, -s    Suppress Non-Error Output
+  --dry-run       Show What Would Be Done Without Making Changes
+  --help, -h      Show This Help
 `.trim());
     Deno.exit(0);
   }
