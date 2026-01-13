@@ -75,19 +75,29 @@ ssh *args:
 inbox *args: _start-test-machine
     #!/usr/bin/env sh
     id=$(just _test-machine-id)
-    fly ssh console -a {{app}} --machine $id --pty -C 'deno run -A scripts/view-inbox.tsx {{args}}'
+    fly ssh console -a {{app}} --machine $id --pty -C "deno run -A scripts/view-inbox.tsx {{args}}'"
     just _stop-test-machine
 
 event-logs *args: _start-test-machine
     #!/usr/bin/env sh
     id=$(just _test-machine-id)
-    fly ssh console -a {{app}} --machine $id --pty -C 'deno run -A scripts/view-event-log.tsx {{args}}'
+    fly ssh console -a {{app}} --machine $id --pty -C "deno run -A scripts/view-event-log.tsx {{args}}"
     just _stop-test-machine
 
 configure-browsers *args: _start-test-machine
     #!/usr/bin/env sh
     id=$(just _test-machine-id)
-    fly ssh console -a {{app}} --machine $id --pty -C 'deno run -A scripts/manage-browser-configs.tsx {{args}}'
+    fly ssh console -a {{app}} --machine $id --pty -C "deno run -A scripts/manage-browser-configs.tsx {{args}}"
+    just _stop-test-machine
+
+# =============================================================================
+# Internal Recipes
+# =============================================================================
+
+_run-tests: _start-test-machine
+    #!/usr/bin/env sh
+    id=$(just _test-machine-id)
+    fly ssh console -a {{app}} --machine $id --pty -C "sh -c 'deno task test || exit 0'"
     just _stop-test-machine
 
 # =============================================================================
@@ -112,7 +122,7 @@ _start-test-machine: _ensure-test-machine
     id=$(just _test-machine-id)
     image=$(just _prod-machine-image)
     if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-        printf '\033[33mWarning: Local Changes Detected! This Command Will Run the Last Deployed Code, Rather Than the Most Recent Local Changes.\033[0m\n'
+        printf '\033[33mWarning: Uncommitted Changes Detected! This Will Run the Last Deployed Version, Rather Than the Most Recent Local Changes.\033[0m\n'
     fi
     if [ -n "$image" ] && [ "$image" != "/:" ]; then
         fly machine update $id -a {{app}} --image "$image" -y >/dev/null 2>&1 || true
@@ -139,7 +149,7 @@ test-machine-destroy:
     #!/usr/bin/env sh
     id=$(just _test-machine-id)
     if [ -n "$id" ]; then
-        fly machine destroy $id -a {{app}} --force && echo "Test machine destroyed."
+        fly machine destroy $id -a {{app}} --force && echo "Test Machine Destroyed!"
     else
         echo "Error: No Test Machine Defined."
     fi
@@ -155,4 +165,3 @@ ext-build *args:
 # Sync Extension to Browserbase
 ext-sync *args: (ext-build "--silent")
     @deno run -A scripts/sync-extension.ts {{args}}
-

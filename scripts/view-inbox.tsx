@@ -3,58 +3,46 @@
 // view-inbox.tsx — Platform Inbox Viewer TUI (Ink)
 // =============================================================================
 
-import React, { useState, useEffect, type FC, type ReactNode } from "react";
+import { useState, useEffect, type FC } from "react";
 import { Box, Text, useInput, useApp } from "ink";
-import type { ThreadId } from "@bernays/server/core";
+import { AccountId, Scope, type ThreadId } from "@bernays/server/core";
 import type { StorableEvent } from "@bernays/server/store";
 import { createPostgresEventStore } from "@bernays/server/store";
-import {
-  createPostgresLinkedInAccountStore,
-  type LinkedInAccount,
-} from "../plugins/linkedin/account.ts";
-import { linkedInBehavior } from "../plugins/linkedin/behavior.ts";
-import type { LinkedInInbox, LinkedInIndexMeta } from "../plugins/linkedin/views.ts";
-import { LINKEDIN_SCOPE } from "../plugins/linkedin/schemas.ts";
-import {
-  createPostgresXAccountStore,
-  type XAccount,
-} from "../plugins/x/account.ts";
-import { xBehavior } from "../plugins/x/behavior.ts";
-import type { XInbox, XIndexMeta } from "../plugins/x/views.ts";
-import { X_SCOPE } from "../plugins/x/schemas.ts";
-import type { MessageView } from "@bernays/server/views";
+import { createPostgresLinkedInAccountStore } from "@bernays/plugins/linkedin";
+import { createPostgresXAccountStore } from "@bernays/plugins/x";
 import {
   Header,
   StatusBar,
+  FullHeightLayout,
+  ErrorBanner,
+  toAppError,
+  type AppError,
   MenuItem,
   relativeTime,
   truncate,
-  renderApp,
+  runApp,
   requireDatabaseUrl,
   runMain,
+  useContentHeight,
+  useTerminalSize,
 } from "./lib/ink.tsx";
+import { createBindings, useKeyHandler } from "./lib/keybindings.tsx";
+import { useListNavigation, usePagination } from "./lib/hooks.tsx";
+import {
+  type BaseThread,
+  type BaseInbox,
+  type BaseThreadSummary,
+  type BaseAccount,
+  type AnyPlatformProvider,
+  platformOptions,
+  getProvider,
+} from "./lib/providers.tsx";
 
 // =============================================================================
 // Types
 // =============================================================================
 
 type Platform = "linkedin" | "x";
-
-interface BaseThreadSummary {
-  readonly lastActivity: string;
-  readonly unreadCount: number;
-}
-
-interface BaseInbox<T> {
-  readonly byThreadId: Readonly<Record<string, T>>;
-}
-
-interface BaseThread {
-  readonly threadId: string;
-  readonly messages: readonly MessageView[];
-  readonly unreadCount: number;
-  readonly lastActivity: string;
-}
 
 type View =
   | { type: "platform-select" }
@@ -66,36 +54,46 @@ type View =
 // Platform Select
 // =============================================================================
 
-const PlatformSelectView: FC<{ onSelect: (p: Platform) => void }> = (props: {
-  onSelect: (p: Platform) => void;
-}) => {
-  const { exit } = useApp();
-  const [selected, setSelected] = useState(0);
-  const platforms: { id: Platform; label: string; color: string }[] = [
-    { id: "linkedin", label: "LinkedIn - Professional Network", color: "cyan" },
-    { id: "x", label: "X (Twitter) - Social Media", color: "magenta" },
-  ];
+const platforms = platformOptions.map((p) => ({
+  id: p.key as Platform,
+  label: p.name,
+  color: p.color,
+}));
 
-  useInput((input: string, key: { upArrow: boolean; downArrow: boolean; return: boolean; escape: boolean }) => {
-    if (input === "q" || key.escape) exit();
-    else if (key.upArrow || input === "k") setSelected((s: number) => Math.max(0, s - 1));
-    else if (key.downArrow || input === "j") setSelected((s: number) => Math.min(platforms.length - 1, s + 1));
-    else if (key.return || input === " ") props.onSelect(platforms[selected].id);
-    else if (input === "1") props.onSelect("linkedin");
-    else if (input === "2") props.onSelect("x");
+const PlatformSelectView: FC<{ onSelect: (p: Platform) => void }> = ({ onSelect }) => {
+  const { exit } = useApp();
+  const nav = useListNavigation(platforms);
+
+  const bindings = createBindings({
+    navigation: true,
+    onUp: nav.up,
+    onDown: nav.down,
+    onSelect: () => onSelect(platforms[nav.selectedIndex].id),
+    onQuit: exit,
   });
 
+  // Number key shortcuts
+  useInput((input: string) => {
+    const num = parseInt(input, 10);
+    if (num >= 1 && num <= platforms.length) {
+      onSelect(platforms[num - 1].id);
+    }
+  });
+
+  useKeyHandler(bindings, [nav.selectedIndex]);
+
   return (
-    <Box flexDirection="column">
-      <Header title="Inbox Viewer" />
+    <FullHeightLayout
+      header={<Header title="Inbox Viewer" />}
+      statusBar={<StatusBar>{bindings.hints}</StatusBar>}
+    >
       <Text bold>Select a Platform:</Text>
       <Box flexDirection="column" marginY={1}>
         {platforms.map((p, i) => (
-          <MenuItem key={p.id} idx={i} label={p.label} selected={selected === i} color={p.color} />
+          <MenuItem key={p.id} idx={i} label={p.label} selected={nav.selectedIndex === i} color={p.color} />
         ))}
       </Box>
-      <StatusBar>j/k or arrows to navigate | Enter to select | q to quit</StatusBar>
-    </Box>
+    </FullHeightLayout>
   );
 };
 
@@ -110,43 +108,45 @@ interface AccountSelectProps {
   onBack: () => void;
 }
 
-const AccountSelectView: FC<AccountSelectProps> = (props: AccountSelectProps) => {
+const AccountSelectView: FC<AccountSelectProps> = ({ platform, accounts, onSelect, onBack }) => {
   const { exit } = useApp();
-  const [selected, setSelected] = useState(0);
-  const color = props.platform === "linkedin" ? "cyan" : "magenta";
+  const nav = useListNavigation(accounts);
+  const provider = getProvider(platform);
+  const color = provider?.color ?? "white";
+  const platformName = provider?.name ?? platform;
 
-  useInput((input: string, key: { upArrow: boolean; downArrow: boolean; return: boolean; escape: boolean }) => {
-    if (input === "q") exit();
-    else if (key.escape || input === "b") props.onBack();
-    else if (key.upArrow || input === "k") setSelected((s: number) => Math.max(0, s - 1));
-    else if (key.downArrow || input === "j") setSelected((s: number) => Math.min(props.accounts.length - 1, s + 1));
-    else if (key.return || input === " ") {
-      if (props.accounts.length > 0) props.onSelect(selected);
-    }
+  const bindings = createBindings({
+    navigation: true,
+    onUp: nav.up,
+    onDown: nav.down,
+    onSelect: () => { if (accounts.length > 0) onSelect(nav.selectedIndex); },
+    onBack,
+    onQuit: exit,
   });
 
-  const platformName = props.platform === "linkedin" ? "LinkedIn" : "X (Twitter)";
+  useKeyHandler(bindings, [nav.selectedIndex]);
 
   return (
-    <Box flexDirection="column">
-      <Header title={`${platformName} - Select Account`} />
-      {props.accounts.length === 0 ? (
+    <FullHeightLayout
+      header={<Header title={`${platformName} - Select Account`} />}
+      statusBar={<StatusBar>{bindings.hints}</StatusBar>}
+    >
+      {accounts.length === 0 ? (
         <Text color="yellow">No accounts found.</Text>
       ) : (
         <Box flexDirection="column" marginY={1}>
-          {props.accounts.map((acc, i) => (
+          {accounts.map((acc, i) => (
             <MenuItem
               key={acc.id}
               idx={i}
               label={`${acc.displayName} (${acc.id.slice(0, 8)}...)`}
-              selected={selected === i}
+              selected={nav.selectedIndex === i}
               color={color}
             />
           ))}
         </Box>
       )}
-      <StatusBar>j/k navigate | Enter select | b back | q quit</StatusBar>
-    </Box>
+    </FullHeightLayout>
   );
 };
 
@@ -154,72 +154,89 @@ const AccountSelectView: FC<AccountSelectProps> = (props: AccountSelectProps) =>
 // Inbox View
 // =============================================================================
 
-interface InboxProps<TInbox extends BaseInbox<TMeta>, TMeta extends BaseThreadSummary> {
-  platform: Platform;
+interface InboxViewProps {
+  provider: AnyPlatformProvider;
   accountName: string;
-  inbox: TInbox;
+  inbox: BaseInbox<BaseThreadSummary>;
   onSelectThread: (threadId: string) => void;
   onBack: () => void;
   onRefresh: () => void;
-  renderHeader: (inbox: TInbox) => ReactNode;
-  renderMeta?: (threadId: string, meta: TMeta) => ReactNode;
 }
 
-function InboxView<TInbox extends BaseInbox<TMeta>, TMeta extends BaseThreadSummary>(
-  props: InboxProps<TInbox, TMeta>
-): React.ReactElement {
+const InboxView: FC<InboxViewProps> = ({
+  provider,
+  accountName,
+  inbox,
+  onSelectThread,
+  onBack,
+  onRefresh,
+}) => {
   const { exit } = useApp();
-  const [selected, setSelected] = useState(0);
-  const [page, setPage] = useState(0);
-  const pageSize = 10;
+  const { columns } = useTerminalSize();
 
-  const threadIds = Object.keys(props.inbox.byThreadId).sort((a, b) => {
-    const metaA = props.inbox.byThreadId[a];
-    const metaB = props.inbox.byThreadId[b];
+  // Dynamic page size: Chrome: Header (3) + header render (1) + margin (1) + showing line (1) + margin (2) + status bar (3) = 11 lines
+  const availableHeight = useContentHeight(11);
+  const pageSize = Math.max(5, availableHeight);
+
+  // Sort threads by last activity
+  const threadIds = Object.keys(inbox.byThreadId).sort((a, b) => {
+    const metaA = inbox.byThreadId[a];
+    const metaB = inbox.byThreadId[b];
     return new Date(metaB.lastActivity).getTime() - new Date(metaA.lastActivity).getTime();
   });
 
-  const totalPages = Math.ceil(threadIds.length / pageSize);
-  const pageThreadIds = threadIds.slice(page * pageSize, (page + 1) * pageSize);
-  const color = props.platform === "linkedin" ? "cyan" : "magenta";
+  // Pagination and navigation
+  const pagination = usePagination(threadIds, pageSize);
+  const nav = useListNavigation(pagination.pageItems);
 
-  useInput((input: string, key: { upArrow: boolean; downArrow: boolean; return: boolean; escape: boolean }) => {
-    if (input === "q") exit();
-    else if (key.escape || input === "b") props.onBack();
-    else if (input === "r") props.onRefresh();
-    else if (key.upArrow || input === "k") setSelected((s: number) => Math.max(0, s - 1));
-    else if (key.downArrow || input === "j") setSelected((s: number) => Math.min(pageThreadIds.length - 1, s + 1));
-    else if (key.return || input === " ") {
-      if (pageThreadIds.length > 0) props.onSelectThread(pageThreadIds[selected]);
-    }
-    else if (input === "n" && page < totalPages - 1) { setPage((p: number) => p + 1); setSelected(0); }
-    else if (input === "p" && page > 0) { setPage((p: number) => p - 1); setSelected(0); }
+  const bindings = createBindings({
+    navigation: true,
+    pagination: pagination.totalPages > 1,
+    onUp: nav.up,
+    onDown: nav.down,
+    onPageUp: () => { pagination.prevPage(); nav.reset(); },
+    onPageDown: () => { pagination.nextPage(); nav.reset(); },
+    onSelect: () => { if (pagination.pageItems.length > 0) onSelectThread(pagination.pageItems[nav.selectedIndex]); },
+    onBack,
+    onRefresh,
+    onQuit: exit,
   });
 
+  useKeyHandler(bindings, [nav.selectedIndex, pagination.page]);
+
+  // Calculate proportional column widths
+  // Fixed columns: prefix (7), time (12), unread (6), meta (12) = 37 chars
+  const availableWidth = Math.max(30, columns - 37);
+  const threadIdWidth = Math.max(20, Math.min(50, availableWidth));
+
+  const statusHints = bindings.hints + (pagination.totalPages > 1 ? ` | ${pagination.page + 1}/${pagination.totalPages}` : "");
+
   return (
-    <Box flexDirection="column">
-      <Header title={`${props.platform === "linkedin" ? "LinkedIn" : "X"}: ${props.accountName}`} />
-      {props.renderHeader(props.inbox)}
+    <FullHeightLayout
+      header={<Header title={`${provider.name}: ${accountName}`} />}
+      statusBar={<StatusBar>{statusHints}</StatusBar>}
+    >
+      {provider.renderInboxHeader(inbox)}
       <Box marginY={1} />
       {threadIds.length === 0 ? (
         <Text dimColor>No threads found.</Text>
       ) : (
         <>
           <Text dimColor>
-            Showing {page * pageSize + 1}-{Math.min((page + 1) * pageSize, threadIds.length)} of {threadIds.length}:
+            Showing {pagination.pageStartIndex + 1}-{Math.min(pagination.pageStartIndex + pageSize, threadIds.length)} of {threadIds.length}:
           </Text>
           <Box flexDirection="column" marginY={1}>
-            {pageThreadIds.map((threadId, i) => {
-              const meta = props.inbox.byThreadId[threadId] as TMeta;
+            {pagination.pageItems.map((threadId, i) => {
+              const meta = inbox.byThreadId[threadId];
               return (
                 <Box key={threadId}>
-                  <Text color={selected === i ? "green" : "white"}>
-                    {selected === i ? "> " : "  "}
-                    <Text bold>[{page * pageSize + i + 1}]</Text>{" "}
-                    <Text color={color}>{truncate(threadId, 28)}</Text>{" "}
+                  <Text color={nav.selectedIndex === i ? "green" : "white"}>
+                    {nav.selectedIndex === i ? "> " : "  "}
+                    <Text bold>[{String(pagination.pageStartIndex + i + 1).padStart(2)}]</Text>{" "}
+                    <Text color={provider.color}>{truncate(threadId, threadIdWidth).padEnd(threadIdWidth)}</Text>{" "}
                     <Text dimColor>{relativeTime(meta.lastActivity).padEnd(10)}</Text>
                     {meta.unreadCount > 0 && <Text color="yellow"> ({meta.unreadCount})</Text>}
-                    {props.renderMeta?.(threadId, meta)}
+                    {provider.renderThreadMeta?.(threadId, meta)}
                   </Text>
                 </Box>
               );
@@ -227,11 +244,7 @@ function InboxView<TInbox extends BaseInbox<TMeta>, TMeta extends BaseThreadSumm
           </Box>
         </>
       )}
-      <StatusBar>
-        j/k nav | Enter view | n/p page | r refresh | b back | q quit
-        {totalPages > 1 && ` | ${page + 1}/${totalPages}`}
-      </StatusBar>
-    </Box>
+    </FullHeightLayout>
   );
 }
 
@@ -239,36 +252,47 @@ function InboxView<TInbox extends BaseInbox<TMeta>, TMeta extends BaseThreadSumm
 // Thread View
 // =============================================================================
 
-interface ThreadProps {
-  platform: Platform;
+interface ThreadViewProps {
+  provider: AnyPlatformProvider;
   thread: BaseThread;
   accountId: string;
   onBack: () => void;
-  renderHeader: () => ReactNode;
 }
 
-const ThreadView: FC<ThreadProps> = (props: ThreadProps) => {
+const ThreadView: FC<ThreadViewProps> = ({ provider, thread, accountId, onBack }) => {
   const { exit } = useApp();
   const [page, setPage] = useState(0);
-  const pageSize = 10;
-  const messages = [...props.thread.messages];
+
+  // Dynamic page size: Chrome: Header (3) + header render (1) + margin (1) + messages line (1) + border (2) + margin (1) + status bar (3) = 12 lines
+  // Each message takes ~3 lines (sender line + content line + gap)
+  const availableHeight = useContentHeight(12);
+  const pageSize = Math.max(3, Math.floor(availableHeight / 3));
+
+  const messages = [...thread.messages];
   const totalPages = Math.ceil(messages.length / pageSize);
   const start = Math.max(0, messages.length - (page + 1) * pageSize);
   const end = messages.length - page * pageSize;
   const pageMessages = messages.slice(start, end);
-  const color = props.platform === "linkedin" ? "cyan" : "magenta";
 
-  useInput((input: string, key: { escape: boolean }) => {
-    if (input === "q") exit();
-    else if (key.escape || input === "b") props.onBack();
-    else if (input === "o" && page < totalPages - 1) setPage((p: number) => p + 1);
-    else if (input === "n" && page > 0) setPage((p: number) => p - 1);
+  const bindings = createBindings({
+    onBack,
+    onQuit: exit,
+    custom: [
+      { key: "o", label: "older", handler: () => { if (page < totalPages - 1) setPage((p) => p + 1); }, enabled: page < totalPages - 1 },
+      { key: "n", label: "newer", handler: () => { if (page > 0) setPage((p) => p - 1); }, enabled: page > 0 },
+    ],
   });
 
+  useKeyHandler(bindings, [page, totalPages]);
+
+  const statusHints = bindings.hints + (totalPages > 1 ? ` | ${page + 1}/${totalPages}` : "");
+
   return (
-    <Box flexDirection="column">
-      <Header title={`Thread: ${truncate(props.thread.threadId, 30)}`} />
-      {props.renderHeader()}
+    <FullHeightLayout
+      header={<Header title={`Thread: ${truncate(thread.threadId, 30)}`} />}
+      statusBar={<StatusBar>{statusHints}</StatusBar>}
+    >
+      {provider.renderThreadHeader(thread)}
       <Box marginY={1} />
       {messages.length === 0 ? (
         <Text dimColor>No messages.</Text>
@@ -277,11 +301,11 @@ const ThreadView: FC<ThreadProps> = (props: ThreadProps) => {
           <Text dimColor>Messages {start + 1}-{end} of {messages.length}:</Text>
           <Box flexDirection="column" marginY={1} borderStyle="single" borderColor="gray" paddingX={1}>
             {pageMessages.map((msg) => {
-              const isOwn = msg.senderId === props.accountId;
+              const isOwn = msg.senderId === accountId;
               return (
                 <Box key={msg.id} flexDirection="column">
                   <Box>
-                    <Text color={isOwn ? "green" : color} bold>
+                    <Text color={isOwn ? "green" : provider.color} bold>
                       [{isOwn ? "You" : truncate(msg.senderId, 20)}]
                     </Text>
                     <Text dimColor> {relativeTime(msg.timestamp)}</Text>
@@ -293,11 +317,7 @@ const ThreadView: FC<ThreadProps> = (props: ThreadProps) => {
           </Box>
         </>
       )}
-      <StatusBar>
-        o older | n newer | b back | q quit
-        {totalPages > 1 && ` | ${page + 1}/${totalPages}`}
-      </StatusBar>
-    </Box>
+    </FullHeightLayout>
   );
 };
 
@@ -305,73 +325,136 @@ const ThreadView: FC<ThreadProps> = (props: ThreadProps) => {
 // Main App
 // =============================================================================
 
+// Account stores keyed by platform
+interface AccountStores {
+  linkedin: Awaited<ReturnType<typeof createPostgresLinkedInAccountStore>>;
+  x: Awaited<ReturnType<typeof createPostgresXAccountStore>>;
+}
+
 interface AppProps {
   initialPlatform?: Platform;
-  linkedInAccountStore: Awaited<ReturnType<typeof createPostgresLinkedInAccountStore>>;
-  xAccountStore: Awaited<ReturnType<typeof createPostgresXAccountStore>>;
+  accountStores: AccountStores;
   eventStore: Awaited<ReturnType<typeof createPostgresEventStore>>;
 }
 
-const App: FC<AppProps> = (props: AppProps) => {
-  const [view, setView] = useState<View>(
-    props.initialPlatform ? { type: "account-select", platform: props.initialPlatform } : { type: "platform-select" }
-  );
-  const [linkedInAccounts, setLinkedInAccounts] = useState<readonly LinkedInAccount[]>([]);
-  const [xAccounts, setXAccounts] = useState<readonly XAccount[]>([]);
-  const [linkedInInbox, setLinkedInInbox] = useState<LinkedInInbox | null>(null);
-  const [xInbox, setXInbox] = useState<XInbox | null>(null);
-  const [linkedInEvents, setLinkedInEvents] = useState<readonly StorableEvent[]>([]);
-  const [xEvents, setXEvents] = useState<readonly StorableEvent[]>([]);
-  const [loading, setLoading] = useState(false);
+// Platform-specific state stored generically
+interface PlatformState {
+  accounts: readonly BaseAccount[];
+  inbox: BaseInbox<BaseThreadSummary> | null;
+  events: readonly StorableEvent[];
+}
 
+const App: FC<AppProps> = ({ initialPlatform, accountStores, eventStore }) => {
+  const [view, setView] = useState<View>(
+    initialPlatform ? { type: "account-select", platform: initialPlatform } : { type: "platform-select" }
+  );
+  // Platform state indexed by platform key
+  const [platformState, setPlatformState] = useState<Record<Platform, PlatformState>>({
+    linkedin: { accounts: [], inbox: null, events: [] },
+    x: { accounts: [], inbox: null, events: [] },
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<AppError | null>(null);
+  const [accountsLoading, setAccountsLoading] = useState(true);
+
+  // Load all accounts on mount
   useEffect(() => {
     const load = async () => {
-      const { Runtime } = await import("effect");
-      const runtime = Runtime.defaultRuntime;
-      const [li, x] = await Promise.all([
-        Runtime.runPromise(runtime)(props.linkedInAccountStore.list()),
-        Runtime.runPromise(runtime)(props.xAccountStore.list()),
-      ]);
-      setLinkedInAccounts(li);
-      setXAccounts(x);
+      setAccountsLoading(true);
+      setError(null);
+      try {
+        const { Runtime } = await import("effect");
+        const runtime = Runtime.defaultRuntime;
+        const [linkedInAccounts, xAccounts] = await Promise.all([
+          Runtime.runPromise(runtime)(accountStores.linkedin.list()),
+          Runtime.runPromise(runtime)(accountStores.x.list()),
+        ]);
+        setPlatformState((prev) => ({
+          linkedin: { ...prev.linkedin, accounts: linkedInAccounts },
+          x: { ...prev.x, accounts: xAccounts },
+        }));
+      } catch (e) {
+        setError(toAppError(e, "Failed to Load Accounts"));
+      } finally {
+        setAccountsLoading(false);
+      }
     };
     load();
   }, []);
 
-  useEffect(() => {
+  // Load inbox for current platform and account
+  const loadInbox = async () => {
     if (view.type !== "inbox" && view.type !== "thread") return;
-    const loadInbox = async () => {
-      setLoading(true);
-      try {
-        if (view.platform === "linkedin" && linkedInAccounts[view.accountIndex]) {
-          const account = linkedInAccounts[view.accountIndex];
-          const result = await props.eventStore.fetch({ type: "byScope", scope: LINKEDIN_SCOPE });
-          if (result.ok) {
-            const events = result.value.filter((e: StorableEvent) => {
-              const ev = e as { accountId?: string };
-              return !ev.accountId || ev.accountId === account.id;
-            });
-            setLinkedInEvents(events);
-            setLinkedInInbox(linkedInBehavior.deriveInbox(events as never, account.id));
-          }
-        } else if (view.platform === "x" && xAccounts[view.accountIndex]) {
-          const account = xAccounts[view.accountIndex];
-          const result = await props.eventStore.fetch({ type: "byScope", scope: X_SCOPE });
-          if (result.ok) {
-            const events = result.value.filter((e: StorableEvent) => {
-              const ev = e as { accountId?: string };
-              return !ev.accountId || ev.accountId === account.id;
-            });
-            setXEvents(events);
-            setXInbox(xBehavior.deriveInbox(events as never, account.id));
-          }
-        }
-      } finally {
-        setLoading(false);
+
+    const provider = getProvider(view.platform);
+    if (!provider) return;
+
+    const state = platformState[view.platform];
+    const account = state.accounts[view.accountIndex];
+    if (!account) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await eventStore.fetch({ type: "byScope", scope: Scope(provider.scope) });
+      if (result.ok) {
+        const events = result.value.filter((e: StorableEvent) => {
+          const ev = e as { accountId?: string };
+          return !ev.accountId || ev.accountId === account.id;
+        });
+        const inbox = provider.deriveInbox(events, AccountId(account.id));
+        setPlatformState((prev) => ({
+          ...prev,
+          [view.platform]: { ...prev[view.platform], events, inbox },
+        }));
+      } else {
+        setError(toAppError(result.error, "Failed to Load Events"));
       }
-    };
+    } catch (e) {
+      setError(toAppError(e, "Failed to Load Inbox"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     loadInbox();
-  }, [view.type, view.type === "inbox" || view.type === "thread" ? view.accountIndex : -1]);
+  }, [view.type, view.type === "inbox" || view.type === "thread" ? view.accountIndex : -1, view.type === "inbox" || view.type === "thread" ? view.platform : ""]);
+
+  // Helper to get accounts for display
+  const getAccountsForDisplay = (platform: Platform) => {
+    const provider = getProvider(platform);
+    const state = platformState[platform];
+    if (!provider || !state) return [];
+    return state.accounts.map((a) => ({
+      id: a.id,
+      displayName: provider.formatAccountName(a),
+    }));
+  };
+
+  // Show loading state for accounts
+  if (accountsLoading) {
+    return (
+      <FullHeightLayout
+        header={<Header title="Inbox Viewer" />}
+        statusBar={<StatusBar>Loading accounts...</StatusBar>}
+      >
+        <Text color="cyan">Loading accounts...</Text>
+      </FullHeightLayout>
+    );
+  }
+
+  // Show error with option to retry
+  if (error && (view.type === "platform-select" || view.type === "account-select")) {
+    return (
+      <FullHeightLayout
+        header={<Header title="Inbox Viewer" />}
+        statusBar={<StatusBar>Press any key to dismiss | q quit</StatusBar>}
+      >
+        <ErrorBanner error={error} onDismiss={() => setError(null)} />
+      </FullHeightLayout>
+    );
+  }
 
   if (loading) return <Box><Text color="cyan">Loading...</Text></Box>;
 
@@ -380,13 +463,10 @@ const App: FC<AppProps> = (props: AppProps) => {
   }
 
   if (view.type === "account-select") {
-    const accounts = view.platform === "linkedin"
-      ? linkedInAccounts.map((a: LinkedInAccount) => ({ id: a.id, displayName: a.displayName }))
-      : xAccounts.map((a: XAccount) => ({ id: a.id, displayName: `@${a.handle}` }));
     return (
       <AccountSelectView
         platform={view.platform}
-        accounts={accounts}
+        accounts={getAccountsForDisplay(view.platform)}
         onSelect={(i: number) => setView({ type: "inbox", platform: view.platform, accountIndex: i })}
         onBack={() => setView({ type: "platform-select" })}
       />
@@ -394,55 +474,31 @@ const App: FC<AppProps> = (props: AppProps) => {
   }
 
   if (view.type === "inbox") {
-    if (view.platform === "linkedin" && linkedInInbox) {
-      const account = linkedInAccounts[view.accountIndex];
+    const provider = getProvider(view.platform);
+    const state = platformState[view.platform];
+    const account = state?.accounts[view.accountIndex];
+
+    // Show error if there is one
+    if (error) {
       return (
-        <InboxView<LinkedInInbox, LinkedInIndexMeta>
-          platform="linkedin"
-          accountName={account.displayName}
-          inbox={linkedInInbox}
-          onSelectThread={(id: string) => setView({ ...view, type: "thread", threadId: id })}
-          onBack={() => setView({ type: "account-select", platform: "linkedin" })}
-          onRefresh={() => setView({ ...view })}
-          renderHeader={(inbox: LinkedInInbox) => (
-            <Box>
-              <Text>
-                <Text bold>Threads:</Text> {Object.keys(inbox.byThreadId).length}
-                {"  |  "}
-                <Text bold>Pending:</Text> <Text color="yellow">{inbox.pendingInvitations}</Text>
-                {"  |  "}
-                <Text bold>Weekly:</Text> {inbox.weeklyInvitesRemaining}/100
-              </Text>
-            </Box>
-          )}
-          renderMeta={(_: string, meta: LinkedInIndexMeta) =>
-            meta.isSponsored ? <Text dimColor> [Sponsored]</Text> : null
-          }
-        />
+        <FullHeightLayout
+          header={<Header title={`${provider?.name ?? view.platform} Inbox`} />}
+          statusBar={<StatusBar>r retry | b back | q quit</StatusBar>}
+        >
+          <ErrorBanner error={error} onDismiss={() => setError(null)} />
+        </FullHeightLayout>
       );
     }
-    if (view.platform === "x" && xInbox) {
-      const account = xAccounts[view.accountIndex];
+
+    if (provider && state?.inbox && account) {
       return (
-        <InboxView<XInbox, XIndexMeta>
-          platform="x"
-          accountName={`@${account.handle}`}
-          inbox={xInbox}
+        <InboxView
+          provider={provider}
+          accountName={provider.formatAccountName(account)}
+          inbox={state.inbox}
           onSelectThread={(id: string) => setView({ ...view, type: "thread", threadId: id })}
-          onBack={() => setView({ type: "account-select", platform: "x" })}
-          onRefresh={() => setView({ ...view })}
-          renderHeader={(inbox: XInbox) => (
-            <Box>
-              <Text>
-                <Text bold>Conversations:</Text> {Object.keys(inbox.byThreadId).length}
-                {"  |  "}
-                <Text bold>Unread:</Text> <Text color="yellow">{inbox.totalUnread}</Text>
-                {"  |  "}
-                <Text bold>Synced:</Text> {relativeTime(inbox.syncedAt)}
-              </Text>
-            </Box>
-          )}
-          renderMeta={(_: string, meta: XIndexMeta) => <Text dimColor> {meta.participantCount}p</Text>}
+          onBack={() => setView({ type: "account-select", platform: view.platform })}
+          onRefresh={() => loadInbox()}
         />
       );
     }
@@ -450,43 +506,19 @@ const App: FC<AppProps> = (props: AppProps) => {
   }
 
   if (view.type === "thread") {
-    if (view.platform === "linkedin") {
-      const account = linkedInAccounts[view.accountIndex];
-      const thread = linkedInBehavior.deriveThread(linkedInEvents as never, view.threadId as ThreadId);
+    const provider = getProvider(view.platform);
+    const state = platformState[view.platform];
+    const account = state?.accounts[view.accountIndex];
+
+    if (provider && state && account) {
+      const thread = provider.deriveThread(state.events, view.threadId as ThreadId);
       if (!thread) return <Text color="red">Thread not found</Text>;
       return (
         <ThreadView
-          platform="linkedin"
+          provider={provider}
           thread={thread}
           accountId={account.id}
-          onBack={() => setView({ type: "inbox", platform: "linkedin", accountIndex: view.accountIndex })}
-          renderHeader={() => (
-            <Text>
-              <Text bold>Messages:</Text> {thread.messages.length}
-              {"  |  "}
-              <Text bold>Unread:</Text> <Text color="yellow">{thread.unreadCount}</Text>
-            </Text>
-          )}
-        />
-      );
-    }
-    if (view.platform === "x") {
-      const account = xAccounts[view.accountIndex];
-      const thread = xBehavior.deriveThread(xEvents as never, view.threadId as ThreadId);
-      if (!thread) return <Text color="red">Thread not found</Text>;
-      return (
-        <ThreadView
-          platform="x"
-          thread={thread}
-          accountId={account.id}
-          onBack={() => setView({ type: "inbox", platform: "x", accountIndex: view.accountIndex })}
-          renderHeader={() => (
-            <Text>
-              <Text bold>Messages:</Text> {thread.messages.length}
-              {"  |  "}
-              <Text bold>Unread:</Text> <Text color="yellow">{thread.unreadCount}</Text>
-            </Text>
-          )}
+          onBack={() => setView({ type: "inbox", platform: view.platform, accountIndex: view.accountIndex })}
         />
       );
     }
@@ -522,11 +554,10 @@ const main = async (): Promise<void> => {
     createPostgresEventStore({ databaseUrl }),
   ]);
 
-  renderApp(
+  await runApp(
     <App
       initialPlatform={initialPlatform}
-      linkedInAccountStore={linkedInAccountStore}
-      xAccountStore={xAccountStore}
+      accountStores={{ linkedin: linkedInAccountStore, x: xAccountStore }}
       eventStore={eventStore}
     />
   );

@@ -22,10 +22,6 @@
 
           playwrightModule = import ./flake-parts/playwright.nix;
 
-          deployScript = pkgs.writeShellScriptBin "bernays-deploy" ''
-            exec ${./scripts/deploy.sh} "$@"
-          '';
-
         in
         {
           devShells.default = pkgs.mkShell ((playwrightModule { inherit pkgs; }) {
@@ -39,7 +35,6 @@
               pkgs.jq
               pkgs.deterministic-zip
               unstablePkgs.claude-code
-              deployScript
             ];
             shellHook = ''
               export ESBUILD=${pkgs.esbuild}/bin/esbuild

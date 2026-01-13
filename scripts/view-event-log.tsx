@@ -17,14 +17,32 @@ import {
 import {
   Header,
   StatusBar,
+  FullHeightLayout,
+  ErrorBanner,
+  toAppError,
+  type AppError,
   relativeTime,
   formatTimestamp,
   truncate,
   scopeColor,
-  renderApp,
+  runApp,
   requireDatabaseUrl,
   runMain,
+  useContentHeight,
+  useTerminalSize,
 } from "./lib/ink.tsx";
+import {
+  createBindings,
+  useKeyHandler,
+  type KeyBinding,
+} from "./lib/keybindings.tsx";
+import { useListNavigation } from "./lib/hooks.tsx";
+import {
+  byScope,
+  byType,
+  sortByTimestampDesc,
+  and,
+} from "./lib/filters.ts";
 
 // =============================================================================
 // Types
@@ -65,22 +83,21 @@ const buildQuery = (state: QueryState): EventStoreQuery => {
   return { type: "all" };
 };
 
-const applyFilters = (events: StorableEvent[], state: QueryState): StorableEvent[] => {
-  let filtered = events;
-  if (state.scope) filtered = filtered.filter((e) => e.scope === state.scope);
-  if (state.type) {
-    const lower = state.type.toLowerCase();
-    filtered = filtered.filter((e) => e.type.toLowerCase().includes(lower));
-  }
-  return filtered;
+const buildFilters = (state: QueryState): ((e: StorableEvent) => boolean)[] => {
+  const filters: ((e: StorableEvent) => boolean)[] = [];
+  if (state.scope) filters.push(byScope(state.scope));
+  if (state.type) filters.push(byType(state.type));
+  return filters;
 };
 
 const fetchEvents = async (store: EventStore, state: QueryState): Promise<StorableEvent[]> => {
   const res = await store.fetch(buildQuery(state));
   if (!res.ok) throw new Error(`Query failed: ${res.error.message}`);
-  const filtered = applyFilters([...res.value], state);
-  filtered.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  return filtered;
+  const filters = buildFilters(state);
+  const filtered = filters.length > 0
+    ? [...res.value].filter(and(...filters))
+    : [...res.value];
+  return sortByTimestampDesc(filtered);
 };
 
 // =============================================================================
@@ -109,8 +126,10 @@ const FilterInput: FC<FilterInputProps> = (props: FilterInputProps) => {
   };
 
   return (
-    <Box flexDirection="column">
-      <Header title="Set Filter" />
+    <FullHeightLayout
+      header={<Header title="Set Filter" />}
+      statusBar={<StatusBar>Enter to confirm | Escape to cancel</StatusBar>}
+    >
       <Box>
         <Text bold>{labels[props.field]}: </Text>
         <TextInput
@@ -119,8 +138,7 @@ const FilterInput: FC<FilterInputProps> = (props: FilterInputProps) => {
           onSubmit={(v: string) => props.onSubmit(v)}
         />
       </Box>
-      <StatusBar>Enter to confirm | Escape to cancel</StatusBar>
-    </Box>
+    </FullHeightLayout>
   );
 };
 
@@ -139,18 +157,28 @@ const DetailView: FC<DetailViewProps> = (props: DetailViewProps) => {
   const e = props.event;
   const payload = JSON.stringify(e, null, 2).split("\n");
 
-  useInput((input: string, key: { escape: boolean; upArrow: boolean; downArrow: boolean }) => {
-    if (input === "q") exit();
-    else if (key.escape || input === "b") props.onBack();
-    else if (key.upArrow || input === "k") setScrollOffset((o: number) => Math.max(0, o - 1));
-    else if (key.downArrow || input === "j") setScrollOffset((o: number) => Math.min(payload.length - 10, o + 1));
+  // Dynamic visible lines: Chrome: Header (3) + metadata lines (5) + payload header (1) + margins (3) + status bar (3) = 15 lines
+  const payloadHeight = useContentHeight(15);
+  const visibleLines = Math.max(5, payloadHeight);
+  const maxScroll = Math.max(0, payload.length - visibleLines);
+
+  const bindings = createBindings({
+    navigation: true,
+    onUp: () => setScrollOffset((o) => Math.max(0, o - 1)),
+    onDown: () => setScrollOffset((o) => Math.min(maxScroll, o + 1)),
+    onBack: props.onBack,
+    onQuit: exit,
   });
 
-  const visiblePayload = payload.slice(scrollOffset, scrollOffset + 15);
+  useKeyHandler(bindings, [maxScroll]);
+
+  const visiblePayload = payload.slice(scrollOffset, scrollOffset + visibleLines);
 
   return (
-    <Box flexDirection="column">
-      <Header title="Event Detail" />
+    <FullHeightLayout
+      header={<Header title="Event Detail" />}
+      statusBar={<StatusBar>{bindings.hints}</StatusBar>}
+    >
       <Box flexDirection="column" marginBottom={1}>
         <Text><Text bold>Event ID:</Text> <Text color="cyan">{e.eventId}</Text></Text>
         <Text><Text bold>Scope:</Text> <Text color={scopeColor(e.scope)}>{e.scope}</Text></Text>
@@ -165,12 +193,11 @@ const DetailView: FC<DetailViewProps> = (props: DetailViewProps) => {
         {visiblePayload.map((line, i) => (
           <Text key={i} dimColor>{line}</Text>
         ))}
-        {payload.length > 15 && (
-          <Text dimColor>... ({payload.length - 15} more lines, j/k to scroll)</Text>
+        {payload.length > visibleLines && (
+          <Text dimColor>... ({payload.length - visibleLines} more lines, j/k to scroll)</Text>
         )}
       </Box>
-      <StatusBar>j/k scroll | b back | q quit</StatusBar>
-    </Box>
+    </FullHeightLayout>
   );
 };
 
@@ -187,41 +214,70 @@ const ExportView: FC<ExportViewProps> = (props: ExportViewProps) => {
   const { exit } = useApp();
   const [format, setFormat] = useState<"csv" | "json" | null>(null);
   const [exported, setExported] = useState<string | null>(null);
+  const [error, setError] = useState<AppError | null>(null);
+  const [exporting, setExporting] = useState(false);
 
-  useInput((input: string, key: { escape: boolean }) => {
-    if (input === "q") exit();
-    else if (key.escape || input === "b") props.onBack();
-    else if (input === "c" && !format) setFormat("csv");
-    else if (input === "j" && !format) setFormat("json");
+  const canSelectFormat = !format && !exporting && !error;
+
+  const bindings = createBindings({
+    onBack: props.onBack,
+    onQuit: exit,
+    custom: [
+      { key: "c", label: "CSV", handler: () => setFormat("csv"), enabled: canSelectFormat },
+      { key: "j", label: "JSON", handler: () => setFormat("json"), enabled: canSelectFormat },
+    ],
   });
 
+  // Error dismissal
+  useInput((_input: string, key: { escape: boolean }) => {
+    if (error) {
+      setError(null);
+      setFormat(null);
+    } else if (key.escape) {
+      props.onBack();
+    }
+  });
+
+  useKeyHandler(bindings, [format, exporting, error]);
+
   useEffect(() => {
-    if (!format) return;
+    if (!format || exporting) return;
     const doExport = async () => {
-      const output = format === "json"
-        ? JSON.stringify(props.events, null, 2)
-        : stringify(
-            props.events.map((e) => ({
-              timestamp: e.timestamp,
-              scope: e.scope,
-              type: e.type,
-              eventId: e.eventId,
-              correlationId: getString(e, "correlationId") ?? "",
-              payload: JSON.stringify(e),
-            })),
-            { columns: ["timestamp", "scope", "type", "eventId", "correlationId", "payload"], headers: true }
-          );
-      const filename = `events-${Date.now()}.${format}`;
-      await Deno.writeTextFile(filename, output);
-      setExported(filename);
+      setExporting(true);
+      setError(null);
+      try {
+        const output = format === "json"
+          ? JSON.stringify(props.events, null, 2)
+          : stringify(
+              props.events.map((e) => ({
+                timestamp: e.timestamp,
+                scope: e.scope,
+                type: e.type,
+                eventId: e.eventId,
+                correlationId: getString(e, "correlationId") ?? "",
+                payload: JSON.stringify(e),
+              })),
+              { columns: ["timestamp", "scope", "type", "eventId", "correlationId", "payload"], headers: true }
+            );
+        const filename = `events-${Date.now()}.${format}`;
+        await Deno.writeTextFile(filename, output);
+        setExported(filename);
+      } catch (e) {
+        setError(toAppError(e, "Export Failed"));
+      } finally {
+        setExporting(false);
+      }
     };
     doExport();
   }, [format]);
 
   return (
-    <Box flexDirection="column">
-      <Header title="Export Events" />
-      {!format ? (
+    <FullHeightLayout
+      header={<Header title="Export Events" />}
+      statusBar={<StatusBar>{bindings.hints}</StatusBar>}
+    >
+      {error && <ErrorBanner error={error} onDismiss={() => { setError(null); setFormat(null); }} />}
+      {!format && !error ? (
         <>
           <Text>Select export format:</Text>
           <Box marginY={1} flexDirection="column">
@@ -231,11 +287,10 @@ const ExportView: FC<ExportViewProps> = (props: ExportViewProps) => {
         </>
       ) : exported ? (
         <Text color="green">Exported {props.events.length} events to {exported}</Text>
-      ) : (
+      ) : exporting ? (
         <Text color="cyan">Exporting...</Text>
-      )}
-      <StatusBar>b back | q quit</StatusBar>
-    </Box>
+      ) : null}
+    </FullHeightLayout>
   );
 };
 
@@ -256,43 +311,71 @@ const ListView: FC<ListViewProps> = (props: ListViewProps) => {
   const { exit } = useApp();
   const [events, setEvents] = useState<StorableEvent[]>([]);
   const [total, setTotal] = useState(0);
-  const [selected, setSelected] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<AppError | null>(null);
+  const { columns } = useTerminalSize();
 
-  const pageSize = props.state.limit;
+  // Dynamic page size based on terminal height
+  // Chrome: Header (3) + filters line (1) + showing line (1) + margins (2) + status bar (3) + error banner (4) = 14 lines
+  const availableHeight = useContentHeight(error ? 14 : 10);
+  const pageSize = Math.max(5, availableHeight);
   const page = Math.floor(props.state.offset / pageSize);
   const totalPages = Math.ceil(total / pageSize);
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        const all = await fetchEvents(props.store, { ...props.state, offset: 0, limit: 10000 });
-        setTotal(all.length);
-        setEvents(all.slice(props.state.offset, props.state.offset + pageSize));
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, [props.state]);
-
-  useInput((input: string, key: { upArrow: boolean; downArrow: boolean; return: boolean; escape: boolean }) => {
-    if (input === "q" || key.escape) exit();
-    else if (key.upArrow || input === "k") setSelected((s: number) => Math.max(0, s - 1));
-    else if (key.downArrow || input === "j") setSelected((s: number) => Math.min(events.length - 1, s + 1));
-    else if (key.return || input === " ") {
-      if (events[selected]) props.onViewEvent(events[selected]);
+  const loadEvents = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const all = await fetchEvents(props.store, { ...props.state, offset: 0, limit: 10000 });
+      setTotal(all.length);
+      setEvents(all.slice(props.state.offset, props.state.offset + pageSize));
+    } catch (e) {
+      setError(toAppError(e, "Failed to Load Events"));
+      setEvents([]);
+      setTotal(0);
+    } finally {
+      setLoading(false);
     }
-    else if (input === "f") props.onFilter("scope");
-    else if (input === "t") props.onFilter("type");
-    else if (input === "s") props.onFilter("since");
-    else if (input === "c") props.onFilter("correlation");
-    else if (input === "r") props.onUpdateState({ scope: undefined, type: undefined, since: undefined, correlationId: undefined, offset: 0 });
-    else if (input === "n" && props.state.offset + pageSize < total) props.onUpdateState({ offset: props.state.offset + pageSize });
-    else if (input === "p" && props.state.offset > 0) props.onUpdateState({ offset: Math.max(0, props.state.offset - pageSize) });
-    else if (input === "e") props.onExport();
+  };
+
+  useEffect(() => {
+    loadEvents();
+  }, [props.state, pageSize]);
+
+  // Navigation within current page
+  const nav = useListNavigation(events);
+
+  // Filter action bindings
+  const filterBindings: KeyBinding[] = [
+    { key: "f", label: "scope", handler: () => props.onFilter("scope") },
+    { key: "t", label: "type", handler: () => props.onFilter("type") },
+    { key: "s", label: "since", handler: () => props.onFilter("since") },
+    { key: "c", label: "corr", handler: () => props.onFilter("correlation") },
+    { key: "R", label: "reset", handler: () => props.onUpdateState({ scope: undefined, type: undefined, since: undefined, correlationId: undefined, offset: 0 }) },
+    { key: "e", label: "export", handler: () => props.onExport() },
+    ...(error ? [{ key: "r", label: "retry", handler: loadEvents }] : []),
+  ];
+
+  const bindings = createBindings({
+    navigation: true,
+    pagination: totalPages > 1,
+    onUp: nav.up,
+    onDown: nav.down,
+    onPageUp: () => { props.onUpdateState({ offset: Math.max(0, props.state.offset - pageSize) }); nav.reset(); },
+    onPageDown: () => { if (props.state.offset + pageSize < total) { props.onUpdateState({ offset: props.state.offset + pageSize }); nav.reset(); } },
+    onSelect: () => { if (events[nav.selectedIndex]) props.onViewEvent(events[nav.selectedIndex]); },
+    onQuit: exit,
+    custom: filterBindings,
   });
+
+  // Error dismissal
+  useInput((_input: string, _key: { escape: boolean }) => {
+    if (error && error.recoverable) {
+      setError(null);
+    }
+  });
+
+  useKeyHandler(bindings, [nav.selectedIndex, props.state.offset, total, error]);
 
   const filters: string[] = [];
   if (props.state.scope) filters.push(`scope=${props.state.scope}`);
@@ -300,9 +383,19 @@ const ListView: FC<ListViewProps> = (props: ListViewProps) => {
   if (props.state.since) filters.push(`since=${props.state.since}`);
   if (props.state.correlationId) filters.push(`corr=${props.state.correlationId.slice(0, 8)}...`);
 
+  // Calculate proportional column widths
+  // Fixed columns: prefix (7), scope (12), time (12), eventId (10) = 41 chars
+  const availableWidth = Math.max(40, columns - 41);
+  const typeWidth = Math.max(15, Math.min(40, availableWidth));
+
+  const statusHints = bindings.hints + (totalPages > 1 ? ` | ${page + 1}/${totalPages}` : "");
+
   return (
-    <Box flexDirection="column">
-      <Header title="Event Log Viewer" />
+    <FullHeightLayout
+      header={<Header title="Event Log Viewer" />}
+      statusBar={<StatusBar>{statusHints}</StatusBar>}
+    >
+      {error && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
       <Box marginBottom={1}>
         <Text bold>Filters: </Text>
         {filters.length > 0 ? (
@@ -314,9 +407,9 @@ const ListView: FC<ListViewProps> = (props: ListViewProps) => {
 
       {loading ? (
         <Text color="cyan">Loading...</Text>
-      ) : events.length === 0 ? (
+      ) : events.length === 0 && !error ? (
         <Text dimColor>No events found.</Text>
-      ) : (
+      ) : events.length > 0 ? (
         <>
           <Text dimColor>
             Showing {props.state.offset + 1}-{props.state.offset + events.length} of {total}:
@@ -324,11 +417,11 @@ const ListView: FC<ListViewProps> = (props: ListViewProps) => {
           <Box flexDirection="column" marginY={1}>
             {events.map((e, i) => (
               <Box key={e.eventId}>
-                <Text color={selected === i ? "green" : "white"}>
-                  {selected === i ? "> " : "  "}
+                <Text color={nav.selectedIndex === i ? "green" : "white"}>
+                  {nav.selectedIndex === i ? "> " : "  "}
                   <Text bold>[{(props.state.offset + i + 1).toString().padStart(2)}]</Text>{" "}
                   <Text color={scopeColor(e.scope)}>{e.scope.padEnd(10)}</Text>{" "}
-                  {truncate(e.type, 25).padEnd(25)}{" "}
+                  {truncate(e.type, typeWidth).padEnd(typeWidth)}{" "}
                   <Text dimColor>{relativeTime(e.timestamp).padEnd(10)}</Text>{" "}
                   <Text dimColor>{e.eventId.slice(0, 8)}</Text>
                 </Text>
@@ -336,13 +429,8 @@ const ListView: FC<ListViewProps> = (props: ListViewProps) => {
             ))}
           </Box>
         </>
-      )}
-
-      <StatusBar>
-        j/k nav | Enter view | f scope | t type | s since | c corr | r reset | n/p page | e export | q quit
-        {totalPages > 1 && ` | ${page + 1}/${totalPages}`}
-      </StatusBar>
-    </Box>
+      ) : null}
+    </FullHeightLayout>
   );
 };
 
@@ -415,55 +503,73 @@ const App: FC<AppProps> = (props: AppProps) => {
 // =============================================================================
 
 const cliList = async (store: EventStore, limit: number): Promise<void> => {
-  const events = await fetchEvents(store, { limit, offset: 0 });
-  if (events.length === 0) {
-    console.log("No events found.");
-    return;
+  try {
+    const events = await fetchEvents(store, { limit, offset: 0 });
+    if (events.length === 0) {
+      console.log("No events found.");
+      return;
+    }
+    console.log("\nRecent Events\n" + "─".repeat(76));
+    for (let i = 0; i < events.length; i++) {
+      const e = events[i];
+      console.log(`  [${(i + 1).toString().padStart(2)}] ${e.scope.padEnd(10)} ${e.type.padEnd(25)} ${relativeTime(e.timestamp).padEnd(10)} ${e.eventId.slice(0, 8)}`);
+    }
+    console.log("─".repeat(76) + `\nShowing ${events.length} most recent events`);
+  } catch (e) {
+    const error = toAppError(e, "Failed to list events");
+    console.error(`Error: ${error.title} - ${error.message}`);
+    Deno.exit(1);
   }
-  console.log("\nRecent Events\n" + "─".repeat(76));
-  for (let i = 0; i < events.length; i++) {
-    const e = events[i];
-    console.log(`  [${(i + 1).toString().padStart(2)}] ${e.scope.padEnd(10)} ${e.type.padEnd(25)} ${relativeTime(e.timestamp).padEnd(10)} ${e.eventId.slice(0, 8)}`);
-  }
-  console.log("─".repeat(76) + `\nShowing ${events.length} most recent events`);
 };
 
 const cliView = async (store: EventStore, eventId: string): Promise<void> => {
-  const res = await store.fetch({ type: "all" });
-  if (!res.ok) {
-    console.error(`Query failed: ${res.error.message}`);
-    return;
+  try {
+    const res = await store.fetch({ type: "all" });
+    if (!res.ok) {
+      console.error(`Query failed: ${res.error.message}`);
+      Deno.exit(1);
+    }
+    const event = res.value.find((e) => e.eventId === eventId || e.eventId.startsWith(eventId));
+    if (!event) {
+      console.error(`Event not found: ${eventId}`);
+      return;
+    }
+    console.log("\nEvent Details\n" + "─".repeat(60));
+    console.log(`Event ID:    ${event.eventId}`);
+    console.log(`Scope:       ${event.scope}`);
+    console.log(`Type:        ${event.type}`);
+    console.log(`Timestamp:   ${formatTimestamp(event.timestamp)}`);
+    console.log("\nPayload:");
+    console.log(JSON.stringify(event, null, 2));
+  } catch (e) {
+    const error = toAppError(e, "Failed to get event");
+    console.error(`Error: ${error.title} - ${error.message}`);
+    Deno.exit(1);
   }
-  const event = res.value.find((e) => e.eventId === eventId || e.eventId.startsWith(eventId));
-  if (!event) {
-    console.error(`Event not found: ${eventId}`);
-    return;
-  }
-  console.log("\nEvent Details\n" + "─".repeat(60));
-  console.log(`Event ID:    ${event.eventId}`);
-  console.log(`Scope:       ${event.scope}`);
-  console.log(`Type:        ${event.type}`);
-  console.log(`Timestamp:   ${formatTimestamp(event.timestamp)}`);
-  console.log("\nPayload:");
-  console.log(JSON.stringify(event, null, 2));
 };
 
 const cliExport = async (store: EventStore, format: "csv" | "json"): Promise<void> => {
-  const events = await fetchEvents(store, { limit: 10000, offset: 0 });
-  const output = format === "json"
-    ? JSON.stringify(events, null, 2)
-    : stringify(
-        events.map((e) => ({
-          timestamp: e.timestamp,
-          scope: e.scope,
-          type: e.type,
-          eventId: e.eventId,
-          correlationId: getString(e, "correlationId") ?? "",
-          payload: JSON.stringify(e),
-        })),
-        { columns: ["timestamp", "scope", "type", "eventId", "correlationId", "payload"], headers: true }
-      );
-  console.log(output);
+  try {
+    const events = await fetchEvents(store, { limit: 10000, offset: 0 });
+    const output = format === "json"
+      ? JSON.stringify(events, null, 2)
+      : stringify(
+          events.map((e) => ({
+            timestamp: e.timestamp,
+            scope: e.scope,
+            type: e.type,
+            eventId: e.eventId,
+            correlationId: getString(e, "correlationId") ?? "",
+            payload: JSON.stringify(e),
+          })),
+          { columns: ["timestamp", "scope", "type", "eventId", "correlationId", "payload"], headers: true }
+        );
+    console.log(output);
+  } catch (e) {
+    const error = toAppError(e, "Failed to export events");
+    console.error(`Error: ${error.title} - ${error.message}`);
+    Deno.exit(1);
+  }
 };
 
 // =============================================================================
@@ -511,7 +617,7 @@ COMMANDS
     }
     await cliExport(store, format);
   } else {
-    renderApp(<App store={store} />);
+    await runApp(<App store={store} />);
   }
 };
 

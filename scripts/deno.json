@@ -1,6 +1,7 @@
 {
   "version": "0.1.0",
   "imports": {
+    "@bernays/plugins": "workspace:*",
     "@std/cli": "jsr:@std/cli@^1.0.25",
     "@std/csv": "jsr:@std/csv@^1.0.6",
     "@std/encoding": "jsr:@std/encoding@^1.0.10",

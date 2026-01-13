@@ -725,7 +725,6 @@ const runDeploy = async (ctx: FlyDeployContext): Promise<void> => {
     console.log(dim("Skipping Secrets (SKIP_SECRETS=1)"));
   }
 
-  console.log(bold("Deploying..."));
   await execution.deploy();
 
   await recordDeploy(instance.appName);
@@ -735,6 +734,7 @@ const runDeploy = async (ctx: FlyDeployContext): Promise<void> => {
   console.log(dim("  View Logs:   bernays logs"));
   console.log(dim("  App Status:  bernays status"));
 };
+
 // =============================================================================
 // CLI
 // =============================================================================

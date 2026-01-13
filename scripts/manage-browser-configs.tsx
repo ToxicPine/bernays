@@ -17,10 +17,23 @@ import type { BrowserConfig, ProxyConfig } from "@bernays/server/backend";
 import {
   Header,
   StatusBar,
-  renderApp,
+  FullHeightLayout,
+  ErrorBanner,
+  useAsyncOperation,
+  toAppError,
+  type AppError,
+  runApp,
   requireDatabaseUrl,
   runMain,
+  useContentHeight,
+  useTerminalSize,
 } from "./lib/ink.tsx";
+import {
+  createBindings,
+  useKeyHandler,
+  type KeyBinding,
+} from "./lib/keybindings.tsx";
+import { useListNavigation, usePagination } from "./lib/hooks.tsx";
 
 // =============================================================================
 // Types
@@ -50,21 +63,28 @@ interface CreateData {
 // Components
 // =============================================================================
 
-const ConfigRow: FC<{ config: BrowserConfig; index: number; selected: boolean }> = (
-  props: { config: BrowserConfig; index: number; selected: boolean }
+const ConfigRow: FC<{ config: BrowserConfig; index: number; selected: boolean; columns: number }> = (
+  props: { config: BrowserConfig; index: number; selected: boolean; columns: number }
 ) => {
   const c = props.config;
   const extCount = c.extensionIds.length;
+  // Distribute widths proportionally: ~35% id, ~40% context, ~15% ext, ~10% proxy
+  // Accounting for prefix (4 chars) and labels (20 chars total)
+  const availableWidth = Math.max(60, props.columns - 24);
+  const idWidth = Math.max(12, Math.floor(availableWidth * 0.35));
+  const ctxWidth = Math.max(10, Math.floor(availableWidth * 0.40));
+  const displayId = c.id.length > idWidth ? c.id.slice(0, idWidth - 3) + "..." : c.id.padEnd(idWidth);
+  const displayCtx = c.context.length > ctxWidth ? c.context.slice(0, ctxWidth - 3) + "..." : c.context.padEnd(ctxWidth);
   return (
     <Box>
       <Text color={props.selected ? "green" : "white"}>
         {props.selected ? "> " : "  "}
-        <Text bold>[{props.index + 1}]</Text>{" "}
-        <Text color="cyan">{c.id.padEnd(24)}</Text>{" "}
-        <Text dimColor>ctx:</Text> {c.context.slice(0, 18).padEnd(18)}{" "}
-        <Text dimColor>ext:</Text> {String(extCount).padEnd(2)}{" "}
+        <Text bold>[{String(props.index + 1).padStart(2)}]</Text>{" "}
+        <Text color="cyan">{displayId}</Text>{" "}
+        <Text dimColor>ctx:</Text> {displayCtx}{" "}
+        <Text dimColor>ext:</Text> {String(extCount).padStart(2)}{" "}
         <Text dimColor>proxy:</Text>{" "}
-        <Text color={c.proxy ? "green" : "gray"}>{c.proxy ? "yes" : "no"}</Text>
+        <Text color={c.proxy ? "green" : "gray"}>{c.proxy ? "yes" : "no "}</Text>
       </Text>
     </Box>
   );
@@ -84,50 +104,84 @@ interface ListViewProps {
 
 const ListView: FC<ListViewProps> = (props: ListViewProps) => {
   const { exit } = useApp();
-  const [configs, setConfigs] = useState<readonly BrowserConfig[]>([]);
-  const [selected, setSelected] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const { data: configs, error, loading, run, clearError } = useAsyncOperation<readonly BrowserConfig[]>();
+  const { columns } = useTerminalSize();
+
+  // Dynamic page size: Chrome: Header (3) + margins (2) + status bar (3) + error banner (4) = 12 lines
+  const availableHeight = useContentHeight(error ? 12 : 8);
+  const pageSize = Math.max(5, availableHeight);
 
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      const list = await Effect.runPromise(props.store.list());
-      setConfigs(list);
-      setLoading(false);
-    };
-    load();
+    run(async () => {
+      return await Effect.runPromise(props.store.list());
+    }, "Failed to Load Configs");
   }, []);
 
-  useInput((input: string, key: { upArrow: boolean; downArrow: boolean; return: boolean; escape: boolean }) => {
-    if (input === "q" || key.escape) exit();
-    else if (key.upArrow || input === "k") setSelected((s: number) => Math.max(0, s - 1));
-    else if (key.downArrow || input === "j") setSelected((s: number) => Math.min(configs.length - 1, s + 1));
-    else if (key.return || input === "v") {
-      if (configs[selected]) props.onView(configs[selected]);
-    }
-    else if (input === "c") props.onCreate();
-    else if (input === "e" && configs[selected]) props.onEdit(configs[selected]);
-    else if (input === "d" && configs[selected]) props.onDelete(configs[selected]);
+  const configList = configs || [];
+
+  // Navigation and pagination
+  const pagination = usePagination(configList, pageSize);
+  const nav = useListNavigation(pagination.pageItems);
+
+  // Keybindings
+  const getSelectedConfig = () => configList[pagination.pageStartIndex + nav.selectedIndex];
+
+  const customBindings: KeyBinding[] = [
+    { key: "v", label: "view", handler: () => { const c = getSelectedConfig(); if (c) props.onView(c); } },
+    { key: "c", label: "create", handler: () => props.onCreate() },
+    { key: "e", label: "edit", handler: () => { const c = getSelectedConfig(); if (c) props.onEdit(c); } },
+    { key: "d", label: "delete", handler: () => { const c = getSelectedConfig(); if (c) props.onDelete(c); } },
+    ...(error ? [{ key: "r", label: "retry", handler: () => {
+      run(async () => await Effect.runPromise(props.store.list()), "Failed to Load Configs");
+    }}] : []),
+  ];
+
+  const bindings = createBindings({
+    navigation: true,
+    pagination: pagination.totalPages > 1,
+    onUp: nav.up,
+    onDown: nav.down,
+    onPageUp: () => { pagination.prevPage(); nav.reset(); },
+    onPageDown: () => { pagination.nextPage(); nav.reset(); },
+    onSelect: () => { const c = getSelectedConfig(); if (c) props.onView(c); },
+    onQuit: exit,
+    custom: customBindings,
   });
 
+  // Error dismissal handler
+  useInput((input: string, key: { escape: boolean }) => {
+    if (error && error.recoverable && (input || key.escape)) {
+      clearError();
+    }
+  });
+
+  useKeyHandler(bindings, [pagination.pageStartIndex, nav.selectedIndex, error]);
+
+  const statusHints = bindings.hints + (pagination.totalPages > 1 ? ` | ${pagination.page + 1}/${pagination.totalPages}` : "");
+
   return (
-    <Box flexDirection="column">
-      <Header title="Browser Config Manager" />
+    <FullHeightLayout
+      header={<Header title="Browser Config Manager" />}
+      statusBar={<StatusBar>{statusHints}</StatusBar>}
+    >
+      {error && <ErrorBanner error={error} onDismiss={clearError} />}
       {loading ? (
         <Text color="cyan">Loading...</Text>
-      ) : configs.length === 0 ? (
+      ) : configList.length === 0 && !error ? (
         <Text dimColor>No configs found.</Text>
-      ) : (
-        <Box flexDirection="column" marginY={1}>
-          {configs.map((c, i) => (
-            <ConfigRow key={c.id} config={c} index={i} selected={selected === i} />
-          ))}
-        </Box>
-      )}
-      <StatusBar>
-        j/k nav | Enter/v view | c create | e edit | d delete | q quit
-      </StatusBar>
-    </Box>
+      ) : configList.length > 0 ? (
+        <>
+          <Text dimColor>
+            Showing {pagination.pageStartIndex + 1}-{Math.min(pagination.pageStartIndex + pageSize, configList.length)} of {configList.length}:
+          </Text>
+          <Box flexDirection="column" marginY={1}>
+            {pagination.pageItems.map((c, i) => (
+              <ConfigRow key={c.id} config={c} index={pagination.pageStartIndex + i} selected={nav.selectedIndex === i} columns={columns} />
+            ))}
+          </Box>
+        </>
+      ) : null}
+    </FullHeightLayout>
   );
 };
 
@@ -146,16 +200,22 @@ const DetailView: FC<DetailViewProps> = (props: DetailViewProps) => {
   const { exit } = useApp();
   const c = props.config;
 
-  useInput((input: string, key: { escape: boolean }) => {
-    if (input === "q") exit();
-    else if (key.escape || input === "b") props.onBack();
-    else if (input === "e") props.onEdit();
-    else if (input === "d") props.onDelete();
+  const bindings = createBindings({
+    onBack: props.onBack,
+    onQuit: exit,
+    custom: [
+      { key: "e", label: "edit", handler: props.onEdit },
+      { key: "d", label: "delete", handler: props.onDelete },
+    ],
   });
 
+  useKeyHandler(bindings);
+
   return (
-    <Box flexDirection="column">
-      <Header title="Config Details" />
+    <FullHeightLayout
+      header={<Header title="Config Details" />}
+      statusBar={<StatusBar>{bindings.hints}</StatusBar>}
+    >
       <Box flexDirection="column" marginY={1}>
         <Text><Text bold>ID:</Text> <Text color="cyan">{c.id}</Text></Text>
         <Text><Text bold>Context:</Text> {c.context}</Text>
@@ -170,8 +230,7 @@ const DetailView: FC<DetailViewProps> = (props: DetailViewProps) => {
           <Text><Text bold>Proxy:</Text> <Text dimColor>(none)</Text></Text>
         )}
       </Box>
-      <StatusBar>e edit | d delete | b back | q quit</StatusBar>
-    </Box>
+    </FullHeightLayout>
   );
 };
 
@@ -185,7 +244,7 @@ interface FormViewProps {
   data: Partial<CreateData>;
   original?: BrowserConfig;
   onUpdate: (field: string, value: string) => void;
-  onNext: () => void;
+  onNext: (value: string) => void;
   onCancel: () => void;
 }
 
@@ -207,7 +266,7 @@ const FormView: FC<FormViewProps> = (props: FormViewProps) => {
 
   const handleSubmit = (val: string) => {
     props.onUpdate(props.step, val);
-    props.onNext();
+    props.onNext(val);
   };
 
   const labels: Record<string, { label: string; hint?: string }> = {
@@ -226,8 +285,10 @@ const FormView: FC<FormViewProps> = (props: FormViewProps) => {
   const isAction = props.step === "proxy-action";
 
   return (
-    <Box flexDirection="column">
-      <Header title={props.mode === "create" ? "Create Config" : "Edit Config"} />
+    <FullHeightLayout
+      header={<Header title={props.mode === "create" ? "Create Config" : "Edit Config"} />}
+      statusBar={<StatusBar>Enter to continue | Escape to cancel</StatusBar>}
+    >
       {props.original && (
         <Box marginBottom={1}>
           <Text dimColor>Editing: {props.original.id}</Text>
@@ -259,8 +320,7 @@ const FormView: FC<FormViewProps> = (props: FormViewProps) => {
           )}
         </Box>
       </Box>
-      <StatusBar>Enter to continue | Escape to cancel</StatusBar>
-    </Box>
+    </FullHeightLayout>
   );
 };
 
@@ -274,23 +334,43 @@ interface ConfirmViewProps {
   original?: BrowserConfig;
   onConfirm: () => void;
   onCancel: () => void;
+  error?: AppError | null;
+  saving?: boolean;
+  onDismissError?: () => void;
 }
 
 const ConfirmView: FC<ConfirmViewProps> = (props: ConfirmViewProps) => {
   const { exit } = useApp();
 
-  useInput((input: string, key: { escape: boolean }) => {
-    if (input === "q") exit();
-    else if (key.escape || input === "n") props.onCancel();
-    else if (input === "y" || input === "Y") props.onConfirm();
+  const bindings = createBindings({
+    onQuit: exit,
+    custom: [
+      { key: "y", label: "confirm", handler: props.onConfirm, enabled: !props.saving },
+      { key: "n", label: "cancel", handler: props.onCancel, enabled: !props.saving },
+    ],
   });
+
+  // Error dismissal and escape handling
+  useInput((_input: string, key: { escape: boolean }) => {
+    if (props.error && props.onDismissError) {
+      props.onDismissError();
+      return;
+    }
+    if (props.saving) return;
+    if (key.escape) props.onCancel();
+  });
+
+  useKeyHandler(bindings, [props.saving, props.error]);
 
   const d = props.data;
   const hasProxy = d.proxyServer && d.proxyServer.length > 0;
 
   return (
-    <Box flexDirection="column">
-      <Header title={props.action === "create" ? "Confirm Create" : "Confirm Edit"} />
+    <FullHeightLayout
+      header={<Header title={props.action === "create" ? "Confirm Create" : "Confirm Edit"} />}
+      statusBar={<StatusBar>{bindings.hints}</StatusBar>}
+    >
+      {props.error && <ErrorBanner error={props.error} onDismiss={props.onDismissError} />}
       <Box flexDirection="column" marginY={1} borderStyle="single" borderColor="gray" paddingX={1}>
         <Text><Text bold>ID:</Text> <Text color="cyan">{d.id}</Text></Text>
         <Text><Text bold>Context:</Text> {d.context}</Text>
@@ -305,9 +385,12 @@ const ConfirmView: FC<ConfirmViewProps> = (props: ConfirmViewProps) => {
           <Text><Text bold>Proxy:</Text> <Text dimColor>(none)</Text></Text>
         )}
       </Box>
-      <Text bold color="yellow">Save this config? (y/n)</Text>
-      <StatusBar>y confirm | n cancel | q quit</StatusBar>
-    </Box>
+      {props.saving ? (
+        <Text color="cyan">Saving...</Text>
+      ) : (
+        <Text bold color="yellow">Save this config? (y/n)</Text>
+      )}
+    </FullHeightLayout>
   );
 };
 
@@ -325,36 +408,68 @@ interface DeleteViewProps {
 const DeleteView: FC<DeleteViewProps> = (props: DeleteViewProps) => {
   const { exit } = useApp();
   const [deleted, setDeleted] = useState(false);
+  const [error, setError] = useState<AppError | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
-  useInput((input: string, key: { escape: boolean }) => {
-    if (input === "q") exit();
-    else if (key.escape || input === "n") props.onCancel();
-    else if (input === "y" || input === "Y") {
-      Effect.runPromise(props.store.remove(props.config.id)).then(() => {
+  const handleDelete = () => {
+    if (deleting) return;
+    setDeleting(true);
+    Effect.runPromise(props.store.remove(props.config.id))
+      .then(() => {
         setDeleted(true);
         setTimeout(props.onDone, 1000);
+      })
+      .catch((e) => {
+        setDeleting(false);
+        setError(toAppError(e, "Delete Failed"));
       });
-    }
+  };
+
+  const bindings = createBindings({
+    onQuit: exit,
+    custom: [
+      { key: "y", label: "delete", handler: handleDelete },
+      { key: "n", label: "cancel", handler: props.onCancel },
+    ],
   });
+
+  // Error dismissal and escape handling
+  useInput((_input: string, key: { escape: boolean }) => {
+    if (error) {
+      setError(null);
+      return;
+    }
+    if (key.escape) props.onCancel();
+  });
+
+  useKeyHandler(bindings, [deleting, error]);
 
   if (deleted) {
     return (
-      <Box flexDirection="column">
-        <Header title="Delete Config" />
+      <FullHeightLayout
+        header={<Header title="Delete Config" />}
+        statusBar={<StatusBar>Returning to list...</StatusBar>}
+      >
         <Text color="green">Config deleted successfully.</Text>
-      </Box>
+      </FullHeightLayout>
     );
   }
 
   return (
-    <Box flexDirection="column">
-      <Header title="Delete Config" />
+    <FullHeightLayout
+      header={<Header title="Delete Config" />}
+      statusBar={<StatusBar>{bindings.hints}</StatusBar>}
+    >
+      {error && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
       <Box marginY={1}>
         <Text>Delete config <Text color="cyan">{props.config.id}</Text>?</Text>
       </Box>
-      <Text bold color="red">This cannot be undone. (y/n)</Text>
-      <StatusBar>y delete | n cancel | q quit</StatusBar>
-    </Box>
+      {deleting ? (
+        <Text color="cyan">Deleting...</Text>
+      ) : (
+        <Text bold color="red">This cannot be undone. (y/n)</Text>
+      )}
+    </FullHeightLayout>
   );
 };
 
@@ -369,6 +484,8 @@ interface AppProps {
 const App: FC<AppProps> = (props: AppProps) => {
   const [view, setView] = useState<View>({ type: "list" });
   const [refreshKey, setRefreshKey] = useState(0);
+  const [saveError, setSaveError] = useState<AppError | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const refresh = () => setRefreshKey((k) => k + 1);
 
@@ -388,10 +505,18 @@ const App: FC<AppProps> = (props: AppProps) => {
   };
 
   const saveConfig = async (data: CreateData, original?: BrowserConfig) => {
-    const config = buildConfig(data, original?.id);
-    await Effect.runPromise(props.store.upsert(config));
-    refresh();
-    setView({ type: "list" });
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const config = buildConfig(data, original?.id);
+      await Effect.runPromise(props.store.upsert(config));
+      refresh();
+      setView({ type: "list" });
+    } catch (e) {
+      setSaveError(toAppError(e, "Save Failed"));
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Create flow
@@ -399,11 +524,10 @@ const App: FC<AppProps> = (props: AppProps) => {
     const steps: CreateStep[] = ["id", "context", "extensions", "proxy-ask", "proxy-server", "proxy-user", "proxy-pass"];
     const stepIdx = steps.indexOf(view.step as CreateStep);
 
-    const handleNext = () => {
-      const d = view.data;
+    const handleNext = (currentValue: string) => {
+      const d = { ...view.data, [view.step]: currentValue };
       if (view.step === "proxy-ask") {
-        const answer = (d as Record<string, string>)["proxy-ask"] || "";
-        if (answer.toLowerCase() !== "y") {
+        if (currentValue.toLowerCase() !== "y") {
           setView({ type: "confirm", action: "create", data: d as CreateData });
           return;
         }
@@ -413,7 +537,7 @@ const App: FC<AppProps> = (props: AppProps) => {
         return;
       }
       const nextStep = steps[stepIdx + 1];
-      if (nextStep) setView({ ...view, step: nextStep });
+      if (nextStep) setView({ ...view, step: nextStep, data: d });
     };
 
     return (
@@ -435,10 +559,10 @@ const App: FC<AppProps> = (props: AppProps) => {
     const steps: EditStep[] = ["context", "extensions", "proxy-action", "proxy-server", "proxy-user", "proxy-pass"];
     const stepIdx = steps.indexOf(view.step as EditStep);
 
-    const handleNext = () => {
-      const d = view.data;
+    const handleNext = (currentValue: string) => {
+      const d = { ...view.data, [view.step]: currentValue };
       if (view.step === "proxy-action") {
-        const action = (d as Record<string, string>)["proxy-action"] || "k";
+        const action = currentValue || "k";
         if (action.toLowerCase() === "k") {
           // Keep existing proxy
           const existing = view.config.proxy;
@@ -477,7 +601,7 @@ const App: FC<AppProps> = (props: AppProps) => {
         return;
       }
       const nextStep = steps[stepIdx + 1];
-      if (nextStep) setView({ ...view, step: nextStep });
+      if (nextStep) setView({ ...view, step: nextStep, data: d });
     };
 
     return (
@@ -502,7 +626,10 @@ const App: FC<AppProps> = (props: AppProps) => {
         data={view.data}
         original={view.original}
         onConfirm={() => saveConfig(view.data, view.original)}
-        onCancel={() => setView({ type: "list" })}
+        onCancel={() => { setSaveError(null); setView({ type: "list" }); }}
+        error={saveError}
+        saving={saving}
+        onDismissError={() => setSaveError(null)}
       />
     );
   }
@@ -568,36 +695,48 @@ const App: FC<AppProps> = (props: AppProps) => {
 // =============================================================================
 
 const cliList = async (store: ConfigStoreService): Promise<void> => {
-  const configs = await Effect.runPromise(store.list());
-  if (configs.length === 0) {
-    console.log("No configs found.");
-    return;
+  try {
+    const configs = await Effect.runPromise(store.list());
+    if (configs.length === 0) {
+      console.log("No configs found.");
+      return;
+    }
+    console.log("\nBrowser Configs\n" + "─".repeat(80));
+    for (let i = 0; i < configs.length; i++) {
+      const c = configs[i];
+      console.log(`  [${i + 1}] ${c.id.padEnd(24)} ctx:${c.context.slice(0, 18).padEnd(18)} ext:${c.extensionIds.length} proxy:${c.proxy ? "yes" : "no"}`);
+    }
+    console.log("─".repeat(80) + `\nTotal: ${configs.length}`);
+  } catch (e) {
+    const error = toAppError(e, "Failed to list configs");
+    console.error(`Error: ${error.title} - ${error.message}`);
+    Deno.exit(1);
   }
-  console.log("\nBrowser Configs\n" + "─".repeat(80));
-  for (let i = 0; i < configs.length; i++) {
-    const c = configs[i];
-    console.log(`  [${i + 1}] ${c.id.padEnd(24)} ctx:${c.context.slice(0, 18).padEnd(18)} ext:${c.extensionIds.length} proxy:${c.proxy ? "yes" : "no"}`);
-  }
-  console.log("─".repeat(80) + `\nTotal: ${configs.length}`);
 };
 
 const cliView = async (store: ConfigStoreService, id: string): Promise<void> => {
-  const result = await Effect.runPromise(store.get(BrowserConfigId(id)));
-  if (Option.isNone(result)) {
-    console.error(`Config not found: ${id}`);
-    return;
-  }
-  const c = result.value;
-  console.log("\nConfig Details\n" + "─".repeat(50));
-  console.log(`ID:         ${c.id}`);
-  console.log(`Context:    ${c.context}`);
-  console.log(`Extensions: ${c.extensionIds.join(", ") || "(none)"}`);
-  if (c.proxy) {
-    console.log(`Proxy:      ${c.proxy.server}`);
-    console.log(`Proxy User: ${c.proxy.username || "(none)"}`);
-    console.log(`Proxy Pass: ${c.proxy.password ? "[set]" : "(none)"}`);
-  } else {
-    console.log(`Proxy:      (none)`);
+  try {
+    const result = await Effect.runPromise(store.get(BrowserConfigId(id)));
+    if (Option.isNone(result)) {
+      console.error(`Config not found: ${id}`);
+      return;
+    }
+    const c = result.value;
+    console.log("\nConfig Details\n" + "─".repeat(50));
+    console.log(`ID:         ${c.id}`);
+    console.log(`Context:    ${c.context}`);
+    console.log(`Extensions: ${c.extensionIds.join(", ") || "(none)"}`);
+    if (c.proxy) {
+      console.log(`Proxy:      ${c.proxy.server}`);
+      console.log(`Proxy User: ${c.proxy.username || "(none)"}`);
+      console.log(`Proxy Pass: ${c.proxy.password ? "[set]" : "(none)"}`);
+    } else {
+      console.log(`Proxy:      (none)`);
+    }
+  } catch (e) {
+    const error = toAppError(e, "Failed to get config");
+    console.error(`Error: ${error.title} - ${error.message}`);
+    Deno.exit(1);
   }
 };
 
@@ -637,7 +776,7 @@ COMMANDS
     }
     await cliView(store, String(rest[0]));
   } else {
-    renderApp(<App store={store} />);
+    await runApp(<App store={store} />);
   }
 };
 

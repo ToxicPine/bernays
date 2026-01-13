@@ -156,4 +156,27 @@ window.__registerCommand<ObserverContext, void>(
   },
 );
 
+// ============================================================================
+// Test Command
+// ============================================================================
+
+interface TestEchoParams {
+  echoId: string;
+}
+
+/**
+ * Test command for e2e verification of bidirectional communication.
+ * Emits a TestEcho event with the same echoId that was sent in.
+ */
+window.__registerCommand<TestEchoParams, void>(
+  "test:echo",
+  async (params) => {
+    window.__emitObservation("TestEcho", {
+      scope: "test",
+      echoId: params.echoId,
+    });
+    return { ok: true, value: undefined };
+  },
+);
+
 export {};

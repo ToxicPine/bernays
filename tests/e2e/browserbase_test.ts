@@ -1,7 +1,7 @@
 // tests/e2e/browserbase_test.ts
 // Full E2E test: PostgreSQL + Browserbase + Extension
 
-import { assertEquals, assertGreaterOrEqual } from "@std/assert";
+import { assertGreaterOrEqual } from "@std/assert";
 import { Effect, Layer } from "effect";
 import {
   cleanupTestData,
@@ -11,6 +11,7 @@ import {
   validateBrowserbase,
   validateDatabase,
   waitForExtension,
+  type BridgeMessage,
   type E2EConfig,
   type TestSession,
 } from "../lib/mod.ts";
@@ -51,7 +52,7 @@ interface Context {
   browserPool: BrowserPoolService;
   account: LinkedInAccount;
   session?: TestSession;
-  events: unknown[];
+  events: BridgeMessage[];
 }
 
 let ctx: Context | undefined;
@@ -130,23 +131,45 @@ Deno.test({
       await waitForExtension(ctx!.session!.page, TEST_URL, 60000);
     });
 
-    await t.step("collect bridge events", async () => {
+    await t.step("verify bidirectional communication", async () => {
       const { send, events, cleanup } = await setupBridge(ctx!.session!.page);
+
+      // Set context so events are tagged with our browser ID
       await send("observe:setContext", {
         browserId: TEST_BROWSER_ID,
         tabId: "e2e-test",
       });
-      await new Promise((r) => setTimeout(r, 10000));
+
+      // Send test:echo command with a unique ID
+      const echoId = crypto.randomUUID();
+      await send("test:echo", { echoId });
+
+      // Wait for event to arrive
+      await new Promise((r) => setTimeout(r, 1000));
+
+      // Find our echo event
+      const echoEvent = events.find((e) => {
+        const payload = e.payload as Record<string, unknown> | undefined;
+        return payload?.type === "TestEcho" && payload?.echoId === echoId;
+      });
+
       ctx!.events = [...events];
       cleanup();
-      assertGreaterOrEqual(ctx!.events.length, 0);
+
+      // Verify we got the exact event we sent
+      if (!echoEvent) {
+        console.log("Events received:", JSON.stringify(events, null, 2));
+        throw new Error(`Expected TestEcho event with echoId=${echoId}, got ${events.length} events`);
+      }
     });
 
-    await t.step("verify events in postgres", async () => {
+    await t.step("verify postgres connectivity", async () => {
+      // Note: Events from this test session don't flow to postgres because we're
+      // using a direct Browserbase session, not the BrowserPool+EventIngestion pipeline.
+      // This step just verifies we can query the event store.
       const result = await ctx!.eventStore.fetch({ type: "all" });
       if (!result.ok) throw new Error(result.error.message);
-      const linkedIn = result.value.filter((e) => e.scope === "linkedin");
-      console.log(`Events in DB: ${result.value.length}, LinkedIn: ${linkedIn.length}`);
+      console.log(`Events in DB: ${result.value.length}`);
     });
 
     await t.step("run sockpuppet", async () => {
