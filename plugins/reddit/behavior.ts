@@ -1,43 +1,28 @@
 // src/platforms/reddit/behavior.ts
-// Reddit platform behavior - derivation and execution
+// Reddit platform behavior - pure derivation only
 
-import { Effect } from "effect";
-import type {
-  AccountId,
-  BrowserConfigId,
-  ThreadId,
+import {
+  type BrowserConfigId,
+  ParticipantId,
+  type ParticipantId as ParticipantIdType,
+  type ThreadId,
 } from "@bernays/server/core";
-import type { StorableEvent } from "@bernays/server/store";
-import { BrowserPool } from "@bernays/server/backend";
-import {
-  calculateUnreadCount,
-  type MessageView,
-  type Participant,
-} from "@bernays/server/views";
-import {
-  type ExecuteError,
-  ExecuteErrorCode,
-  executeError,
-  type PlatformBehavior,
-} from "@bernays/server/platforms";
 import {
   buildThreadGraphs,
+  calculateUnreadCount,
+  extractParticipants,
   type GraphMessage,
-  graphNodesToMessages,
   type ThreadGraph,
+  toMessageViews,
 } from "@bernays/server/views";
-import { logger } from "$/logger.ts";
+import type { PlatformBehavior } from "@bernays/server/platforms";
 
 // Platform-specific types
 import type { RedditAnchor, RedditEvent } from "./schemas.ts";
-import type { RedditIntent } from "./schemas.ts";
-import type {
-  RedditInbox,
-  RedditIndexMeta,
-  RedditThread,
-} from "./views.ts";
+import type { RedditInbox, RedditIndexMeta, RedditThread } from "./views.ts";
 import type { RedditAccount } from "./account.ts";
-import type { RedditAuthStatus, RedditBrowser } from "./browser.ts";
+import { type RedditAuthStatus, type RedditBrowser } from "./browser.ts";
+import type { RedditContact } from "./contact.ts";
 import { REDDIT_SCOPE } from "./schemas.ts";
 
 // Type Alias
@@ -47,38 +32,19 @@ type RedditScope = typeof REDDIT_SCOPE;
 // Helper Functions
 
 /**
- * Convert graph nodes to MessageView format
- */
-const toMessageViews = (
-  graph: ThreadGraph<GraphMessage, RedditAnchor>,
-): readonly MessageView[] =>
-  graphNodesToMessages(graph.nodes).map((m) => ({
-    id: m.canonicalId,
-    senderId: m.senderId,
-    content: m.content,
-    timestamp: m.timestamp,
-  }));
-
-/**
- * Extract participants from Reddit anchor
- */
-const extractParticipants = (anchor: RedditAnchor): readonly Participant[] =>
-  anchor.participants.map((id) => ({ id }));
-
-/**
  * Convert ThreadGraph to RedditThread
  */
 const toRedditThread = (
-  graph: ThreadGraph<GraphMessage, RedditAnchor>,
-  accountId: string,
+  graph: ThreadGraph<RedditScope, GraphMessage, RedditAnchor>,
+  participantId: ParticipantIdType<"reddit">,
 ): RedditThread => {
-  const messages = toMessageViews(graph);
-  const unreadCount = calculateUnreadCount(messages, accountId);
+  const messages = toMessageViews<"reddit">(graph);
+  const unreadCount = calculateUnreadCount(messages, participantId);
 
   return {
     threadId: graph.id,
     messages,
-    participants: extractParticipants(graph.anchor),
+    participants: extractParticipants<"reddit">(graph.anchor),
     anchor: graph.anchor,
     unreadCount,
     lastActivity: graph.lastActivity,
@@ -90,15 +56,17 @@ const toRedditThread = (
 
 export const redditBehavior: PlatformBehavior<
   RedditScope,
+  "reddit",
   RedditEvent,
-  RedditIntent,
   RedditAnchor,
   RedditThread,
   RedditInbox,
   RedditAccount,
-  RedditBrowser
+  RedditBrowser,
+  RedditContact
 > = {
   scope: REDDIT_SCOPE,
+  identity: "reddit",
 
   // ---------------------------------------------------------------------------
   // Derivation
@@ -106,22 +74,20 @@ export const redditBehavior: PlatformBehavior<
 
   deriveInbox: (
     events: readonly RedditEvent[],
-    accountId: AccountId,
+    participantId: ParticipantIdType<"reddit">,
   ): RedditInbox => {
-    const allThreads = buildThreadGraphs<GraphMessage, RedditAnchor>(
-      events as readonly StorableEvent[],
-    );
-
-    const redditThreads = [...allThreads.values()].filter(
-      (t) => t.scope === REDDIT_SCOPE,
+    // Events are pre-filtered by scope via the Projection layer
+    const threads = buildThreadGraphs<RedditScope, GraphMessage, RedditAnchor>(
+      REDDIT_SCOPE,
+      events,
     );
 
     const byThreadId: Record<string, RedditIndexMeta> = {};
     let unreadTotal = 0;
 
-    for (const thread of redditThreads) {
-      const messages = toMessageViews(thread);
-      const unreadCount = calculateUnreadCount(messages, accountId);
+    for (const thread of threads.values()) {
+      const messages = toMessageViews<"reddit">(thread);
+      const unreadCount = calculateUnreadCount(messages, participantId);
       unreadTotal += unreadCount;
 
       byThreadId[thread.id] = {
@@ -142,21 +108,24 @@ export const redditBehavior: PlatformBehavior<
     events: readonly RedditEvent[],
     threadId: ThreadId,
   ): RedditThread | undefined => {
-    const allThreads = buildThreadGraphs<GraphMessage, RedditAnchor>(
-      events as readonly StorableEvent[],
+    // Events are pre-filtered by scope via the Projection layer
+    const threads = buildThreadGraphs<RedditScope, GraphMessage, RedditAnchor>(
+      REDDIT_SCOPE,
+      events,
     );
-    const thread = allThreads.get(threadId);
+    const thread = threads.get(threadId);
 
-    if (!thread || thread.scope !== REDDIT_SCOPE) {
+    if (!thread) {
       return undefined;
     }
 
     const authEvent = events.find((e) => e.type === "AuthObserved");
-    const accountId = authEvent
-      ? (authEvent as { accountId: string }).accountId
-      : "";
+    const participantId = authEvent
+      ? (authEvent as { participantId: ParticipantIdType<"reddit"> })
+        .participantId
+      : ParticipantId("reddit", "");
 
-    return toRedditThread(thread, accountId);
+    return toRedditThread(thread, participantId);
   },
 
   deriveBrowsers: (
@@ -179,13 +148,12 @@ export const redditBehavior: PlatformBehavior<
     for (const event of events) {
       if (event.type === "AuthObserved") {
         const authEvent = event as {
-          configId?: string;
-          browserId?: string;
+          configId: string;
           authenticated: boolean;
           isBanned?: boolean;
           bannedReason?: string;
         };
-        const configId = authEvent.configId ?? authEvent.browserId;
+        const { configId } = authEvent;
         if (configId) {
           const existing = browserStatus.get(configId);
           browserStatus.set(configId, {
@@ -200,10 +168,10 @@ export const redditBehavior: PlatformBehavior<
       // Process rate limit events
       if (event.type === "RateLimitObserved") {
         const rateLimitEvent = event as {
-          browserId: string;
+          configId: string;
           retryAfter?: string;
         };
-        const configId = rateLimitEvent.browserId;
+        const { configId } = rateLimitEvent;
         const existing = browserStatus.get(configId);
         if (existing) {
           browserStatus.set(configId, {
@@ -222,7 +190,7 @@ export const redditBehavior: PlatformBehavior<
       // Process ban events
       if (event.type === "AccountBanned") {
         const banEvent = event as {
-          accountId: string;
+          participantId: ParticipantIdType<"reddit">;
           reason?: string;
         };
         // Update all browsers associated with this account
@@ -241,7 +209,7 @@ export const redditBehavior: PlatformBehavior<
     // Map account's browser bindings to RedditBrowser
     return account.browserBindings.map((binding) => {
       const status = browserStatus.get(binding.configId) ?? {
-        authStatus: "unknown" as RedditAuthStatus,
+        authStatus: "unknown" as const,
         isBanned: false,
       };
 
@@ -257,91 +225,56 @@ export const redditBehavior: PlatformBehavior<
     });
   },
 
-  // ---------------------------------------------------------------------------
-  // Execution
-  // ---------------------------------------------------------------------------
+  deriveContact: (
+    events: readonly RedditEvent[],
+    participantId: ParticipantIdType<"reddit">,
+  ): RedditContact | undefined => {
+    let username: string | undefined;
+    let karma: number | undefined;
+    let accountAge: string | undefined;
+    let lastInteraction: string | undefined;
 
-  execute: (
-    intent: RedditIntent,
-    browsers: readonly RedditBrowser[],
-    preferConfigId?: BrowserConfigId,
-  ): Effect.Effect<
-    { usedConfigId: BrowserConfigId },
-    ExecuteError,
-    BrowserPool
-  > =>
-    Effect.gen(function* () {
-      const pool = yield* BrowserPool;
-
-      // Select browser: prefer specified, then running+authenticated+not banned, then any running
-      let selected: RedditBrowser | undefined;
-
-      if (preferConfigId) {
-        selected = browsers.find(
-          (b) =>
-            b.configId === preferConfigId &&
-            b.isRunning &&
-            b.authStatus === "authenticated" &&
-            !b.isBanned,
-        );
-      }
-
-      if (!selected) {
-        selected = browsers.find(
-          (b) =>
-            b.isRunning &&
-            b.authStatus === "authenticated" &&
-            !b.isBanned &&
-            !b.rateLimitedUntil,
-        );
-      }
-
-      if (!selected) {
-        selected = browsers.find(
-          (b) =>
-            b.isRunning && b.authStatus === "authenticated" && !b.isBanned,
-        );
-      }
-
-      if (!selected) {
-        selected = browsers.find((b) => b.isRunning && !b.isBanned);
-      }
-
-      if (!selected) {
-        return yield* Effect.fail(
-          executeError(
-            ExecuteErrorCode("NoBrowserAvailable"),
-            "No running browser available (all may be banned or not authenticated)",
-          ),
-        );
-      }
-
-      const configId = selected.configId;
-
-      logger.info(`[Reddit] Executing intent: ${intent.type}`, { configId });
-
-      // Map intent type to bridge command
-      const command = (() => {
-        switch (intent.type) {
-          case "SendDirectMessage":
-            return { type: "reddit:sendMessage", payload: intent };
-          case "SyncConversations":
-            return { type: "reddit:syncConversations", payload: intent };
-          case "DiscoverUsers":
-            return { type: "reddit:discoverUsers", payload: intent };
+    for (const event of events) {
+      // Extract info from user discovery
+      if (event.type === "UserDiscovered") {
+        const userEvent = event as {
+          userId: string;
+          username: string;
+          karma?: number;
+          accountAge?: string;
+        };
+        if (userEvent.userId === participantId) {
+          username = userEvent.username;
+          if (userEvent.karma !== undefined) karma = userEvent.karma;
+          if (userEvent.accountAge) accountAge = userEvent.accountAge;
         }
-      })();
+      }
 
-      yield* pool.send(configId, command).pipe(
-        Effect.mapError((err) =>
-          executeError(
-            ExecuteErrorCode("CommandFailed"),
-            `Bridge command failed: ${err.message}`,
-            err,
-          )
-        ),
-      );
+      // Extract from DM anchor participants
+      if (event.type === "DirectMessageObserved") {
+        const dmEvent = event as {
+          anchor: { participants: readonly string[] };
+        };
+        if (dmEvent.anchor.participants.includes(participantId as string)) {
+          if (!lastInteraction || event.timestamp > lastInteraction) {
+            lastInteraction = event.timestamp;
+          }
+        }
+      }
+    }
 
-      return { usedConfigId: configId };
-    }),
+    // Only return contact if we found any info
+    if (!username && !lastInteraction) {
+      return undefined;
+    }
+
+    return {
+      id: participantId,
+      name: username,
+      username,
+      karma,
+      accountAge,
+      lastInteraction,
+    };
+  },
 };

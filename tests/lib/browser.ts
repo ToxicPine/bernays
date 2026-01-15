@@ -1,7 +1,7 @@
 // tests/lib/browser.ts
 // Browserbase session management for E2E tests
 
-import { chromium, type Browser, type Page } from "playwright";
+import { type Browser, chromium, type Page } from "playwright";
 import Browserbase from "@browserbasehq/sdk";
 import type { E2EConfig } from "./config.ts";
 
@@ -21,7 +21,9 @@ export interface BridgeMessage {
   error?: { code: string; message: string };
 }
 
-export const createSession = async (config: E2EConfig): Promise<TestSession> => {
+export const createSession = async (
+  config: E2EConfig,
+): Promise<TestSession> => {
   const client = new Browserbase({ apiKey: config.browserbaseApiKey });
 
   const session = await client.sessions.create({
@@ -63,7 +65,9 @@ export const waitForExtension = async (
 ): Promise<void> => {
   await page.goto(url, { waitUntil: "domcontentloaded", timeout });
   await page.waitForFunction(
-    () => typeof (window as unknown as Record<string, unknown>).__bridgeHandler === "function",
+    () =>
+      typeof (window as unknown as Record<string, unknown>).__bridgeHandler ===
+        "function",
     { timeout },
   );
 };
@@ -96,7 +100,11 @@ export const setupBridge = async (page: Page): Promise<{
     }
   });
 
-  const send = (cmd: string, payload: unknown, timeout = 30000): Promise<unknown> => {
+  const send = (
+    cmd: string,
+    payload: unknown,
+    timeout = 30000,
+  ): Promise<unknown> => {
     const requestId = crypto.randomUUID();
     const req: BridgeMessage = {
       v: 1,
@@ -116,9 +124,10 @@ export const setupBridge = async (page: Page): Promise<{
 
       page.evaluate(
         (args: { cmd: string; req: BridgeMessage }) => {
-          const handler = (window as unknown as Record<string, unknown>).__bridgeHandler as
-            | ((cmd: string, req: BridgeMessage) => unknown)
-            | undefined;
+          const handler = (window as unknown as Record<string, unknown>)
+            .__bridgeHandler as
+              | ((cmd: string, req: BridgeMessage) => unknown)
+              | undefined;
           return handler?.(args.cmd, args.req);
         },
         { cmd, req },

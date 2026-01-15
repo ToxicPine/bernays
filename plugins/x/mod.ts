@@ -10,8 +10,6 @@ import {
   XAnchorSchema,
   type XEvent,
   XEventSchema,
-  type XIntent,
-  XIntentSchema,
   type XScope,
 } from "./schemas.ts";
 
@@ -21,23 +19,25 @@ import type { XInbox, XThread } from "./views.ts";
 // Account & Browser
 import type { XAccount } from "./account.ts";
 import type { XBrowser } from "./browser.ts";
+import type { XContact } from "./contact.ts";
 
 // Behavior
 import { xBehavior } from "./behavior.ts";
 
 export const xPlatform: PlatformDefinition<
   XScope,
+  "x",
   XEvent,
-  XIntent,
   XAnchor,
   XThread,
   XInbox,
   XAccount,
-  XBrowser
+  XBrowser,
+  XContact
 > = {
   scope: X_SCOPE,
+  identity: "x",
   eventSchema: XEventSchema,
-  intentSchema: XIntentSchema,
   anchorSchema: XAnchorSchema,
   behavior: xBehavior,
 };
@@ -78,41 +78,14 @@ export {
   XTweetSentSchema,
 } from "./schemas.ts";
 
-// Schemas (intents)
-export {
-  type XBookmarkTweet,
-  XBookmarkTweetSchema,
-  type XDeleteTweet,
-  XDeleteTweetSchema,
-  type XFollow,
-  XFollowSchema,
-  type XIntent,
-  XIntentSchema,
-  type XLike,
-  XLikeSchema,
-  type XPostTweet,
-  XPostTweetSchema,
-  type XReplyToTweet,
-  XReplyToTweetSchema,
-  type XRetweet,
-  XRetweetSchema,
-  type XSearchTweets,
-  XSearchTweetsSchema,
-  type XSendMessage,
-  XSendMessageSchema,
-  type XSyncConversations,
-  XSyncConversationsSchema,
-  type XUnfollow,
-  XUnfollowSchema,
-  type XUnlike,
-  XUnlikeSchema,
-} from "./schemas.ts";
-
 // Views
 export type { XInbox, XIndexMeta, XThread } from "./views.ts";
 
 // Browser
-export type { XAuthStatus, XBrowser } from "./browser.ts";
+export type { XBrowser } from "./browser.ts";
+
+// Contact
+export type { XContact } from "./contact.ts";
 
 // Account
 export {

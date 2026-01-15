@@ -8,10 +8,7 @@ export {
   validateDatabase,
 } from "./config.ts";
 
-export {
-  cleanupTestData,
-  getEventCount,
-} from "./database.ts";
+export { cleanupTestData, getEventCount } from "./database.ts";
 
 export {
   type BridgeMessage,

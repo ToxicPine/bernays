@@ -1,5 +1,5 @@
 // src/routing/ingestion.ts
-// Event ingestion - consumes bridge events, validates, and stores
+// Event ingestion - consumes bridge events, validates, and stores via Injector
 
 import { Context, Effect, Layer, Stream } from "effect";
 import { z } from "@zod/zod";
@@ -11,6 +11,7 @@ import {
   type EventStoreQuery,
   type StorableEvent,
 } from "$/store/mod.ts";
+import { type Injector, makeInjector } from "$/projections/mod.ts";
 
 // Event Ingestion Service
 
@@ -35,29 +36,36 @@ export class EventIngestion extends Context.Tag("EventIngestion")<
  * The ingestion service:
  * 1. Consumes events from BrowserPool.events stream
  * 2. Enriches with eventId and timestamp if missing
- * 3. Validates against scope-specific schema
- * 4. Stores valid events to EventStore
+ * 3. Validates and stores via scope-specific Injector
  *
  * Invalid events are logged and dropped.
+ * All writes go through Injector for validated writes per ARCHITECTURE.md.
  *
  * @param schemas - Map of scope to event schema for validation
+ * @param eventStore - The raw EventStore implementation
  */
 export const makeEventIngestion = (
   schemas: ReadonlyMap<ScopeType, z.ZodType<StorableEvent>>,
-): Layer.Layer<EventIngestion, never, BrowserPool | EventStore> =>
+  eventStore: EventStoreType,
+): Layer.Layer<EventIngestion, never, BrowserPool> =>
   Layer.scoped(
     EventIngestion,
     Effect.gen(function* () {
       const pool = yield* BrowserPool;
-      const store = yield* EventStore;
+
+      // Create injectors per scope for validated writes
+      const injectors = new Map<ScopeType, Injector<StorableEvent>>();
+      for (const [scope, schema] of schemas) {
+        injectors.set(scope, makeInjector(scope, schema, eventStore));
+      }
 
       const processEvent = ({ configId, event }: TaggedBridgeEvent) =>
         Effect.gen(function* () {
-          // 1. Check scope
+          // 1. Check scope and get injector
           const scope = Scope(event.scope);
-          const schema = schemas.get(scope);
+          const injector = injectors.get(scope);
 
-          if (!schema) {
+          if (!injector) {
             yield* Effect.logWarning("Unknown scope, dropping event", {
               scope,
               type: event.type,
@@ -66,40 +74,34 @@ export const makeEventIngestion = (
             return;
           }
 
-          // 2. Enrich with required fields if missing
+          // 2. Enrich with required fields
           const enriched = {
             ...event,
+            scope, // Use branded Scope instead of raw string
             eventId: EventId(crypto.randomUUID()),
             timestamp: new Date().toISOString(),
             correlationId: genCorrelationId(),
             configId,
           };
 
-          // 3. Validate against schema
-          const result = schema.safeParse(enriched);
-
-          if (!result.success) {
-            yield* Effect.logWarning("Event validation failed, dropping", {
-              scope,
-              type: event.type,
-              configId,
-              errors: result.error.issues.map((i) => ({
-                path: i.path.join("."),
-                message: i.message,
-              })),
-            });
-            return;
-          }
-
-          // 4. Store the validated event
-          yield* store.append([result.data]).pipe(
-            Effect.catchAll((err) =>
-              Effect.logError("Failed to store event", {
+          // 3. Validate and store via Injector (validation + append are atomic)
+          yield* injector.append(enriched as unknown as StorableEvent).pipe(
+            Effect.catchAll((err) => {
+              if (err.code === "ValidationFailed") {
+                return Effect.logWarning("Event validation failed, dropping", {
+                  scope,
+                  type: event.type,
+                  configId,
+                  error: err.message,
+                });
+              }
+              return Effect.logError("Failed to store event", {
                 scope,
                 type: event.type,
+                configId,
                 error: err.message,
-              })
-            ),
+              });
+            }),
           );
         });
 

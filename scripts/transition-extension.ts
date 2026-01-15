@@ -1,6 +1,6 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-net --allow-env
 // =============================================================================
-// transition-extension.ts — Transition from old extension ID to new
+// transition-extension.ts — Transition From Old Extension ID to New
 // =============================================================================
 //
 // Usage:
@@ -36,8 +36,7 @@ import {
   BrowserBackendLive,
   makeBrowserbaseBackend,
 } from "@bernays/server/backend";
-import { createLogger, type Logger } from "./lib/log.ts";
-import { loadDotenv } from "./lib/env.ts";
+import { createLogger, loadDotenv, type Logger } from "./lib/cli/mod.ts";
 
 // =============================================================================
 // Config
@@ -112,7 +111,7 @@ export const transition = async (
   // Run the transition
   log.section("Updating Browser Configs");
   log.info(`Replacing: ${config.fromId}`);
-  log.info(`With:      ${config.toId}`);
+  log.info(`With: ${config.toId}`);
 
   const result = await Effect.runPromise(
     transitionExtension(fromId, toId).pipe(
@@ -144,26 +143,26 @@ const dryRun = async (
   log: Logger,
 ): Promise<TransitionResult> => {
   log.section("Checking Browser Configs");
-  log.info(`Would replace: ${fromId}`);
-  log.info(`With:          ${toId}`);
+  log.info(`Would Replace: ${fromId}`);
+  log.info(`With: ${toId}`);
 
   const configs = await Effect.runPromise(configStore.list());
   const affected = configs.filter((c) => c.extensionIds.includes(fromId));
 
   if (affected.length === 0) {
-    log.info("No browser configs found with the old extension ID");
+    log.info("No Browser Configs Found With Old Extension ID");
   } else {
-    log.info(`Found ${affected.length} config(s) with old extension ID`);
+    log.info(`Found ${affected.length} Config(s) With Old Extension ID`);
     for (const c of affected) {
-      log.dim(`  Would update: ${c.id}`);
+      log.dim(`  Would Update: ${c.id}`);
     }
   }
 
   log.section("Would Clean Up Old Extension");
-  log.dim(`  Would delete extension: ${fromId}`);
+  log.dim(`  Would Delete Extension: ${fromId}`);
 
   log.section("Done");
-  log.dim("  (Dry run - no changes were made)");
+  log.dim("  (Dry Run — No Changes Were Made)");
 
   return { configsUpdated: affected.length, extensionDeleted: false };
 };

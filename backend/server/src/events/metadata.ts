@@ -3,7 +3,7 @@
 
 import { z } from "@zod/zod";
 import { StorableEventSchema } from "$/store/mod.ts";
-import type { CausationId, CorrelationId, IntentId } from "$/core/branded.ts";
+import { CausationId, CorrelationId, IntentId } from "$/core/branded.ts";
 
 /**
  * Extended event schema with correlation/causation for tracing.
@@ -15,9 +15,9 @@ import type { CausationId, CorrelationId, IntentId } from "$/core/branded.ts";
  * - intentId: Associates event with originating intent (optional)
  */
 export const CorrelationMetadataSchema = StorableEventSchema.extend({
-  correlationId: z.uuid().transform((val) => val as CorrelationId),
-  causationId: z.uuid().transform((val) => val as CausationId).optional(),
-  intentId: z.uuid().transform((val) => val as IntentId).optional(),
+  correlationId: z.uuid().transform(CorrelationId),
+  causationId: z.uuid().transform(CausationId).optional(),
+  intentId: z.uuid().transform(IntentId).optional(),
 });
 
 export type CorrelationMetadata = z.infer<typeof CorrelationMetadataSchema>;

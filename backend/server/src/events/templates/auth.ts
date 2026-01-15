@@ -3,40 +3,55 @@
 
 import { z } from "@zod/zod";
 import {
-  AccountId,
-  type AccountId as AccountIdType,
   BrowserConfigId,
   type BrowserConfigId as BrowserConfigIdType,
-} from "$/core/branded.ts";
+  type ParticipantId as ParticipantIdType,
+  participantIdSchema,
+} from "$/core/mod.ts";
 import { CorrelationMetadataSchema } from "$/events/metadata.ts";
 
 export const AuthStatusSchema = z.enum(["authenticated", "expired", "unknown"]);
 export type AuthStatus = z.infer<typeof AuthStatusSchema>;
 
 /**
- * Base schema for auth observation events.
- * Platforms extend this with their scope and type literals.
+ * Factory to create scoped auth observation base schemas.
+ * Provides common fields with proper branded type transforms.
+ *
+ * Platforms extend this with their scope (using their own scope schema with
+ * branded transform), type literal, and platform-specific auth fields
+ * (e.g., canRead, canWrite, issue status).
  *
  * Example extension:
  * ```typescript
- * const LinkedInAuthObservedSchema = AuthObservedBase.extend({
- *   scope: z.literal("linkedin"),
+ * const LinkedInAuthObservedSchema = authObservedBase("linkedin").extend({
+ *   scope: linkedInScopeSchema, // z.literal("linkedin").transform(() => LINKEDIN_SCOPE)
  *   type: z.literal("AuthObserved"),
+ *   authenticated: z.boolean(),
+ *   canRead: z.boolean(),
+ *   canWrite: z.boolean(),
  * });
  * ```
  */
+export const authObservedBase = <TScope extends string>(scope: TScope) =>
+  CorrelationMetadataSchema.extend({
+    configId: z.string().transform(BrowserConfigId),
+    participantId: participantIdSchema(scope),
+  });
+
+/**
+ * Generic AuthObservedBase for cases where scope is not known at compile time.
+ * Prefer the scoped factory `authObservedBase(scope)` when possible.
+ */
 export const AuthObservedBase = CorrelationMetadataSchema.extend({
   configId: z.string().transform(BrowserConfigId),
-  accountId: z.string().transform(AccountId),
-  status: AuthStatusSchema,
+  participantId: z.string(),
 });
 
 export type AuthObservedBase = z.infer<typeof AuthObservedBase>;
 
 /** Type-safe accessors for use in platform behaviors. */
 
-export interface AuthObservedFields {
+export interface AuthObservedFields<TScope extends string = string> {
   readonly configId: BrowserConfigIdType;
-  readonly accountId: AccountIdType;
-  readonly status: AuthStatus;
+  readonly participantId: ParticipantIdType<TScope>;
 }

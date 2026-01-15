@@ -66,7 +66,10 @@ const loadEnvAndParse = async () => {
     databaseUrl: Deno.env.get("DATABASE_URL") ?? "",
     flyAppName: Deno.env.get("FLY_APP_NAME") ?? "virtual-bernays",
     testTimeout: parseInt(Deno.env.get("E2E_TEST_TIMEOUT") ?? "120000", 10),
-    browserTimeout: parseInt(Deno.env.get("E2E_BROWSER_TIMEOUT") ?? "60000", 10),
+    browserTimeout: parseInt(
+      Deno.env.get("E2E_BROWSER_TIMEOUT") ?? "60000",
+      10,
+    ),
   });
 };
 
@@ -92,8 +95,8 @@ export const loadConfig = async (): Promise<E2EConfig> => {
   if (missing.length > 0) {
     throw new Error(
       `E2E config missing required environment variables:\n` +
-      missing.map((v) => `  - ${v}`).join("\n") +
-      `\n\nSet these in your environment or in .env/.env.test files.`
+        missing.map((v) => `  - ${v}`).join("\n") +
+        `\n\nSet these in your environment or in .env/.env.test files.`,
     );
   }
 

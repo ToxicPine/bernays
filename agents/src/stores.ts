@@ -14,10 +14,10 @@ import {
 } from "@bernays/plugins/linkedin";
 import type { BrowserConfig } from "@bernays/server/backend";
 import {
-  AccountId,
-  type AccountId as AccountIdType,
   BrowserConfigId,
   type BrowserConfigId as BrowserConfigIdType,
+  ParticipantId,
+  type ParticipantId as ParticipantIdType,
 } from "@bernays/server/core";
 import { config } from "./config.ts";
 import { tty } from "./logger.ts";
@@ -46,25 +46,22 @@ export const ensureBrowserConfig = async (
 
 export const ensureLinkedInAccount = async (
   store: LinkedInAccountStoreService,
-  accountId: AccountIdType,
+  participantId: ParticipantIdType<"linkedin">,
   configId: BrowserConfigIdType,
 ): Promise<LinkedInAccount> => {
-  const existing = await Effect.runPromise(store.get(accountId));
+  const existing = await Effect.runPromise(store.get(participantId));
   if (Option.isSome(existing)) {
-    tty.info(`Using Account '${existing.value.displayName}'.`);
+    tty.info(`Using Account '${existing.value.id}'.`);
     return existing.value;
   }
 
   tty.info("Creating Default LinkedIn Account...");
   const record: LinkedInAccount = {
-    id: accountId,
+    id: participantId,
     browserBindings: [{ configId, metadata: { deviceType: "desktop" } }],
-    displayName: "Demo User",
-    profileUrl: "https://www.linkedin.com/in/demo",
-    weeklyInviteLimit: 100,
   };
   await Effect.runPromise(store.upsert(record));
-  tty.info(`Account '${accountId}' created.`);
+  tty.info(`Account '${participantId}' created.`);
   return record;
 };
 
@@ -89,12 +86,12 @@ export const initializeStores = async () => {
   );
 
   const configId = BrowserConfigId("main");
-  const accountId = AccountId(config.accountId);
+  const participantId = ParticipantId("linkedin", config.accountId);
 
   await ensureBrowserConfig(configStore, configId);
   const account = await ensureLinkedInAccount(
     accountStore,
-    accountId,
+    participantId,
     configId,
   );
 

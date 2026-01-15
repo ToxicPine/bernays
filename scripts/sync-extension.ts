@@ -1,6 +1,6 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-net --allow-env
 // =============================================================================
-// sync.ts — Sync extension to Browserbase
+// sync-extension.ts — Sync Extension to Browserbase
 // =============================================================================
 //
 // Usage:
@@ -27,8 +27,12 @@
 // =============================================================================
 
 import { parseArgs } from "@std/cli";
-import { createLogger, type Logger } from "./lib/log.ts";
-import { loadDotenv, writeDotenv } from "./lib/env.ts";
+import {
+  createLogger,
+  loadDotenv,
+  type Logger,
+  writeDotenv,
+} from "./lib/cli/mod.ts";
 
 // =============================================================================
 // Config
@@ -70,7 +74,7 @@ const updateEnvFile = (
   if (writeDotenv(key, value, envPath)) {
     log.ok(`Updated ${key} in .env`);
   } else {
-    log.dim(`${key} unchanged in .env`);
+    log.dim(`${key} Unchanged in .env`);
   }
 };
 
@@ -205,7 +209,7 @@ export const sync = async (config: SyncConfig): Promise<void> => {
 
   // Check if up to date
   if (existingExt && existingExt.fileName === zip.name) {
-    log.ok("Extension is up to date");
+    log.ok("Extension Is Up to Date");
     return;
   }
 

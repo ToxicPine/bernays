@@ -3,16 +3,18 @@
 
 import { z } from "@zod/zod";
 import {
-  type AccountId,
-  type CanonicalId,
-  type IntentId,
+  CanonicalId,
+  IntentId,
+  participantIdSchema,
   Scope,
-  type ThreadId,
+  ThreadId,
 } from "@bernays/server/core";
 import { CorrelationMetadataSchema } from "@bernays/server/events";
 import {
   AnchorMessageObservedBase,
+  authObservedBase,
   MessageObservedBase,
+  rateLimitObservedBase,
 } from "@bernays/server/events";
 import {
   SendMessageBase,
@@ -30,18 +32,16 @@ const redditScopeSchema = z.literal("reddit").transform(() => REDDIT_SCOPE);
 
 export const RedditAnchorSchema = z.object({
   roomId: z.string(),
-  participants: z.array(z.string()),
+  participants: z.array(participantIdSchema("reddit")),
 });
 
 export type RedditAnchor = z.infer<typeof RedditAnchorSchema>;
 
 // Event Schemas
 
-export const RedditAuthObservedSchema = CorrelationMetadataSchema.extend({
+export const RedditAuthObservedSchema = authObservedBase("reddit").extend({
   scope: redditScopeSchema,
   type: z.literal("AuthObserved"),
-  accountId: z.string().transform((val) => val as AccountId),
-  browserId: z.string(),
   tabId: z.string(),
   authenticated: z.boolean(),
   canRead: z.boolean(),
@@ -57,7 +57,7 @@ export const RedditDirectMessageObservedSchema = AnchorMessageObservedBase
     scope: redditScopeSchema,
     type: z.literal("DirectMessageObserved"),
     anchor: RedditAnchorSchema,
-    threadId: z.string().transform((val) => val as ThreadId),
+    threadId: z.string().transform(ThreadId),
   });
 
 export type RedditDirectMessageObserved = z.infer<
@@ -67,7 +67,7 @@ export type RedditDirectMessageObserved = z.infer<
 export const RedditMessageObservedSchema = MessageObservedBase.extend({
   scope: redditScopeSchema,
   type: z.literal("MessageObserved"),
-  threadId: z.string().transform((val) => val as ThreadId),
+  threadId: z.string().transform(ThreadId),
 });
 
 export type RedditMessageObserved = z.infer<typeof RedditMessageObservedSchema>;
@@ -75,8 +75,8 @@ export type RedditMessageObserved = z.infer<typeof RedditMessageObservedSchema>;
 export const RedditMessageSentSchema = CorrelationMetadataSchema.extend({
   scope: redditScopeSchema,
   type: z.literal("MessageSent"),
-  threadId: z.string().transform((val) => val as ThreadId),
-  canonicalId: z.string().transform((val) => val as CanonicalId),
+  threadId: z.string().transform(ThreadId),
+  canonicalId: z.string().transform(CanonicalId),
   content: z.string(),
 });
 
@@ -95,13 +95,12 @@ export const RedditUserDiscoveredSchema = CorrelationMetadataSchema.extend({
 
 export type RedditUserDiscovered = z.infer<typeof RedditUserDiscoveredSchema>;
 
-export const RedditRateLimitObservedSchema = CorrelationMetadataSchema.extend({
-  scope: redditScopeSchema,
-  type: z.literal("RateLimitObserved"),
-  browserId: z.string(),
-  retryAfter: z.string().optional(),
-  limitType: z.enum(["message", "chat", "general"]),
-});
+export const RedditRateLimitObservedSchema = rateLimitObservedBase("reddit")
+  .extend({
+    scope: redditScopeSchema,
+    type: z.literal("RateLimitObserved"),
+    limitType: z.enum(["message", "chat", "general"]),
+  });
 
 export type RedditRateLimitObserved = z.infer<
   typeof RedditRateLimitObservedSchema
@@ -110,7 +109,7 @@ export type RedditRateLimitObserved = z.infer<
 export const RedditAccountBannedSchema = CorrelationMetadataSchema.extend({
   scope: redditScopeSchema,
   type: z.literal("AccountBanned"),
-  accountId: z.string().transform((val) => val as AccountId),
+  participantId: participantIdSchema("reddit"),
   banType: z.enum(["suspended", "shadowbanned", "subreddit"]),
   reason: z.string().optional(),
   subreddit: z.string().optional(),
@@ -124,7 +123,7 @@ export const RedditConversationsSyncedSchema = CorrelationMetadataSchema
   .extend({
     scope: redditScopeSchema,
     type: z.literal("ConversationsSynced"),
-    accountId: z.string().transform((val) => val as AccountId),
+    participantId: participantIdSchema("reddit"),
     threadCount: z.number(),
     syncedAt: z.iso.datetime(),
   });
@@ -151,12 +150,12 @@ export type RedditEvent = z.infer<typeof RedditEventSchema>;
 
 const RedditIntentBase = z.object({
   scope: redditScopeSchema,
-  intentId: z.uuid().transform((val) => val as IntentId),
+  intentId: z.uuid().transform(IntentId),
   timestamp: z.iso.datetime(),
 });
 
-export const RedditSendDirectMessageSchema = RedditIntentBase.merge(
-  SendMessageBase,
+export const RedditSendDirectMessageSchema = RedditIntentBase.extend(
+  SendMessageBase.shape,
 ).extend({
   type: z.literal("SendDirectMessage"),
   recipientUsername: z.string().optional(),
@@ -166,8 +165,8 @@ export type RedditSendDirectMessage = z.infer<
   typeof RedditSendDirectMessageSchema
 >;
 
-export const RedditSyncConversationsSchema = RedditIntentBase.merge(
-  SyncConversationsBase,
+export const RedditSyncConversationsSchema = RedditIntentBase.extend(
+  SyncConversationsBase.shape,
 ).extend({
   type: z.literal("SyncConversations"),
 });

@@ -12,7 +12,8 @@ tools:
   - Grep
 ---
 
-You are a Test Architect Agent for the Bernays Social Automation Framework. You establish and maintain unit tests that verify each layer of the system.
+You are a Test Architect Agent for the Bernays Social Automation Framework. You
+establish and maintain unit tests that verify each layer of the system.
 
 # Layer Stack (Bottom to Top)
 
@@ -47,7 +48,8 @@ Tests for plugins live in `plugins/`.
 
 # Before Writing Any Test
 
-1. **Check HACKS.md**: Look for infrastructure notes (DB backend, deployment target, network constraints)
+1. **Check HACKS.md**: Look for infrastructure notes (DB backend, deployment
+   target, network constraints)
 2. **Explore actual structure**: Use Glob to find existing files
    ```
    Glob: tests/**/*_test.ts
@@ -57,7 +59,8 @@ Tests for plugins live in `plugins/`.
 4. **Check root tasks**: Read `deno.json` for test tasks
 5. **Find related source**: Grep for the module you're testing
 
-Note: E2E tests may need to run on the deployment target (not locally) if DB is on private network. Check HACKS.md and Justfile `backend-test` recipe.
+Note: E2E tests may need to run on the deployment target (not locally) if DB is
+on private network. Check HACKS.md and Justfile `backend-test` recipe.
 
 # Test File Template
 
@@ -80,34 +83,43 @@ Deno.test("ModuleName - handles error case", async () => {
 # Test Categories
 
 ## Store Tests (`tests/store/`)
+
 - Memory store: append, query by scope, query by time range
 - Postgres store: same operations + connection handling
 - File store: persistence, recovery
 - Config store: CRUD operations + `replaceExtensionId` (bulk update)
 
 **Note**: Scripts depend on store implementations:
-- `view-event-log.ts`, `manage-browser-configs.ts` use basic CRUD
-- `transition-extension.ts` requires `ConfigStore.replaceExtensionId()` and `ExtensionStore.remove()`
 
-When adding new store implementations (e.g., SQLite), ensure all required methods are implemented.
+- `view-event-log.ts`, `manage-browser-configs.ts` use basic CRUD
+- `transition-extension.ts` requires `ConfigStore.replaceExtensionId()` and
+  `ExtensionStore.remove()`
+
+When adding new store implementations (e.g., SQLite), ensure all required
+methods are implemented.
 
 ## Backend Tests (`tests/backend/`)
+
 - Pool: session lifecycle, connection state
 - Extensions: registration, loading, validation
 
 ## Routing Tests (`tests/routing/`)
+
 - Event ingestion: schema validation, scope routing
 - Bridge messages: serialization, error handling
 
 ## Projection Tests (`tests/projections/`)
+
 - Scope filtering: events routed correctly
 - Type safety: typed events returned
 
 ## Platform Tests (`tests/platforms/`)
+
 - Behavior: deriveInbox, deriveThread, deriveBrowsers
 - Execute: intent handling, browser selection
 
-**Note**: `scripts/view-inbox.ts` depends on platform behaviors and account stores. When platform APIs change, verify the inbox viewer still works.
+**Note**: `scripts/view-inbox.ts` depends on platform behaviors and account
+stores. When platform APIs change, verify the inbox viewer still works.
 
 # Key Imports (from tests/deno.json)
 

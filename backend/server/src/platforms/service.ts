@@ -1,111 +1,113 @@
 // src/platform/service.ts
 // Platform service - what sockpuppets use
 
-import { Context, Effect, Option } from "effect";
+import { Effect, Option } from "effect";
 import type {
-  AccountId,
   BrowserConfigId,
-  Scope,
+  ParticipantId,
   ThreadId,
 } from "$/core/branded.ts";
 import type { EventStoreError, StorableEvent } from "$/store/mod.ts";
 import type { BaseInboxView } from "$/views/inbox.ts";
 import type { BaseThreadView } from "$/views/thread.ts";
 import type { BaseAccount, BaseBoundBrowser } from "$/views/browser.ts";
+import type { BaseContact } from "$/views/contact.ts";
 import { BrowserPool } from "$/backend/mod.ts";
 import type { Projection } from "$/projections/projection.ts";
-import type {
-  BaseIntent,
-  ExecuteError,
-  PlatformDefinition,
-} from "$/platforms/mod.ts";
+import type { ActionsRecord, PlatformDefinition } from "$/platforms/mod.ts";
 
+// =============================================================================
 // Platform Service Interface
+// =============================================================================
 
 /**
  * PlatformService is what sockpuppets use to interact with a platform.
- * It combines projection, behavior, and browser pool into a clean interface.
+ * It combines projection, behavior, and actions into a clean interface.
  *
  * The sockpuppet sees:
  * - inbox: thread summaries
  * - thread(id): full thread view
  * - browsers: available browsers with platform-specific status
- * - execute(intent): run an intent via a browser
+ * - contact(id): contact info for a participant
+ * - actions: curried methods for platform operations
  */
 export interface PlatformService<
-  _TEvent extends StorableEvent,
-  TIntent extends BaseIntent,
-  TAnchor,
-  TThread extends BaseThreadView<TAnchor>,
+  TScope extends string,
+  TIdentity extends string,
+  TActions extends ActionsRecord,
   TInbox extends BaseInboxView<unknown>,
-  TAccount extends BaseAccount,
+  TThread extends BaseThreadView<unknown>,
   TBrowser extends BaseBoundBrowser,
+  TContact extends BaseContact<TIdentity>,
 > {
-  readonly scope: Scope;
-  readonly accountId: AccountId;
-  readonly account: TAccount;
+  readonly scope: TScope;
+  readonly identity: TIdentity;
+  readonly participantId: ParticipantId<TIdentity>;
 
-  /** Get the inbox view (thread summaries) */
   readonly inbox: Effect.Effect<TInbox, EventStoreError>;
 
-  /** Get a specific thread view */
   readonly thread: (
     id: ThreadId,
   ) => Effect.Effect<Option.Option<TThread>, EventStoreError>;
 
-  /** Get available browsers with platform-specific status */
   readonly browsers: Effect.Effect<readonly TBrowser[], EventStoreError>;
 
-  /** Execute an intent via a browser */
-  readonly execute: (
-    intent: TIntent,
-    options?: { preferConfigId?: BrowserConfigId },
-  ) => Effect.Effect<
-    { usedConfigId: BrowserConfigId },
-    ExecuteError | EventStoreError
-  >;
+  readonly contact: (
+    id: ParticipantId<TIdentity>,
+  ) => Effect.Effect<Option.Option<TContact>, EventStoreError>;
+
+  readonly actions: TActions;
 }
 
+// =============================================================================
 // Platform Service Factory
+// =============================================================================
 
 /**
  * Creates a PlatformService for a specific platform and account.
+ * This is a generic factory that creates the derivation-based properties.
+ * Each platform extends this with its own actions.
  *
  * @param platform - The platform definition
  * @param account - The account to create the service for
  * @param projection - Type-safe projection for this platform's events
+ * @param actions - Platform-specific actions (created by platform's makeXxxActions)
  */
 export const makePlatformService = <
-  TScope extends Scope,
+  TScope extends string,
+  TIdentity extends string,
   TEvent extends StorableEvent & { readonly scope: TScope },
-  TIntent extends BaseIntent<TScope>,
   TAnchor,
   TThread extends BaseThreadView<TAnchor>,
   TInbox extends BaseInboxView<unknown>,
-  TAccount extends BaseAccount,
+  TAccount extends BaseAccount<TIdentity>,
   TBrowser extends BaseBoundBrowser,
+  TContact extends BaseContact<TIdentity>,
+  TActions extends ActionsRecord,
 >(
   platform: PlatformDefinition<
     TScope,
+    TIdentity,
     TEvent,
-    TIntent,
     TAnchor,
     TThread,
     TInbox,
     TAccount,
-    TBrowser
+    TBrowser,
+    TContact
   >,
   account: TAccount,
   projection: Projection<TEvent>,
+  actions: TActions,
 ): Effect.Effect<
   PlatformService<
-    TEvent,
-    TIntent,
-    TAnchor,
-    TThread,
+    TScope,
+    TIdentity,
+    TActions,
     TInbox,
-    TAccount,
-    TBrowser
+    TThread,
+    TBrowser,
+    TContact
   >,
   never,
   BrowserPool
@@ -114,10 +116,8 @@ export const makePlatformService = <
     const pool = yield* BrowserPool;
     const behavior = platform.behavior;
 
-    // Helper to query events
     const queryEvents = projection.query();
 
-    // Helper to get running browser config IDs
     const getRunningConfigIds = Effect.gen(function* () {
       const results = yield* Effect.forEach(
         account.browserBindings,
@@ -134,7 +134,6 @@ export const makePlatformService = <
       );
     });
 
-    // Derive browsers from events
     const getBrowsers = Effect.gen(function* () {
       const events = yield* queryEvents;
       const runningIds = yield* getRunningConfigIds;
@@ -143,8 +142,8 @@ export const makePlatformService = <
 
     return {
       scope: platform.scope,
-      accountId: account.id,
-      account,
+      identity: platform.identity,
+      participantId: account.id,
 
       inbox: Effect.gen(function* () {
         const events = yield* queryEvents;
@@ -159,31 +158,17 @@ export const makePlatformService = <
 
       browsers: getBrowsers,
 
-      execute: (intent, options) =>
+      contact: (participantId) =>
         Effect.gen(function* () {
-          const browsers = yield* getBrowsers;
-          return yield* behavior
-            .execute(intent, browsers, options?.preferConfigId)
-            .pipe(Effect.provideService(BrowserPool, pool));
+          if (!behavior.deriveContact) {
+            return Option.none();
+          }
+          const events = yield* queryEvents;
+          return Option.fromNullable(
+            behavior.deriveContact(events, participantId),
+          );
         }),
+
+      actions,
     };
   });
-
-// Platform Context Tag
-
-/**
- * Platform service context tag.
- * Sockpuppets yield this to access the platform.
- */
-export class Platform extends Context.Tag("Platform")<
-  Platform,
-  PlatformService<
-    StorableEvent,
-    BaseIntent,
-    unknown,
-    BaseThreadView<unknown>,
-    BaseInboxView<unknown>,
-    BaseAccount,
-    BaseBoundBrowser
-  >
->() {}

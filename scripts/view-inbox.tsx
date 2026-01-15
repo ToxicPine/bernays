@@ -3,40 +3,46 @@
 // view-inbox.tsx — Platform Inbox Viewer TUI (Ink)
 // =============================================================================
 
-import { useState, useEffect, type FC } from "react";
-import { Box, Text, useInput, useApp } from "ink";
-import { AccountId, Scope, type ThreadId } from "@bernays/server/core";
+import { type FC, useEffect, useState } from "react";
+import { Box, Text, useApp, useInput } from "ink";
+import {
+  ParticipantIdFromString,
+  Scope,
+  type ThreadId,
+} from "@bernays/server/core";
 import type { StorableEvent } from "@bernays/server/store";
 import { createPostgresEventStore } from "@bernays/server/store";
 import { createPostgresLinkedInAccountStore } from "@bernays/plugins/linkedin";
 import { createPostgresXAccountStore } from "@bernays/plugins/x";
 import {
-  Header,
-  StatusBar,
-  FullHeightLayout,
-  ErrorBanner,
-  toAppError,
   type AppError,
+  createBindings,
+  ErrorBanner,
+  FullHeightLayout,
+  Header,
   MenuItem,
   relativeTime,
-  truncate,
-  runApp,
   requireDatabaseUrl,
+  runApp,
   runMain,
+  StatusBar,
+  toAppError,
+  truncate,
   useContentHeight,
+  useKeyHandler,
+  useListNavigation,
+  usePagination,
   useTerminalSize,
-} from "./lib/ink.tsx";
-import { createBindings, useKeyHandler } from "./lib/keybindings.tsx";
-import { useListNavigation, usePagination } from "./lib/hooks.tsx";
+} from "./lib/tui/mod.ts";
 import {
-  type BaseThread,
-  type BaseInbox,
-  type BaseThreadSummary,
-  type BaseAccount,
   type AnyPlatformProvider,
-  platformOptions,
+  type BaseAccount,
+  type BaseInbox,
+  type BaseThread,
+  type BaseThreadSummary,
   getProvider,
-} from "./lib/providers.tsx";
+  platformOptions,
+} from "./lib/platforms/mod.ts";
 
 // =============================================================================
 // Types
@@ -48,7 +54,12 @@ type View =
   | { type: "platform-select" }
   | { type: "account-select"; platform: Platform }
   | { type: "inbox"; platform: Platform; accountIndex: number }
-  | { type: "thread"; platform: Platform; accountIndex: number; threadId: string };
+  | {
+    type: "thread";
+    platform: Platform;
+    accountIndex: number;
+    threadId: string;
+  };
 
 // =============================================================================
 // Platform Select
@@ -60,7 +71,9 @@ const platforms = platformOptions.map((p) => ({
   color: p.color,
 }));
 
-const PlatformSelectView: FC<{ onSelect: (p: Platform) => void }> = ({ onSelect }) => {
+const PlatformSelectView: FC<{ onSelect: (p: Platform) => void }> = (
+  { onSelect },
+) => {
   const { exit } = useApp();
   const nav = useListNavigation(platforms);
 
@@ -90,7 +103,13 @@ const PlatformSelectView: FC<{ onSelect: (p: Platform) => void }> = ({ onSelect 
       <Text bold>Select a Platform:</Text>
       <Box flexDirection="column" marginY={1}>
         {platforms.map((p, i) => (
-          <MenuItem key={p.id} idx={i} label={p.label} selected={nav.selectedIndex === i} color={p.color} />
+          <MenuItem
+            key={p.id}
+            idx={i}
+            label={p.label}
+            selected={nav.selectedIndex === i}
+            color={p.color}
+          />
         ))}
       </Box>
     </FullHeightLayout>
@@ -108,7 +127,9 @@ interface AccountSelectProps {
   onBack: () => void;
 }
 
-const AccountSelectView: FC<AccountSelectProps> = ({ platform, accounts, onSelect, onBack }) => {
+const AccountSelectView: FC<AccountSelectProps> = (
+  { platform, accounts, onSelect, onBack },
+) => {
   const { exit } = useApp();
   const nav = useListNavigation(accounts);
   const provider = getProvider(platform);
@@ -119,7 +140,9 @@ const AccountSelectView: FC<AccountSelectProps> = ({ platform, accounts, onSelec
     navigation: true,
     onUp: nav.up,
     onDown: nav.down,
-    onSelect: () => { if (accounts.length > 0) onSelect(nav.selectedIndex); },
+    onSelect: () => {
+      if (accounts.length > 0) onSelect(nav.selectedIndex);
+    },
     onBack,
     onQuit: exit,
   });
@@ -131,21 +154,21 @@ const AccountSelectView: FC<AccountSelectProps> = ({ platform, accounts, onSelec
       header={<Header title={`${platformName} - Select Account`} />}
       statusBar={<StatusBar>{bindings.hints}</StatusBar>}
     >
-      {accounts.length === 0 ? (
-        <Text color="yellow">No accounts found.</Text>
-      ) : (
-        <Box flexDirection="column" marginY={1}>
-          {accounts.map((acc, i) => (
-            <MenuItem
-              key={acc.id}
-              idx={i}
-              label={`${acc.displayName} (${acc.id.slice(0, 8)}...)`}
-              selected={nav.selectedIndex === i}
-              color={color}
-            />
-          ))}
-        </Box>
-      )}
+      {accounts.length === 0
+        ? <Text color="yellow">No accounts found.</Text>
+        : (
+          <Box flexDirection="column" marginY={1}>
+            {accounts.map((acc, i) => (
+              <MenuItem
+                key={acc.id}
+                idx={i}
+                label={`${acc.displayName} (${acc.id.slice(0, 8)}...)`}
+                selected={nav.selectedIndex === i}
+                color={color}
+              />
+            ))}
+          </Box>
+        )}
     </FullHeightLayout>
   );
 };
@@ -182,7 +205,8 @@ const InboxView: FC<InboxViewProps> = ({
   const threadIds = Object.keys(inbox.byThreadId).sort((a, b) => {
     const metaA = inbox.byThreadId[a];
     const metaB = inbox.byThreadId[b];
-    return new Date(metaB.lastActivity).getTime() - new Date(metaA.lastActivity).getTime();
+    return new Date(metaB.lastActivity).getTime() -
+      new Date(metaA.lastActivity).getTime();
   });
 
   // Pagination and navigation
@@ -194,9 +218,19 @@ const InboxView: FC<InboxViewProps> = ({
     pagination: pagination.totalPages > 1,
     onUp: nav.up,
     onDown: nav.down,
-    onPageUp: () => { pagination.prevPage(); nav.reset(); },
-    onPageDown: () => { pagination.nextPage(); nav.reset(); },
-    onSelect: () => { if (pagination.pageItems.length > 0) onSelectThread(pagination.pageItems[nav.selectedIndex]); },
+    onPageUp: () => {
+      pagination.prevPage();
+      nav.reset();
+    },
+    onPageDown: () => {
+      pagination.nextPage();
+      nav.reset();
+    },
+    onSelect: () => {
+      if (pagination.pageItems.length > 0) {
+        onSelectThread(pagination.pageItems[nav.selectedIndex]);
+      }
+    },
     onBack,
     onRefresh,
     onQuit: exit,
@@ -209,7 +243,10 @@ const InboxView: FC<InboxViewProps> = ({
   const availableWidth = Math.max(30, columns - 37);
   const threadIdWidth = Math.max(20, Math.min(50, availableWidth));
 
-  const statusHints = bindings.hints + (pagination.totalPages > 1 ? ` | ${pagination.page + 1}/${pagination.totalPages}` : "");
+  const statusHints = bindings.hints +
+    (pagination.totalPages > 1
+      ? ` | ${pagination.page + 1}/${pagination.totalPages}`
+      : "");
 
   return (
     <FullHeightLayout
@@ -218,12 +255,13 @@ const InboxView: FC<InboxViewProps> = ({
     >
       {provider.renderInboxHeader(inbox)}
       <Box marginY={1} />
-      {threadIds.length === 0 ? (
-        <Text dimColor>No threads found.</Text>
-      ) : (
+      {threadIds.length === 0 ? <Text dimColor>No threads found.</Text> : (
         <>
           <Text dimColor>
-            Showing {pagination.pageStartIndex + 1}-{Math.min(pagination.pageStartIndex + pageSize, threadIds.length)} of {threadIds.length}:
+            Showing {pagination.pageStartIndex + 1}-{Math.min(
+              pagination.pageStartIndex + pageSize,
+              threadIds.length,
+            )} of {threadIds.length}:
           </Text>
           <Box flexDirection="column" marginY={1}>
             {pagination.pageItems.map((threadId, i) => {
@@ -232,10 +270,18 @@ const InboxView: FC<InboxViewProps> = ({
                 <Box key={threadId}>
                   <Text color={nav.selectedIndex === i ? "green" : "white"}>
                     {nav.selectedIndex === i ? "> " : "  "}
-                    <Text bold>[{String(pagination.pageStartIndex + i + 1).padStart(2)}]</Text>{" "}
-                    <Text color={provider.color}>{truncate(threadId, threadIdWidth).padEnd(threadIdWidth)}</Text>{" "}
-                    <Text dimColor>{relativeTime(meta.lastActivity).padEnd(10)}</Text>
-                    {meta.unreadCount > 0 && <Text color="yellow"> ({meta.unreadCount})</Text>}
+                    <Text bold>
+                      [{String(pagination.pageStartIndex + i + 1).padStart(2)}]
+                    </Text>{" "}
+                    <Text color={provider.color}>
+                      {truncate(threadId, threadIdWidth).padEnd(threadIdWidth)}
+                    </Text>{" "}
+                    <Text dimColor>
+                      {relativeTime(meta.lastActivity).padEnd(10)}
+                    </Text>
+                    {meta.unreadCount > 0 && (
+                      <Text color="yellow">({meta.unreadCount})</Text>
+                    )}
                     {provider.renderThreadMeta?.(threadId, meta)}
                   </Text>
                 </Box>
@@ -246,7 +292,7 @@ const InboxView: FC<InboxViewProps> = ({
       )}
     </FullHeightLayout>
   );
-}
+};
 
 // =============================================================================
 // Thread View
@@ -259,7 +305,9 @@ interface ThreadViewProps {
   onBack: () => void;
 }
 
-const ThreadView: FC<ThreadViewProps> = ({ provider, thread, accountId, onBack }) => {
+const ThreadView: FC<ThreadViewProps> = (
+  { provider, thread, accountId, onBack },
+) => {
   const { exit } = useApp();
   const [page, setPage] = useState(0);
 
@@ -278,14 +326,29 @@ const ThreadView: FC<ThreadViewProps> = ({ provider, thread, accountId, onBack }
     onBack,
     onQuit: exit,
     custom: [
-      { key: "o", label: "older", handler: () => { if (page < totalPages - 1) setPage((p) => p + 1); }, enabled: page < totalPages - 1 },
-      { key: "n", label: "newer", handler: () => { if (page > 0) setPage((p) => p - 1); }, enabled: page > 0 },
+      {
+        key: "o",
+        label: "older",
+        handler: () => {
+          if (page < totalPages - 1) setPage((p) => p + 1);
+        },
+        enabled: page < totalPages - 1,
+      },
+      {
+        key: "n",
+        label: "newer",
+        handler: () => {
+          if (page > 0) setPage((p) => p - 1);
+        },
+        enabled: page > 0,
+      },
     ],
   });
 
   useKeyHandler(bindings, [page, totalPages]);
 
-  const statusHints = bindings.hints + (totalPages > 1 ? ` | ${page + 1}/${totalPages}` : "");
+  const statusHints = bindings.hints +
+    (totalPages > 1 ? ` | ${page + 1}/${totalPages}` : "");
 
   return (
     <FullHeightLayout
@@ -294,12 +357,16 @@ const ThreadView: FC<ThreadViewProps> = ({ provider, thread, accountId, onBack }
     >
       {provider.renderThreadHeader(thread)}
       <Box marginY={1} />
-      {messages.length === 0 ? (
-        <Text dimColor>No messages.</Text>
-      ) : (
+      {messages.length === 0 ? <Text dimColor>No messages.</Text> : (
         <>
           <Text dimColor>Messages {start + 1}-{end} of {messages.length}:</Text>
-          <Box flexDirection="column" marginY={1} borderStyle="single" borderColor="gray" paddingX={1}>
+          <Box
+            flexDirection="column"
+            marginY={1}
+            borderStyle="single"
+            borderColor="gray"
+            paddingX={1}
+          >
             {pageMessages.map((msg) => {
               const isOwn = msg.senderId === accountId;
               return (
@@ -308,9 +375,9 @@ const ThreadView: FC<ThreadViewProps> = ({ provider, thread, accountId, onBack }
                     <Text color={isOwn ? "green" : provider.color} bold>
                       [{isOwn ? "You" : truncate(msg.senderId, 20)}]
                     </Text>
-                    <Text dimColor> {relativeTime(msg.timestamp)}</Text>
+                    <Text dimColor>{relativeTime(msg.timestamp)}</Text>
                   </Box>
-                  <Text>  {msg.content || "(no content)"}</Text>
+                  <Text>{msg.content || "(no content)"}</Text>
                 </Box>
               );
             })}
@@ -346,10 +413,14 @@ interface PlatformState {
 
 const App: FC<AppProps> = ({ initialPlatform, accountStores, eventStore }) => {
   const [view, setView] = useState<View>(
-    initialPlatform ? { type: "account-select", platform: initialPlatform } : { type: "platform-select" }
+    initialPlatform
+      ? { type: "account-select", platform: initialPlatform }
+      : { type: "platform-select" },
   );
   // Platform state indexed by platform key
-  const [platformState, setPlatformState] = useState<Record<Platform, PlatformState>>({
+  const [platformState, setPlatformState] = useState<
+    Record<Platform, PlatformState>
+  >({
     linkedin: { accounts: [], inbox: null, events: [] },
     x: { accounts: [], inbox: null, events: [] },
   });
@@ -396,13 +467,19 @@ const App: FC<AppProps> = ({ initialPlatform, accountStores, eventStore }) => {
     setLoading(true);
     setError(null);
     try {
-      const result = await eventStore.fetch({ type: "byScope", scope: Scope(provider.scope) });
+      const result = await eventStore.fetch({
+        type: "byScope",
+        scope: Scope(provider.scope),
+      });
       if (result.ok) {
         const events = result.value.filter((e: StorableEvent) => {
           const ev = e as { accountId?: string };
           return !ev.accountId || ev.accountId === account.id;
         });
-        const inbox = provider.deriveInbox(events, AccountId(account.id));
+        const inbox = provider.deriveInbox(
+          events,
+          ParticipantIdFromString(account.id),
+        );
         setPlatformState((prev) => ({
           ...prev,
           [view.platform]: { ...prev[view.platform], events, inbox },
@@ -419,7 +496,11 @@ const App: FC<AppProps> = ({ initialPlatform, accountStores, eventStore }) => {
 
   useEffect(() => {
     loadInbox();
-  }, [view.type, view.type === "inbox" || view.type === "thread" ? view.accountIndex : -1, view.type === "inbox" || view.type === "thread" ? view.platform : ""]);
+  }, [
+    view.type,
+    view.type === "inbox" || view.type === "thread" ? view.accountIndex : -1,
+    view.type === "inbox" || view.type === "thread" ? view.platform : "",
+  ]);
 
   // Helper to get accounts for display
   const getAccountsForDisplay = (platform: Platform) => {
@@ -445,7 +526,9 @@ const App: FC<AppProps> = ({ initialPlatform, accountStores, eventStore }) => {
   }
 
   // Show error with option to retry
-  if (error && (view.type === "platform-select" || view.type === "account-select")) {
+  if (
+    error && (view.type === "platform-select" || view.type === "account-select")
+  ) {
     return (
       <FullHeightLayout
         header={<Header title="Inbox Viewer" />}
@@ -456,10 +539,21 @@ const App: FC<AppProps> = ({ initialPlatform, accountStores, eventStore }) => {
     );
   }
 
-  if (loading) return <Box><Text color="cyan">Loading...</Text></Box>;
+  if (loading) {
+    return (
+      <Box>
+        <Text color="cyan">Loading...</Text>
+      </Box>
+    );
+  }
 
   if (view.type === "platform-select") {
-    return <PlatformSelectView onSelect={(p: Platform) => setView({ type: "account-select", platform: p })} />;
+    return (
+      <PlatformSelectView
+        onSelect={(p: Platform) =>
+          setView({ type: "account-select", platform: p })}
+      />
+    );
   }
 
   if (view.type === "account-select") {
@@ -467,7 +561,8 @@ const App: FC<AppProps> = ({ initialPlatform, accountStores, eventStore }) => {
       <AccountSelectView
         platform={view.platform}
         accounts={getAccountsForDisplay(view.platform)}
-        onSelect={(i: number) => setView({ type: "inbox", platform: view.platform, accountIndex: i })}
+        onSelect={(i: number) =>
+          setView({ type: "inbox", platform: view.platform, accountIndex: i })}
         onBack={() => setView({ type: "platform-select" })}
       />
     );
@@ -496,8 +591,10 @@ const App: FC<AppProps> = ({ initialPlatform, accountStores, eventStore }) => {
           provider={provider}
           accountName={provider.formatAccountName(account)}
           inbox={state.inbox}
-          onSelectThread={(id: string) => setView({ ...view, type: "thread", threadId: id })}
-          onBack={() => setView({ type: "account-select", platform: view.platform })}
+          onSelectThread={(id: string) =>
+            setView({ ...view, type: "thread", threadId: id })}
+          onBack={() =>
+            setView({ type: "account-select", platform: view.platform })}
           onRefresh={() => loadInbox()}
         />
       );
@@ -511,14 +608,22 @@ const App: FC<AppProps> = ({ initialPlatform, accountStores, eventStore }) => {
     const account = state?.accounts[view.accountIndex];
 
     if (provider && state && account) {
-      const thread = provider.deriveThread(state.events, view.threadId as ThreadId);
+      const thread = provider.deriveThread(
+        state.events,
+        view.threadId as ThreadId,
+      );
       if (!thread) return <Text color="red">Thread not found</Text>;
       return (
         <ThreadView
           provider={provider}
           thread={thread}
           accountId={account.id}
-          onBack={() => setView({ type: "inbox", platform: view.platform, accountIndex: view.accountIndex })}
+          onBack={() =>
+            setView({
+              type: "inbox",
+              platform: view.platform,
+              accountIndex: view.accountIndex,
+            })}
         />
       );
     }
@@ -548,7 +653,7 @@ PLATFORMS:
 
   let initialPlatform: Platform | undefined;
   const arg = Deno.args[0]?.toLowerCase();
-  
+
   if (arg === "linkedin") initialPlatform = "linkedin";
   else if (arg === "x") initialPlatform = "x";
   else if (arg) {
@@ -567,7 +672,7 @@ PLATFORMS:
       initialPlatform={initialPlatform}
       accountStores={{ linkedin: linkedInAccountStore, x: xAccountStore }}
       eventStore={eventStore}
-    />
+    />,
   );
 };
 

@@ -15,7 +15,8 @@ export interface CommandResult {
   success: boolean;
 }
 
-export interface CommandOptions extends Omit<Deno.CommandOptions, "stdout" | "stderr"> {
+export interface CommandOptions
+  extends Omit<Deno.CommandOptions, "stdout" | "stderr"> {
   /** Capture output (default: true) */
   capture?: boolean;
 }

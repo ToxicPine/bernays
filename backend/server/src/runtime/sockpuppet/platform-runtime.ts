@@ -1,166 +1,104 @@
 // src/runtime/sockpuppet/platform-runtime.ts
-// Platform service layer for sockpuppets (new architecture)
+// Platform service layer for sockpuppets
 
-import { Effect, Layer, Option } from "effect";
-import type { BrowserConfigId, Scope, ThreadId } from "$/core/branded.ts";
+import { type Context, Effect, Layer } from "effect";
+import { Scope } from "$/core/branded.ts";
 import type { EventStore, StorableEvent } from "$/store/mod.ts";
 import type { BaseInboxView } from "$/views/inbox.ts";
 import type { BaseThreadView } from "$/views/thread.ts";
 import type { BaseAccount, BaseBoundBrowser } from "$/views/browser.ts";
+import type { BaseContact } from "$/views/contact.ts";
 import { BrowserPool, type BrowserPoolService } from "$/backend/mod.ts";
-import type { BaseIntent, PlatformDefinition } from "$/platforms/mod.ts";
+import {
+  type ActionsRecord,
+  makePlatformService,
+  type PlatformDefinition,
+} from "$/platforms/mod.ts";
 import { makeProjection } from "$/projections/projection.ts";
-import { Platform, type PlatformServiceInterface } from "./services.ts";
 
-// Platform Runtime Configuration
-
-export interface PlatformRuntimeConfig<
-  TScope extends Scope,
-  TEvent extends StorableEvent & { readonly scope: TScope },
-  TIntent extends BaseIntent<TScope>,
-  TAnchor,
-  TThread extends BaseThreadView<TAnchor>,
-  TInbox extends BaseInboxView<unknown>,
-  TAccount extends BaseAccount,
-  TBrowser extends BaseBoundBrowser,
-> {
-  readonly platform: PlatformDefinition<
-    TScope,
-    TEvent,
-    TIntent,
-    TAnchor,
-    TThread,
-    TInbox,
-    TAccount,
-    TBrowser
-  >;
-  readonly account: TAccount;
-  readonly eventStore: EventStore<StorableEvent>;
-  readonly browserPool: BrowserPoolService;
-}
-
-// Platform Layer
+// =============================================================================
+// Platform Layer Factory
+// =============================================================================
 
 /**
- * Create a Platform service implementation from config.
+ * Create a Layer that provides a typed Platform service.
+ *
+ * Each platform defines its own tag (e.g., LinkedInPlatform) and this
+ * factory creates a layer for that specific tag.
+ *
+ * @param tag - The platform-specific context tag (e.g., LinkedInPlatform)
+ * @param config - Platform configuration
+ *
+ * @example
+ * ```typescript
+ * const actions = makeLinkedInActions(browserPool, account);
+ * const layer = makePlatformLayer(LinkedInPlatform, {
+ *   platform: linkedInPlatform,
+ *   account,
+ *   eventStore,
+ *   browserPool,
+ *   actions,
+ * });
+ * ```
  */
-export const makePlatformService = <
-  TScope extends Scope,
+export function makePlatformLayer<
+  TScope extends string,
+  TIdentity extends string,
   TEvent extends StorableEvent & { readonly scope: TScope },
-  TIntent extends BaseIntent<TScope>,
   TAnchor,
   TThread extends BaseThreadView<TAnchor>,
   TInbox extends BaseInboxView<unknown>,
-  TAccount extends BaseAccount,
+  TAccount extends BaseAccount<TIdentity>,
   TBrowser extends BaseBoundBrowser,
+  TContact extends BaseContact<TIdentity>,
+  TActions extends ActionsRecord,
+  TTag extends Context.Tag<any, any>,
 >(
-  config: PlatformRuntimeConfig<
-    TScope,
-    TEvent,
-    TIntent,
-    TAnchor,
-    TThread,
-    TInbox,
-    TAccount,
-    TBrowser
-  >,
-): PlatformServiceInterface => {
-  const { platform, account, eventStore, browserPool } = config;
-  const behavior = platform.behavior;
+  tag: TTag,
+  config: {
+    readonly platform: PlatformDefinition<
+      TScope,
+      TIdentity,
+      TEvent,
+      TAnchor,
+      TThread,
+      TInbox,
+      TAccount,
+      TBrowser,
+      TContact
+    >;
+    readonly account: TAccount;
+    readonly eventStore: EventStore<StorableEvent>;
+    readonly browserPool: BrowserPoolService;
+    readonly actions: TActions;
+  },
+): Layer.Layer<Context.Tag.Identifier<TTag>> {
+  const { platform, account, eventStore, browserPool, actions } = config;
 
   const projection = makeProjection(
-    platform.scope,
+    Scope(platform.scope),
     platform.eventSchema,
     eventStore,
   );
 
-  const getRunningConfigIds = Effect.gen(function* () {
-    const results = yield* Effect.forEach(
-      account.browserBindings,
-      (binding) =>
-        Effect.gen(function* () {
-          const running = yield* browserPool.isRunning(binding.configId);
-          return running ? binding.configId : null;
-        }),
-    );
-    return new Set(
-      results.filter((id): id is BrowserConfigId => id !== null),
-    );
-  });
+  // Create BrowserPool layer from the provided service
+  const browserPoolLayer = Layer.succeed(BrowserPool, browserPool);
 
-  return {
-    scope: platform.scope,
-    accountId: account.id,
+  // Create the platform service effect and provide BrowserPool
+  const serviceEffect = makePlatformService(
+    platform,
     account,
+    projection,
+    actions,
+  );
 
-    inbox: Effect.gen(function* () {
-      const events = yield* projection.query();
-      return behavior.deriveInbox(events, account.id) as BaseInboxView<unknown>;
-    }),
+  // Create layer - cast the effect result to match the tag's expected service type
+  const effectWithCast = Effect.map(
+    serviceEffect,
+    (svc) => svc as Context.Tag.Service<TTag>,
+  );
 
-    thread: (threadId: ThreadId) =>
-      Effect.gen(function* () {
-        const events = yield* projection.query();
-        const thread = behavior.deriveThread(events, threadId);
-        return Option.fromNullable(thread as BaseThreadView<unknown> | null);
-      }),
-
-    browsers: Effect.gen(function* () {
-      const events = yield* projection.query();
-      const runningIds = yield* getRunningConfigIds;
-      return behavior.deriveBrowsers(
-        events,
-        account,
-        runningIds,
-      ) as readonly BaseBoundBrowser[];
-    }),
-
-    execute: (
-      intent: BaseIntent,
-      options?: { preferConfigId?: BrowserConfigId },
-    ) =>
-      Effect.gen(function* () {
-        const events = yield* projection.query();
-        const runningIds = yield* getRunningConfigIds;
-        const browsers = behavior.deriveBrowsers(events, account, runningIds);
-
-        // Cast intent to platform-specific type
-        const typedIntent = intent as TIntent;
-
-        // Execute via behavior, providing BrowserPool
-        const result = yield* behavior
-          .execute(typedIntent, browsers, options?.preferConfigId)
-          .pipe(
-            Effect.provideService(BrowserPool, browserPool),
-          );
-
-        return result;
-      }),
-  };
-};
-
-/**
- * Create a Layer that provides the Platform service.
- */
-export const makePlatformLayer = <
-  TScope extends Scope,
-  TEvent extends StorableEvent & { readonly scope: TScope },
-  TIntent extends BaseIntent<TScope>,
-  TAnchor,
-  TThread extends BaseThreadView<TAnchor>,
-  TInbox extends BaseInboxView<unknown>,
-  TAccount extends BaseAccount,
-  TBrowser extends BaseBoundBrowser,
->(
-  config: PlatformRuntimeConfig<
-    TScope,
-    TEvent,
-    TIntent,
-    TAnchor,
-    TThread,
-    TInbox,
-    TAccount,
-    TBrowser
-  >,
-): Layer.Layer<Platform> =>
-  Layer.succeed(Platform, makePlatformService(config));
+  return Layer.effect(tag, effectWithCast).pipe(
+    Layer.provide(browserPoolLayer),
+  );
+}

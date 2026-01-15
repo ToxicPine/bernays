@@ -3,8 +3,8 @@
 // view-event-log.tsx — Event Log Viewer TUI (Ink)
 // =============================================================================
 
-import { useState, useEffect, type FC } from "react";
-import { Box, Text, useInput, useApp } from "ink";
+import { type FC, useEffect, useState } from "react";
+import { Box, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { parseArgs } from "@std/cli";
 import { stringify } from "@std/csv";
@@ -15,34 +15,30 @@ import {
   type StorableEvent,
 } from "@bernays/server/store";
 import {
-  Header,
-  StatusBar,
-  FullHeightLayout,
-  ErrorBanner,
-  toAppError,
+  and,
   type AppError,
-  relativeTime,
-  formatTimestamp,
-  truncate,
-  scopeColor,
-  runApp,
-  requireDatabaseUrl,
-  runMain,
-  useContentHeight,
-  useTerminalSize,
-} from "./lib/ink.tsx";
-import {
-  createBindings,
-  useKeyHandler,
-  type KeyBinding,
-} from "./lib/keybindings.tsx";
-import { useListNavigation } from "./lib/hooks.tsx";
-import {
   byScope,
   byType,
+  createBindings,
+  ErrorBanner,
+  formatTimestamp,
+  FullHeightLayout,
+  Header,
+  type KeyBinding,
+  relativeTime,
+  requireDatabaseUrl,
+  runApp,
+  runMain,
+  scopeColor,
   sortByTimestampDesc,
-  and,
-} from "./lib/filters.ts";
+  StatusBar,
+  toAppError,
+  truncate,
+  useContentHeight,
+  useKeyHandler,
+  useListNavigation,
+  useTerminalSize,
+} from "./lib/tui/mod.ts";
 
 // =============================================================================
 // Types
@@ -78,7 +74,9 @@ const getString = (obj: unknown, key: string): string | undefined => {
 // =============================================================================
 
 const buildQuery = (state: QueryState): EventStoreQuery => {
-  if (state.correlationId) return { type: "byCorrelation", correlationId: state.correlationId };
+  if (state.correlationId) {
+    return { type: "byCorrelation", correlationId: state.correlationId };
+  }
   if (state.since) return { type: "since", timestamp: state.since };
   return { type: "all" };
 };
@@ -90,7 +88,10 @@ const buildFilters = (state: QueryState): ((e: StorableEvent) => boolean)[] => {
   return filters;
 };
 
-const fetchEvents = async (store: EventStore, state: QueryState): Promise<StorableEvent[]> => {
+const fetchEvents = async (
+  store: EventStore,
+  state: QueryState,
+): Promise<StorableEvent[]> => {
   const res = await store.fetch(buildQuery(state));
   if (!res.ok) throw new Error(`Query failed: ${res.error.message}`);
   const filters = buildFilters(state);
@@ -131,7 +132,7 @@ const FilterInput: FC<FilterInputProps> = (props: FilterInputProps) => {
       statusBar={<StatusBar>Enter to confirm | Escape to cancel</StatusBar>}
     >
       <Box>
-        <Text bold>{labels[props.field]}: </Text>
+        <Text bold>{labels[props.field]}:</Text>
         <TextInput
           value={value}
           onChange={(v: string) => setValue(v)}
@@ -172,7 +173,10 @@ const DetailView: FC<DetailViewProps> = (props: DetailViewProps) => {
 
   useKeyHandler(bindings, [maxScroll]);
 
-  const visiblePayload = payload.slice(scrollOffset, scrollOffset + visibleLines);
+  const visiblePayload = payload.slice(
+    scrollOffset,
+    scrollOffset + visibleLines,
+  );
 
   return (
     <FullHeightLayout
@@ -180,21 +184,37 @@ const DetailView: FC<DetailViewProps> = (props: DetailViewProps) => {
       statusBar={<StatusBar>{bindings.hints}</StatusBar>}
     >
       <Box flexDirection="column" marginBottom={1}>
-        <Text><Text bold>Event ID:</Text> <Text color="cyan">{e.eventId}</Text></Text>
-        <Text><Text bold>Scope:</Text> <Text color={scopeColor(e.scope)}>{e.scope}</Text></Text>
-        <Text><Text bold>Type:</Text> {e.type}</Text>
-        <Text><Text bold>Timestamp:</Text> {formatTimestamp(e.timestamp)}</Text>
+        <Text>
+          <Text bold>Event ID:</Text> <Text color="cyan">{e.eventId}</Text>
+        </Text>
+        <Text>
+          <Text bold>Scope:</Text>{" "}
+          <Text color={scopeColor(e.scope)}>{e.scope}</Text>
+        </Text>
+        <Text>
+          <Text bold>Type:</Text> {e.type}
+        </Text>
+        <Text>
+          <Text bold>Timestamp:</Text> {formatTimestamp(e.timestamp)}
+        </Text>
         {getString(e, "correlationId") && (
-          <Text><Text bold>Correlation:</Text> {getString(e, "correlationId")}</Text>
+          <Text>
+            <Text bold>Correlation:</Text> {getString(e, "correlationId")}
+          </Text>
         )}
       </Box>
-      <Box borderStyle="single" borderColor="gray" flexDirection="column" paddingX={1}>
+      <Box
+        borderStyle="single"
+        borderColor="gray"
+        flexDirection="column"
+        paddingX={1}
+      >
         <Text bold dimColor>Payload:</Text>
-        {visiblePayload.map((line, i) => (
-          <Text key={i} dimColor>{line}</Text>
-        ))}
+        {visiblePayload.map((line, i) => <Text key={i} dimColor>{line}</Text>)}
         {payload.length > visibleLines && (
-          <Text dimColor>... ({payload.length - visibleLines} more lines, j/k to scroll)</Text>
+          <Text dimColor>
+            ... ({payload.length - visibleLines} more lines, j/k to scroll)
+          </Text>
         )}
       </Box>
     </FullHeightLayout>
@@ -223,8 +243,18 @@ const ExportView: FC<ExportViewProps> = (props: ExportViewProps) => {
     onBack: props.onBack,
     onQuit: exit,
     custom: [
-      { key: "c", label: "CSV", handler: () => setFormat("csv"), enabled: canSelectFormat },
-      { key: "j", label: "JSON", handler: () => setFormat("json"), enabled: canSelectFormat },
+      {
+        key: "c",
+        label: "CSV",
+        handler: () => setFormat("csv"),
+        enabled: canSelectFormat,
+      },
+      {
+        key: "j",
+        label: "JSON",
+        handler: () => setFormat("json"),
+        enabled: canSelectFormat,
+      },
     ],
   });
 
@@ -249,16 +279,26 @@ const ExportView: FC<ExportViewProps> = (props: ExportViewProps) => {
         const output = format === "json"
           ? JSON.stringify(props.events, null, 2)
           : stringify(
-              props.events.map((e) => ({
-                timestamp: e.timestamp,
-                scope: e.scope,
-                type: e.type,
-                eventId: e.eventId,
-                correlationId: getString(e, "correlationId") ?? "",
-                payload: JSON.stringify(e),
-              })),
-              { columns: ["timestamp", "scope", "type", "eventId", "correlationId", "payload"], headers: true }
-            );
+            props.events.map((e) => ({
+              timestamp: e.timestamp,
+              scope: e.scope,
+              type: e.type,
+              eventId: e.eventId,
+              correlationId: getString(e, "correlationId") ?? "",
+              payload: JSON.stringify(e),
+            })),
+            {
+              columns: [
+                "timestamp",
+                "scope",
+                "type",
+                "eventId",
+                "correlationId",
+                "payload",
+              ],
+              headers: true,
+            },
+          );
         const filename = `events-${Date.now()}.${format}`;
         await Deno.writeTextFile(filename, output);
         setExported(filename);
@@ -276,20 +316,38 @@ const ExportView: FC<ExportViewProps> = (props: ExportViewProps) => {
       header={<Header title="Export Events" />}
       statusBar={<StatusBar>{bindings.hints}</StatusBar>}
     >
-      {error && <ErrorBanner error={error} onDismiss={() => { setError(null); setFormat(null); }} />}
-      {!format && !error ? (
-        <>
-          <Text>Select export format:</Text>
-          <Box marginY={1} flexDirection="column">
-            <Text><Text bold color="green">[c]</Text> CSV</Text>
-            <Text><Text bold color="green">[j]</Text> JSON</Text>
-          </Box>
-        </>
-      ) : exported ? (
-        <Text color="green">Exported {props.events.length} events to {exported}</Text>
-      ) : exporting ? (
-        <Text color="cyan">Exporting...</Text>
-      ) : null}
+      {error && (
+        <ErrorBanner
+          error={error}
+          onDismiss={() => {
+            setError(null);
+            setFormat(null);
+          }}
+        />
+      )}
+      {!format && !error
+        ? (
+          <>
+            <Text>Select export format:</Text>
+            <Box marginY={1} flexDirection="column">
+              <Text>
+                <Text bold color="green">[c]</Text> CSV
+              </Text>
+              <Text>
+                <Text bold color="green">[j]</Text> JSON
+              </Text>
+            </Box>
+          </>
+        )
+        : exported
+        ? (
+          <Text color="green">
+            Exported {props.events.length} events to {exported}
+          </Text>
+        )
+        : exporting
+        ? <Text color="cyan">Exporting...</Text>
+        : null}
     </FullHeightLayout>
   );
 };
@@ -326,7 +384,11 @@ const ListView: FC<ListViewProps> = (props: ListViewProps) => {
     setLoading(true);
     setError(null);
     try {
-      const all = await fetchEvents(props.store, { ...props.state, offset: 0, limit: 10000 });
+      const all = await fetchEvents(props.store, {
+        ...props.state,
+        offset: 0,
+        limit: 10000,
+      });
       setTotal(all.length);
       setEvents(all.slice(props.state.offset, props.state.offset + pageSize));
     } catch (e) {
@@ -351,7 +413,18 @@ const ListView: FC<ListViewProps> = (props: ListViewProps) => {
     { key: "t", label: "type", handler: () => props.onFilter("type") },
     { key: "s", label: "since", handler: () => props.onFilter("since") },
     { key: "c", label: "corr", handler: () => props.onFilter("correlation") },
-    { key: "R", label: "reset", handler: () => props.onUpdateState({ scope: undefined, type: undefined, since: undefined, correlationId: undefined, offset: 0 }) },
+    {
+      key: "R",
+      label: "reset",
+      handler: () =>
+        props.onUpdateState({
+          scope: undefined,
+          type: undefined,
+          since: undefined,
+          correlationId: undefined,
+          offset: 0,
+        }),
+    },
     { key: "e", label: "export", handler: () => props.onExport() },
     ...(error ? [{ key: "r", label: "retry", handler: loadEvents }] : []),
   ];
@@ -361,9 +434,23 @@ const ListView: FC<ListViewProps> = (props: ListViewProps) => {
     pagination: totalPages > 1,
     onUp: nav.up,
     onDown: nav.down,
-    onPageUp: () => { props.onUpdateState({ offset: Math.max(0, props.state.offset - pageSize) }); nav.reset(); },
-    onPageDown: () => { if (props.state.offset + pageSize < total) { props.onUpdateState({ offset: props.state.offset + pageSize }); nav.reset(); } },
-    onSelect: () => { if (events[nav.selectedIndex]) props.onViewEvent(events[nav.selectedIndex]); },
+    onPageUp: () => {
+      props.onUpdateState({
+        offset: Math.max(0, props.state.offset - pageSize),
+      });
+      nav.reset();
+    },
+    onPageDown: () => {
+      if (props.state.offset + pageSize < total) {
+        props.onUpdateState({ offset: props.state.offset + pageSize });
+        nav.reset();
+      }
+    },
+    onSelect: () => {
+      if (events[nav.selectedIndex]) {
+        props.onViewEvent(events[nav.selectedIndex]);
+      }
+    },
     onQuit: exit,
     custom: filterBindings,
   });
@@ -375,20 +462,28 @@ const ListView: FC<ListViewProps> = (props: ListViewProps) => {
     }
   });
 
-  useKeyHandler(bindings, [nav.selectedIndex, props.state.offset, total, error]);
+  useKeyHandler(bindings, [
+    nav.selectedIndex,
+    props.state.offset,
+    total,
+    error,
+  ]);
 
   const filters: string[] = [];
   if (props.state.scope) filters.push(`scope=${props.state.scope}`);
   if (props.state.type) filters.push(`type=${props.state.type}`);
   if (props.state.since) filters.push(`since=${props.state.since}`);
-  if (props.state.correlationId) filters.push(`corr=${props.state.correlationId.slice(0, 8)}...`);
+  if (props.state.correlationId) {
+    filters.push(`corr=${props.state.correlationId.slice(0, 8)}...`);
+  }
 
   // Calculate proportional column widths
   // Fixed columns: prefix (7), scope (12), time (12), eventId (10) = 41 chars
   const availableWidth = Math.max(40, columns - 41);
   const typeWidth = Math.max(15, Math.min(40, availableWidth));
 
-  const statusHints = bindings.hints + (totalPages > 1 ? ` | ${page + 1}/${totalPages}` : "");
+  const statusHints = bindings.hints +
+    (totalPages > 1 ? ` | ${page + 1}/${totalPages}` : "");
 
   return (
     <FullHeightLayout
@@ -397,39 +492,49 @@ const ListView: FC<ListViewProps> = (props: ListViewProps) => {
     >
       {error && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
       <Box marginBottom={1}>
-        <Text bold>Filters: </Text>
-        {filters.length > 0 ? (
-          filters.map((f, i) => <Text key={i} color="cyan">{f} </Text>)
-        ) : (
-          <Text dimColor>(none)</Text>
-        )}
+        <Text bold>Filters:</Text>
+        {filters.length > 0
+          ? (
+            filters.map((f, i) => <Text key={i} color="cyan">{f}</Text>)
+          )
+          : <Text dimColor>(none)</Text>}
       </Box>
 
-      {loading ? (
-        <Text color="cyan">Loading...</Text>
-      ) : events.length === 0 && !error ? (
-        <Text dimColor>No events found.</Text>
-      ) : events.length > 0 ? (
-        <>
-          <Text dimColor>
-            Showing {props.state.offset + 1}-{props.state.offset + events.length} of {total}:
-          </Text>
-          <Box flexDirection="column" marginY={1}>
-            {events.map((e, i) => (
-              <Box key={e.eventId}>
-                <Text color={nav.selectedIndex === i ? "green" : "white"}>
-                  {nav.selectedIndex === i ? "> " : "  "}
-                  <Text bold>[{(props.state.offset + i + 1).toString().padStart(2)}]</Text>{" "}
-                  <Text color={scopeColor(e.scope)}>{e.scope.padEnd(10)}</Text>{" "}
-                  {truncate(e.type, typeWidth).padEnd(typeWidth)}{" "}
-                  <Text dimColor>{relativeTime(e.timestamp).padEnd(10)}</Text>{" "}
-                  <Text dimColor>{e.eventId.slice(0, 8)}</Text>
-                </Text>
-              </Box>
-            ))}
-          </Box>
-        </>
-      ) : null}
+      {loading
+        ? <Text color="cyan">Loading...</Text>
+        : events.length === 0 && !error
+        ? <Text dimColor>No events found.</Text>
+        : events.length > 0
+        ? (
+          <>
+            <Text dimColor>
+              Showing{" "}
+              {props.state.offset + 1}-{props.state.offset + events.length} of
+              {" "}
+              {total}:
+            </Text>
+            <Box flexDirection="column" marginY={1}>
+              {events.map((e, i) => (
+                <Box key={e.eventId}>
+                  <Text color={nav.selectedIndex === i ? "green" : "white"}>
+                    {nav.selectedIndex === i ? "> " : "  "}
+                    <Text bold>
+                      [{(props.state.offset + i + 1).toString().padStart(2)}]
+                    </Text>{" "}
+                    <Text color={scopeColor(e.scope)}>
+                      {e.scope.padEnd(10)}
+                    </Text>{" "}
+                    {truncate(e.type, typeWidth).padEnd(typeWidth)}{" "}
+                    <Text dimColor>{relativeTime(e.timestamp).padEnd(10)}</Text>
+                    {" "}
+                    <Text dimColor>{e.eventId.slice(0, 8)}</Text>
+                  </Text>
+                </Box>
+              ))}
+            </Box>
+          </>
+        )
+        : null}
     </FullHeightLayout>
   );
 };
@@ -449,16 +554,23 @@ const App: FC<AppProps> = (props: AppProps) => {
 
   useEffect(() => {
     const load = async () => {
-      const events = await fetchEvents(props.store, { ...state, offset: 0, limit: 10000 });
+      const events = await fetchEvents(props.store, {
+        ...state,
+        offset: 0,
+        limit: 10000,
+      });
       setAllEvents(events);
     };
     load();
   }, [state]);
 
   if (view.type === "filter") {
-    const currentValue = view.field === "scope" ? state.scope
-      : view.field === "type" ? state.type
-      : view.field === "since" ? state.since
+    const currentValue = view.field === "scope"
+      ? state.scope
+      : view.field === "type"
+      ? state.type
+      : view.field === "since"
+      ? state.since
       : state.correlationId;
     return (
       <FilterInput
@@ -479,20 +591,32 @@ const App: FC<AppProps> = (props: AppProps) => {
   }
 
   if (view.type === "detail") {
-    return <DetailView event={view.event} onBack={() => setView({ type: "list" })} />;
+    return (
+      <DetailView
+        event={view.event}
+        onBack={() => setView({ type: "list" })}
+      />
+    );
   }
 
   if (view.type === "export") {
-    return <ExportView events={allEvents} onBack={() => setView({ type: "list" })} />;
+    return (
+      <ExportView
+        events={allEvents}
+        onBack={() => setView({ type: "list" })}
+      />
+    );
   }
 
   return (
     <ListView
       store={props.store}
       state={state}
-      onUpdateState={(updates: Partial<QueryState>) => setState((s) => ({ ...s, ...updates }))}
+      onUpdateState={(updates: Partial<QueryState>) =>
+        setState((s) => ({ ...s, ...updates }))}
       onViewEvent={(event: StorableEvent) => setView({ type: "detail", event })}
-      onFilter={(field: "scope" | "type" | "since" | "correlation") => setView({ type: "filter", field })}
+      onFilter={(field: "scope" | "type" | "since" | "correlation") =>
+        setView({ type: "filter", field })}
       onExport={() => setView({ type: "export" })}
     />
   );
@@ -512,9 +636,15 @@ const cliList = async (store: EventStore, limit: number): Promise<void> => {
     console.log("\nRecent Events\n" + "─".repeat(76));
     for (let i = 0; i < events.length; i++) {
       const e = events[i];
-      console.log(`  [${(i + 1).toString().padStart(2)}] ${e.scope.padEnd(10)} ${e.type.padEnd(25)} ${relativeTime(e.timestamp).padEnd(10)} ${e.eventId.slice(0, 8)}`);
+      console.log(
+        `  [${(i + 1).toString().padStart(2)}] ${e.scope.padEnd(10)} ${
+          e.type.padEnd(25)
+        } ${relativeTime(e.timestamp).padEnd(10)} ${e.eventId.slice(0, 8)}`,
+      );
     }
-    console.log("─".repeat(76) + `\nShowing ${events.length} most recent events`);
+    console.log(
+      "─".repeat(76) + `\nShowing ${events.length} most recent events`,
+    );
   } catch (e) {
     const error = toAppError(e, "Failed to list events");
     console.error(`Error: ${error.title} - ${error.message}`);
@@ -529,7 +659,9 @@ const cliView = async (store: EventStore, eventId: string): Promise<void> => {
       console.error(`Query failed: ${res.error.message}`);
       Deno.exit(1);
     }
-    const event = res.value.find((e) => e.eventId === eventId || e.eventId.startsWith(eventId));
+    const event = res.value.find((e) =>
+      e.eventId === eventId || e.eventId.startsWith(eventId)
+    );
     if (!event) {
       console.error(`Event not found: ${eventId}`);
       return;
@@ -548,22 +680,35 @@ const cliView = async (store: EventStore, eventId: string): Promise<void> => {
   }
 };
 
-const cliExport = async (store: EventStore, format: "csv" | "json"): Promise<void> => {
+const cliExport = async (
+  store: EventStore,
+  format: "csv" | "json",
+): Promise<void> => {
   try {
     const events = await fetchEvents(store, { limit: 10000, offset: 0 });
     const output = format === "json"
       ? JSON.stringify(events, null, 2)
       : stringify(
-          events.map((e) => ({
-            timestamp: e.timestamp,
-            scope: e.scope,
-            type: e.type,
-            eventId: e.eventId,
-            correlationId: getString(e, "correlationId") ?? "",
-            payload: JSON.stringify(e),
-          })),
-          { columns: ["timestamp", "scope", "type", "eventId", "correlationId", "payload"], headers: true }
-        );
+        events.map((e) => ({
+          timestamp: e.timestamp,
+          scope: e.scope,
+          type: e.type,
+          eventId: e.eventId,
+          correlationId: getString(e, "correlationId") ?? "",
+          payload: JSON.stringify(e),
+        })),
+        {
+          columns: [
+            "timestamp",
+            "scope",
+            "type",
+            "eventId",
+            "correlationId",
+            "payload",
+          ],
+          headers: true,
+        },
+      );
     console.log(output);
   } catch (e) {
     const error = toAppError(e, "Failed to export events");

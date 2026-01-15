@@ -9,6 +9,8 @@ export {
   parseBrowserBindings,
 } from "./browser.ts";
 
+export { type BaseContact } from "./contact.ts";
+
 export { type BaseInboxView } from "./inbox.ts";
 
 export {
@@ -27,3 +29,5 @@ export {
   type GraphNodeView,
   type ThreadGraph,
 } from "./graph.ts";
+
+export { extractParticipants, toMessageViews } from "./behavior-utils.ts";

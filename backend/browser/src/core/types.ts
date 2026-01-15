@@ -3,7 +3,7 @@
 // Observer Context
 
 export interface ObserverContext {
-  browserId: string;
+  configId: string;
   tabId: string;
 }
 
@@ -33,6 +33,16 @@ export type CommandResult<T> =
 export type CommandHandler<TReq = unknown, TRes = unknown> = (
   payload: TReq,
 ) => Promise<CommandResult<TRes>>;
+
+// Error Handling Utility
+
+export const wrapCommandError = (err: unknown): CommandResult<never> => {
+  const error = err instanceof Error ? err : new Error(String(err));
+  return {
+    ok: false,
+    error: { code: "Unknown", message: error.message },
+  };
+};
 
 // Window Globals Declaration
 

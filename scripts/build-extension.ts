@@ -1,6 +1,6 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-run --allow-env
 // =============================================================================
-// build.ts — Build browser extension
+// build-extension.ts — Build Browser Extension
 // =============================================================================
 //
 // Usage:
@@ -20,8 +20,12 @@
 
 import { encodeBase32 } from "@std/encoding/base32";
 import { parseArgs } from "@std/cli";
-import { createLogger, type Logger } from "./lib/log.ts";
-import { fileExists, runCommand } from "./lib/shell.ts";
+import {
+  createLogger,
+  fileExists,
+  type Logger,
+  runCommand,
+} from "./lib/cli/mod.ts";
 
 // =============================================================================
 // Config
@@ -140,7 +144,7 @@ const compileFile = async (
   out: string,
   log: Logger,
 ): Promise<void> => {
-  log.info(`Compiling ${src}`);
+  log.info(`Compiling: ${src}`);
   const result = await runCommand([
     ESBUILD,
     src,
@@ -152,7 +156,11 @@ const compileFile = async (
   ]);
 
   if (!result.success) {
-    throw new Error(`Failed to build ${src}: ${result.stderr || result.stdout || `Exit code ${result.code}`}`);
+    throw new Error(
+      `Failed to build ${src}: ${
+        result.stderr || result.stdout || `Exit code ${result.code}`
+      }`,
+    );
   }
   log.ok(out);
 };
@@ -185,7 +193,7 @@ const buildJs = async (log: Logger): Promise<void> => {
     );
   }
 
-  log.info("Generating manifest.json");
+  log.info("Generating Manifest...");
   const manifest = generateManifest(HANDLERS);
   await Deno.writeTextFile(
     `${DIST_DIR}/manifest.json`,
@@ -201,14 +209,16 @@ const buildZip = async (log: Logger): Promise<string> => {
   const zipFile = await Deno.makeTempFile({ suffix: ".zip" });
   await Deno.remove(zipFile);
 
-  log.info(`Using ${ZIP_TOOL}`);
+  log.info(`Using: ${ZIP_TOOL}`);
   const result = await runCommand([ZIP_TOOL, "-r", zipFile, "."], {
     cwd: DIST_DIR,
   });
 
   if (!result.success) {
     throw new Error(
-      `Zip failed: ${result.stderr || result.stdout}\nMake sure ${ZIP_TOOL} is available.`,
+      `Zip failed: ${
+        result.stderr || result.stdout
+      }\nMake sure ${ZIP_TOOL} is available.`,
     );
   }
 

@@ -12,11 +12,12 @@ import {
   type Journal,
   makeJournalLayer,
   makePlatformLayer,
-  type Platform,
 } from "@bernays/server/runtime";
 import {
   type LinkedInAccount,
+  LinkedInPlatform,
   linkedInPlatform,
+  makeLinkedInActions,
 } from "@bernays/plugins/linkedin";
 import type {
   ConfigStoreService,
@@ -44,15 +45,20 @@ const createSockpuppetLayer = (
   eventStore: EventStore<StorableEvent>,
   browserPool: BrowserPoolService,
 ) => {
-  const platformLayer = makePlatformLayer({
+  // Create typed actions for this account
+  const actions = makeLinkedInActions(browserPool, account);
+
+  // Create platform layer with typed tag
+  const platformLayer = makePlatformLayer(LinkedInPlatform, {
     platform: linkedInPlatform,
     account,
     eventStore,
     browserPool,
+    actions,
   });
 
   const journalLayer = makeJournalLayer({
-    accountId: account.id,
+    participantId: account.id,
     eventStore,
   });
 
@@ -64,7 +70,7 @@ const createSockpuppetLayer = (
 // ============================================================================
 
 export const runWithSockpuppet = <A, E>(
-  sockpuppet: Effect.Effect<A, E, Platform | Journal>,
+  sockpuppet: Effect.Effect<A, E, LinkedInPlatform | Journal>,
   account: LinkedInAccount,
   eventStore: EventStore<StorableEvent>,
 ) =>

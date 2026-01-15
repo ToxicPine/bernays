@@ -1,20 +1,28 @@
 // src/views/thread.ts
 // Base thread view types for platform-specific extension
 
-import type { CanonicalId, ThreadId } from "$/core/branded.ts";
+import type { CanonicalId, ParticipantId, ThreadId } from "$/core/mod.ts";
 
 // Participant
 
-export interface Participant {
-  readonly id: string;
+/**
+ * A participant in a thread.
+ * @template TScope - The identity scope (e.g., "linkedin")
+ */
+export interface Participant<TScope extends string = string> {
+  readonly id: ParticipantId<TScope>;
   readonly name?: string;
 }
 
 // Message View
 
-export interface MessageView {
+/**
+ * A message in a thread.
+ * @template TScope - The identity scope (e.g., "linkedin")
+ */
+export interface MessageView<TScope extends string = string> {
   readonly id: CanonicalId;
-  readonly senderId: string;
+  readonly senderId: ParticipantId<TScope>;
   readonly content?: string;
   readonly timestamp: string;
 }
@@ -26,8 +34,9 @@ export interface MessageView {
  * Generic over TAnchor to allow platform-specific anchor shapes.
  *
  * Platforms extend this with platform-specific thread metadata:
- * - LinkedIn: unreadCount, isSponsored
- * - X: isArchived, etc.
+ * - LinkedIn: isSponsored
+ * - X: isArchived
+ * - Reddit: isGroupChat
  */
 export interface BaseThreadView<TAnchor> {
   readonly threadId: ThreadId;
@@ -44,7 +53,7 @@ export interface BaseThreadView<TAnchor> {
  */
 export const calculateUnreadCount = (
   messages: readonly MessageView[],
-  ownerId: string,
+  ownerId: ParticipantId,
 ): number => {
   let lastOwnIndex = -1;
   for (let i = messages.length - 1; i >= 0; i--) {

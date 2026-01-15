@@ -1,6 +1,6 @@
 #!/usr/bin/env -S deno run --allow-read --allow-net --allow-env
 // =============================================================================
-// load-accounts.ts — CLI utility for loading accounts from TOML files
+// load-accounts.ts — Load Accounts From TOML Files
 // =============================================================================
 //
 // Usage:
@@ -11,23 +11,13 @@
 //   export <platform>          Export accounts from database to TOML (stdout)
 //   validate <platform> <file> Validate TOML without touching database
 //
-// Platforms:
-//   linkedin                   LinkedIn accounts
-//   x                          X (Twitter) accounts
-//
 // Options:
 //   --db-url <url>            Database connection string (default: DATABASE_URL env)
 //   --help, -h                Show help
 //
-// Examples:
-//   # Validate TOML
-//   deno run -A scripts/load-accounts.ts validate linkedin accounts/linkedin.toml
-//
-//   # Import to database
-//   deno run -A scripts/load-accounts.ts import linkedin accounts/linkedin.toml
-//
-//   # Export to file
-//   deno run -A scripts/load-accounts.ts export linkedin > accounts/linkedin-backup.toml
+// Adding a new platform:
+//   1. Add the store factory to storeFactories in scripts/lib/platforms/stores.ts
+//   2. That's it - the CLI automatically picks up new platforms
 //
 // =============================================================================
 
@@ -35,35 +25,32 @@ import { parseArgs } from "@std/cli";
 import { parse as parseToml, stringify as stringifyToml } from "@std/toml";
 import { Effect } from "effect";
 
-import { createLogger, die, statusOk } from "./lib/log.ts";
 import {
-  LinkedInTomlFileSchema,
-  XTomlFileSchema,
-  toLinkedInAccount,
-  toXAccount,
-  fromLinkedInAccount,
-  fromXAccount,
-} from "./lib/account-schemas.ts";
-
+  type BrowserConfigId as BrowserConfigIdType,
+  type ParticipantId as ParticipantIdType,
+} from "@bernays/server/core";
+import { createLogger, die, statusOk } from "./lib/cli/mod.ts";
 import {
-  createPostgresLinkedInAccountStore,
-} from "@bernays/plugins/linkedin";
-import {
-  createPostgresXAccountStore,
-} from "@bernays/plugins/x";
-
-// =============================================================================
-// Types
-// =============================================================================
-
-type PlatformName = "linkedin" | "x";
+  AccountsTomlFileSchema,
+  fromAccount,
+  getStore,
+  isSupportedPlatform,
+  supportedPlatforms,
+  toAccount,
+} from "./lib/platforms/mod.ts";
 
 // =============================================================================
 // Help
 // =============================================================================
 
-const HELP = `
-load-accounts — CLI utility for loading accounts from TOML files
+const buildHelp = (): string => {
+  const platforms = supportedPlatforms();
+  const platformList = platforms.map((p) =>
+    `  ${p.padEnd(24)} ${p.charAt(0).toUpperCase() + p.slice(1)} accounts`
+  ).join("\n");
+
+  return `
+load-accounts — CLI Utility for Loading Accounts from TOML Files
 
 USAGE:
   bernays load-accounts [COMMAND] [OPTIONS]
@@ -74,8 +61,7 @@ COMMANDS:
   validate <platform> <file> Validate TOML Without Touching Database
 
 PLATFORMS:
-  linkedin                   LinkedIn Accounts
-  x                          X (Twitter) Accounts
+${platformList}
 
 OPTIONS:
   --db-url <url>            Database Connection String (default: DATABASE_URL env)
@@ -90,83 +76,98 @@ EXAMPLES:
 
   # Export accounts to file
   bernays load-accounts export linkedin > accounts/linkedin-backup.toml
+
+EXTENDING:
+  To Add a New Platform, Add The Store Factory to StoreFactories in
+  scripts/lib/platforms/stores.ts
 `.trim();
-
-// =============================================================================
-// Validation
-// =============================================================================
-
-const isPlatform = (value: string): value is PlatformName => {
-  return value === "linkedin" || value === "x";
 };
 
 // =============================================================================
 // File Reading
 // =============================================================================
 
-const readTomlFile = async (filepath: string): Promise<Record<string, unknown>> => {
+const readTomlFile = async (
+  filepath: string,
+): Promise<Record<string, unknown>> => {
   let content: string;
   try {
     content = await Deno.readTextFile(filepath);
   } catch (err) {
     if (err instanceof Deno.errors.NotFound) {
-      die(`File not found: ${filepath}`);
+      die(`File Not Found: ${filepath}`);
     }
-    throw die(`Failed to read file: ${err}`);
+    throw die(`Failed to Read File: ${err}`);
   }
 
   try {
     return parseToml(content);
   } catch (err) {
-    throw die(`TOML parse error: ${err}`);
+    throw die(`TOML Parse Error: ${err}`);
   }
 };
 
 // =============================================================================
-// LinkedIn Commands
+// Commands
 // =============================================================================
 
-const validateLinkedIn = async (filepath: string): Promise<void> => {
+const validateCommand = async (
+  platform: string,
+  filepath: string,
+): Promise<void> => {
   const log = createLogger();
   log.section(`Validating ${filepath}`);
 
   const parsed = await readTomlFile(filepath);
-  const result = LinkedInTomlFileSchema.safeParse(parsed);
+  const result = AccountsTomlFileSchema.safeParse(parsed);
 
   if (!result.success) {
-    log.error("Validation failed:");
+    log.error("Validation Failed:");
     for (const issue of result.error.issues) {
       log.error(`  ${issue.path.join(".")}: ${issue.message}`);
     }
     Deno.exit(1);
   }
 
-  statusOk(`Validated ${result.data.accounts.length} LinkedIn account(s)`);
+  statusOk(`Validated ${result.data.accounts.length} ${platform} Account(s)`);
 };
 
-const importLinkedIn = async (filepath: string, dbUrl: string): Promise<void> => {
+const importCommand = async (
+  platform: string,
+  filepath: string,
+  dbUrl: string,
+): Promise<void> => {
   const log = createLogger();
   log.section(`Importing ${filepath} to database`);
 
   const parsed = await readTomlFile(filepath);
-  const result = LinkedInTomlFileSchema.safeParse(parsed);
+  const result = AccountsTomlFileSchema.safeParse(parsed);
 
   if (!result.success) {
-    log.error("Validation failed:");
+    log.error("Validation Failed:");
     for (const issue of result.error.issues) {
       log.error(`  ${issue.path.join(".")}: ${issue.message}`);
     }
     Deno.exit(1);
   }
 
-  log.info("Connecting to database...");
-  const store = await createPostgresLinkedInAccountStore({ connectionString: dbUrl });
+  if (!isSupportedPlatform(platform)) {
+    return die(`Unknown Platform: ${platform}`);
+  }
+
+  // After the type guard above, platform is narrowed to SupportedPlatform
+  log.info("Connecting to Database...");
+  const storeEntry = getStore(platform);
+  const store = await storeEntry.create({ connectionString: dbUrl });
 
   let upserted = 0;
   for (const tomlAccount of result.data.accounts) {
-    const account = toLinkedInAccount(tomlAccount);
+    const account = toAccount(tomlAccount);
     try {
-      await Effect.runPromise(store.upsert(account));
+      // Type assertion needed because store is platform-specific but account is generic
+      await Effect.runPromise(
+        (store.upsert as (a: typeof account) => Effect.Effect<void>)(account),
+      );
       log.info(`Upserted: ${account.id}`);
       upserted++;
     } catch (err) {
@@ -174,144 +175,55 @@ const importLinkedIn = async (filepath: string, dbUrl: string): Promise<void> =>
     }
   }
 
-  statusOk(`Upserted ${upserted}/${result.data.accounts.length} LinkedIn account(s)`);
+  statusOk(
+    `Upserted ${upserted}/${result.data.accounts.length} ${platform} Account(s)`,
+  );
 };
 
-const exportLinkedIn = async (dbUrl: string): Promise<void> => {
-  const log = createLogger();
-  log.section("Exporting LinkedIn Accounts From Database");
-
-  log.info("Connecting To Database...");
-  const store = await createPostgresLinkedInAccountStore({ connectionString: dbUrl });
-
-  const accounts = await Effect.runPromise(store.list());
-
-  if (accounts.length === 0) {
-    log.warn("No LinkedIn Accounts Found in Database");
-    return;
-  }
-
-  const tomlData = {
-    accounts: accounts.map(fromLinkedInAccount),
-  };
-
-  const tomlString = stringifyToml(tomlData);
-  console.log(tomlString);
-
-  // Status to stderr so it doesn't interfere with stdout redirect
-  console.error(`\n[OK] Exported ${accounts.length} LinkedIn Account(s)`);
-};
-
-// =============================================================================
-// X Commands
-// =============================================================================
-
-const validateX = async (filepath: string): Promise<void> => {
-  const log = createLogger();
-  log.section(`Validating ${filepath}`);
-
-  const parsed = await readTomlFile(filepath);
-  const result = XTomlFileSchema.safeParse(parsed);
-
-  if (!result.success) {
-    log.error("Validation Failed:");
-    for (const issue of result.error.issues) {
-      log.error(`  ${issue.path.join(".")}: ${issue.message}`);
-    }
-    Deno.exit(1);
-  }
-
-  statusOk(`Validated ${result.data.accounts.length} X Account(s)`);
-};
-
-const importX = async (filepath: string, dbUrl: string): Promise<void> => {
-  const log = createLogger();
-  log.section(`Importing ${filepath} to Database`);
-
-  const parsed = await readTomlFile(filepath);
-  const result = XTomlFileSchema.safeParse(parsed);
-
-  if (!result.success) {
-    log.error("Validation Failed:");
-    for (const issue of result.error.issues) {
-      log.error(`  ${issue.path.join(".")}: ${issue.message}`);
-    }
-    Deno.exit(1);
-  }
-
-  log.info("Connecting to Database...");
-  const store = await createPostgresXAccountStore({ connectionString: dbUrl });
-
-  let upserted = 0;
-  for (const tomlAccount of result.data.accounts) {
-    const account = toXAccount(tomlAccount);
-    try {
-      await Effect.runPromise(store.upsert(account));
-      log.info(`Upserted: ${account.id}`);
-      upserted++;
-    } catch (err) {
-      log.error(`Failed to Upsert ${account.id}: ${err}`);
-    }
-  }
-
-  statusOk(`Upserted ${upserted}/${result.data.accounts.length} X Account(s)`);
-};
-
-const exportX = async (dbUrl: string): Promise<void> => {
-  const log = createLogger();
-  log.section("Exporting X Accounts from Database");
-
-  log.info("Connecting to Database...");
-  const store = await createPostgresXAccountStore({ connectionString: dbUrl });
-
-  const accounts = await Effect.runPromise(store.list());
-
-  if (accounts.length === 0) {
-    log.warn("No X Accounts Found in Database");
-    return;
-  }
-
-  const tomlData = {
-    accounts: accounts.map(fromXAccount),
-  };
-
-  const tomlString = stringifyToml(tomlData);
-  console.log(tomlString);
-
-  // Status to stderr so it doesn't interfere with stdout redirect
-  console.error(`\n[OK] Exported ${accounts.length} X Account(s)`);
-};
-
-// =============================================================================
-// Command Dispatch
-// =============================================================================
-
-const validateCommand = async (platform: PlatformName, filepath: string): Promise<void> => {
-  if (platform === "linkedin") {
-    await validateLinkedIn(filepath);
-  } else {
-    await validateX(filepath);
-  }
-};
-
-const importCommand = async (
-  platform: PlatformName,
-  filepath: string,
+const exportCommand = async (
+  platform: string,
   dbUrl: string,
 ): Promise<void> => {
-  if (platform === "linkedin") {
-    await importLinkedIn(filepath, dbUrl);
-  } else {
-    await importX(filepath, dbUrl);
-  }
-};
+  const log = createLogger();
+  log.section(`Exporting ${platform} accounts from database`);
 
-const exportCommand = async (platform: PlatformName, dbUrl: string): Promise<void> => {
-  if (platform === "linkedin") {
-    await exportLinkedIn(dbUrl);
-  } else {
-    await exportX(dbUrl);
+  if (!isSupportedPlatform(platform)) {
+    return die(`Unknown Platform: ${platform}`);
   }
+
+  // After the type guard above, platform is narrowed to SupportedPlatform
+  log.info("Connecting to Database...");
+  const storeEntry = getStore(platform);
+  const store = await storeEntry.create({ connectionString: dbUrl });
+
+  // Use type assertion for the list result since it can be any platform's account type
+  // The runtime dispatch already ensures the correct store is used
+  const accounts = await Effect.runPromise(
+    store.list() as Effect.Effect<
+      readonly {
+        id: ParticipantIdType;
+        browserBindings: readonly {
+          configId: BrowserConfigIdType;
+          metadata: Record<string, unknown>;
+        }[];
+      }[]
+    >,
+  );
+
+  if (accounts.length === 0) {
+    log.warn(`No ${platform} Accounts Found in Database`);
+    return;
+  }
+
+  const tomlData = {
+    accounts: accounts.map(fromAccount),
+  };
+
+  const tomlString = stringifyToml(tomlData);
+  console.log(tomlString);
+
+  // Status to stderr so it doesn't interfere with stdout redirect
+  console.error(`\n[OK] Exported ${accounts.length} ${platform} Account(s)`);
 };
 
 // =============================================================================
@@ -328,61 +240,66 @@ const main = async (): Promise<void> => {
   });
 
   if (args.help) {
-    console.log(HELP);
+    console.log(buildHelp());
     return;
   }
 
   const [command, ...rest] = args._;
 
   if (!command) {
-    console.log(HELP);
+    console.log(buildHelp());
     Deno.exit(1);
   }
 
-  const dbUrl = args["db-url"] || Deno.env.get("DATABASE_URL") || Deno.env.get("POSTGRES_URL");
+  const dbUrl = args["db-url"] || Deno.env.get("DATABASE_URL") ||
+    Deno.env.get("POSTGRES_URL");
+  const platforms = supportedPlatforms();
+  const platformNames = platforms.join("|");
+
+  const isValidPlatform = (name: string): boolean => isSupportedPlatform(name);
 
   switch (command) {
     case "validate": {
       const [platform, filepath] = rest;
-      if (!platform || !isPlatform(String(platform))) {
-        die("Usage: validate <linkedin|x> <file>");
+      if (!platform || !isValidPlatform(String(platform))) {
+        die(`Usage: validate <${platformNames}> <file>`);
       }
       if (!filepath) {
-        die("Usage: validate <linkedin|x> <file>");
+        die(`Usage: validate <${platformNames}> <file>`);
       }
-      await validateCommand(String(platform) as PlatformName, String(filepath));
+      await validateCommand(String(platform), String(filepath));
       break;
     }
 
     case "import": {
       const [platform, filepath] = rest;
-      if (!platform || !isPlatform(String(platform))) {
-        return die("Usage: import <linkedin|x> <file>");
+      if (!platform || !isValidPlatform(String(platform))) {
+        return die(`Usage: import <${platformNames}> <file>`);
       }
       if (!filepath) {
-        return die("Usage: import <linkedin|x> <file>");
+        return die(`Usage: import <${platformNames}> <file>`);
       }
       if (!dbUrl) {
-        return die("Database URL required. Set DATABASE_URL env var or use --db-url");
+        return die("Database URL Required — Set DATABASE_URL or Use --db-url");
       }
-      await importCommand(String(platform) as PlatformName, String(filepath), dbUrl);
+      await importCommand(String(platform), String(filepath), dbUrl);
       break;
     }
 
     case "export": {
       const [platform] = rest;
-      if (!platform || !isPlatform(String(platform))) {
-        return die("Usage: export <linkedin|x>");
+      if (!platform || !isValidPlatform(String(platform))) {
+        return die(`Usage: export <${platformNames}>`);
       }
       if (!dbUrl) {
-        return die("Database URL required. Set DATABASE_URL env var or use --db-url");
+        return die("Database URL Required — Set DATABASE_URL or Use --db-url");
       }
-      await exportCommand(String(platform) as PlatformName, dbUrl);
+      await exportCommand(String(platform), dbUrl);
       break;
     }
 
     default:
-      die(`Unknown command: ${command}\nRun with --help for usage.`);
+      die(`Unknown Command: ${command}\nRun with --help for usage.`);
   }
 };
 

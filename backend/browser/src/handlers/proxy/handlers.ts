@@ -71,8 +71,7 @@ window.__registerCommand<void, IpCheckResult>("proxy:checkIp", async () => {
 
           // Try to detect if IP is residential
           const isp = (result as IpCheckResult).isp?.toLowerCase() ?? "";
-          const isResidential =
-            !isp.includes("hosting") &&
+          const isResidential = !isp.includes("hosting") &&
             !isp.includes("cloud") &&
             !isp.includes("datacenter") &&
             !isp.includes("server") &&
@@ -149,12 +148,15 @@ window.__registerCommand<
     const exitIp = data.ip;
 
     // Verify IP matches expected prefix if provided
-    if (payload.expectedIpPrefix && !exitIp.startsWith(payload.expectedIpPrefix)) {
+    if (
+      payload.expectedIpPrefix && !exitIp.startsWith(payload.expectedIpPrefix)
+    ) {
       return {
         ok: false,
         error: {
           code: "IpMismatch",
-          message: `Expected IP starting with ${payload.expectedIpPrefix}, got ${exitIp}`,
+          message:
+            `Expected IP starting with ${payload.expectedIpPrefix}, got ${exitIp}`,
         },
       };
     }

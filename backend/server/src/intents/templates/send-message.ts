@@ -2,14 +2,14 @@
 // Template for send message intents
 
 import { z } from "@zod/zod";
-import type { ThreadId } from "$/core/branded.ts";
+import { ThreadId } from "$/core/branded.ts";
 
 /**
  * Base schema for send message intents.
  * Platforms extend this and override `type` with their namespaced version.
  */
 export const SendMessageBase = z.object({
-  threadId: z.string().transform((val) => val as ThreadId),
+  threadId: z.string().transform(ThreadId),
   content: z.string().min(1),
   // type: platforms add their namespaced literal (e.g., "linkedin:SendMessage")
 });

@@ -10,8 +10,6 @@ import {
   RedditAnchorSchema,
   type RedditEvent,
   RedditEventSchema,
-  type RedditIntent,
-  RedditIntentSchema,
   type RedditScope,
 } from "./schemas.ts";
 
@@ -21,23 +19,25 @@ import type { RedditInbox, RedditThread } from "./views.ts";
 // Account & Browser
 import type { RedditAccount } from "./account.ts";
 import type { RedditBrowser } from "./browser.ts";
+import type { RedditContact } from "./contact.ts";
 
 // Behavior
 import { redditBehavior } from "./behavior.ts";
 
 export const redditPlatform: PlatformDefinition<
   RedditScope,
+  "reddit",
   RedditEvent,
-  RedditIntent,
   RedditAnchor,
   RedditThread,
   RedditInbox,
   RedditAccount,
-  RedditBrowser
+  RedditBrowser,
+  RedditContact
 > = {
   scope: REDDIT_SCOPE,
+  identity: "reddit",
   eventSchema: RedditEventSchema,
-  intentSchema: RedditIntentSchema,
   anchorSchema: RedditAnchorSchema,
   behavior: redditBehavior,
 };
@@ -69,35 +69,22 @@ export {
   RedditUserDiscoveredSchema,
 } from "./schemas.ts";
 
-// Schemas (intents)
-export {
-  type RedditDiscoverUsers,
-  RedditDiscoverUsersSchema,
-  type RedditIntent,
-  RedditIntentSchema,
-  type RedditSendDirectMessage,
-  RedditSendDirectMessageSchema,
-  type RedditSyncConversations,
-  RedditSyncConversationsSchema,
-} from "./schemas.ts";
-
 // Views
-export type {
-  RedditInbox,
-  RedditIndexMeta,
-  RedditThread,
-} from "./views.ts";
+export type { RedditInbox, RedditIndexMeta, RedditThread } from "./views.ts";
 
 // Browser
-export type { RedditAuthStatus, RedditBrowser } from "./browser.ts";
+export type { RedditBrowser } from "./browser.ts";
+
+// Contact
+export type { RedditContact } from "./contact.ts";
 
 // Account
 export {
   createPostgresRedditAccountStore,
+  makeInMemoryRedditAccountStoreLayer,
   type RedditAccount,
   RedditAccountStore,
   type RedditAccountStoreService,
-  makeInMemoryRedditAccountStoreLayer,
 } from "./account.ts";
 
 // Behavior

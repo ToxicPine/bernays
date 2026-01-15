@@ -3,16 +3,18 @@
 
 import { z } from "@zod/zod";
 import {
-  type AccountId,
-  type CanonicalId,
-  type IntentId,
+  CanonicalId,
+  IntentId,
+  participantIdSchema,
   Scope,
-  type ThreadId,
+  ThreadId,
 } from "@bernays/server/core";
 import { CorrelationMetadataSchema } from "@bernays/server/events";
 import {
   AnchorMessageObservedBase,
+  authObservedBase,
   MessageObservedBase,
+  rateLimitObservedBase,
 } from "@bernays/server/events";
 import {
   SendMessageBase,
@@ -30,19 +32,17 @@ const xScopeSchema = z.literal("x").transform(() => X_SCOPE);
 
 export const XAnchorSchema = z.object({
   conversationId: z.string(),
-  participants: z.array(z.string()),
+  participants: z.array(participantIdSchema("x")),
 });
 
 export type XAnchor = z.infer<typeof XAnchorSchema>;
 
 // Event Schemas
 
-// 1. XAuthObservedSchema - extends AuthObservedBase with X-specific fields
-export const XAuthObservedSchema = CorrelationMetadataSchema.extend({
+// 1. XAuthObservedSchema - extends authObservedBase with X-specific fields
+export const XAuthObservedSchema = authObservedBase("x").extend({
   scope: xScopeSchema,
   type: z.literal("AuthObserved"),
-  accountId: z.string().transform((val) => val as AccountId),
-  browserId: z.string(),
   tabId: z.string(),
   authenticated: z.boolean(),
   canRead: z.boolean(),
@@ -52,13 +52,10 @@ export const XAuthObservedSchema = CorrelationMetadataSchema.extend({
 
 export type XAuthObserved = z.infer<typeof XAuthObservedSchema>;
 
-// 2. XRateLimitObservedSchema - rate limit detection
-export const XRateLimitObservedSchema = CorrelationMetadataSchema.extend({
+// 2. XRateLimitObservedSchema - extends rateLimitObservedBase with X-specific fields
+export const XRateLimitObservedSchema = rateLimitObservedBase("x").extend({
   scope: xScopeSchema,
   type: z.literal("RateLimitObserved"),
-  accountId: z.string().transform((val) => val as AccountId),
-  configId: z.string(),
-  retryAfter: z.iso.datetime().optional(),
   limitType: z.enum(["tweets", "dms", "follows", "likes", "api"]),
 });
 
@@ -69,7 +66,7 @@ export const XAnchorMessageObservedSchema = AnchorMessageObservedBase.extend({
   scope: xScopeSchema,
   type: z.literal("AnchorMessageObserved"),
   anchor: XAnchorSchema,
-  threadId: z.string().transform((val) => val as ThreadId),
+  threadId: z.string().transform(ThreadId),
 });
 
 export type XAnchorMessageObserved = z.infer<
@@ -80,7 +77,7 @@ export type XAnchorMessageObserved = z.infer<
 export const XMessageObservedSchema = MessageObservedBase.extend({
   scope: xScopeSchema,
   type: z.literal("MessageObserved"),
-  threadId: z.string().transform((val) => val as ThreadId),
+  threadId: z.string().transform(ThreadId),
 });
 
 export type XMessageObserved = z.infer<typeof XMessageObservedSchema>;
@@ -89,8 +86,8 @@ export type XMessageObserved = z.infer<typeof XMessageObservedSchema>;
 export const XMessageSentSchema = CorrelationMetadataSchema.extend({
   scope: xScopeSchema,
   type: z.literal("MessageSent"),
-  threadId: z.string().transform((val) => val as ThreadId),
-  canonicalId: z.string().transform((val) => val as CanonicalId),
+  threadId: z.string().transform(ThreadId),
+  canonicalId: z.string().transform(CanonicalId),
   content: z.string(),
 });
 
@@ -100,7 +97,7 @@ export type XMessageSent = z.infer<typeof XMessageSentSchema>;
 export const XConversationsSyncedSchema = CorrelationMetadataSchema.extend({
   scope: xScopeSchema,
   type: z.literal("ConversationsSynced"),
-  accountId: z.string().transform((val) => val as AccountId),
+  participantId: participantIdSchema("x"),
   threadCount: z.number(),
   syncedAt: z.iso.datetime(),
 });
@@ -177,7 +174,7 @@ export type XRetweetObserved = z.infer<typeof XRetweetObservedSchema>;
 export const XAccountSuspendedSchema = CorrelationMetadataSchema.extend({
   scope: xScopeSchema,
   type: z.literal("AccountSuspended"),
-  accountId: z.string().transform((val) => val as AccountId),
+  participantId: participantIdSchema("x"),
   reason: z.string().optional(),
   suspendedAt: z.iso.datetime(),
   appealUrl: z.string().optional(),
@@ -207,20 +204,21 @@ export type XEvent = z.infer<typeof XEventSchema>;
 
 const XIntentBase = z.object({
   scope: xScopeSchema,
-  intentId: z.uuid().transform((val) => val as IntentId),
+  intentId: z.uuid().transform(IntentId),
   timestamp: z.iso.datetime(),
 });
 
 // 1. XSendMessageSchema - send DM
-export const XSendMessageSchema = XIntentBase.merge(SendMessageBase).extend({
-  type: z.literal("SendMessage"),
-});
+export const XSendMessageSchema = XIntentBase.extend(SendMessageBase.shape)
+  .extend({
+    type: z.literal("SendMessage"),
+  });
 
 export type XSendMessage = z.infer<typeof XSendMessageSchema>;
 
 // 2. XSyncConversationsSchema - sync DM conversations
-export const XSyncConversationsSchema = XIntentBase.merge(
-  SyncConversationsBase,
+export const XSyncConversationsSchema = XIntentBase.extend(
+  SyncConversationsBase.shape,
 ).extend({
   type: z.literal("SyncConversations"),
 });

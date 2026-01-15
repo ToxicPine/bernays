@@ -1,43 +1,32 @@
 // src/platforms/linkedin/behavior.ts
-// LinkedIn platform behavior - derivation and execution
+// LinkedIn platform behavior - pure derivation only
 
-import { Effect } from "effect";
-import type {
-  AccountId,
-  BrowserConfigId,
-  ThreadId,
+import {
+  type BrowserConfigId,
+  ParticipantId,
+  type ParticipantId as ParticipantIdType,
+  type ThreadId,
 } from "@bernays/server/core";
-import type { StorableEvent } from "@bernays/server/store";
-import { BrowserPool } from "@bernays/server/backend";
-import {
-  calculateUnreadCount,
-  type MessageView,
-  type Participant,
-} from "@bernays/server/views";
-import {
-  type ExecuteError,
-  ExecuteErrorCode,
-  executeError,
-  type PlatformBehavior,
-} from "@bernays/server/platforms";
 import {
   buildThreadGraphs,
+  calculateUnreadCount,
+  extractParticipants,
   type GraphMessage,
-  graphNodesToMessages,
   type ThreadGraph,
+  toMessageViews,
 } from "@bernays/server/views";
-import { logger } from "$/logger.ts";
+import type { PlatformBehavior } from "@bernays/server/platforms";
 
 // Platform-specific types
 import type { LinkedInAnchor, LinkedInEvent } from "./schemas.ts";
-import type { LinkedInIntent } from "./schemas.ts";
 import type {
   LinkedInInbox,
   LinkedInIndexMeta,
   LinkedInThread,
 } from "./views.ts";
 import type { LinkedInAccount } from "./account.ts";
-import type { LinkedInAuthStatus, LinkedInBrowser } from "./browser.ts";
+import { type LinkedInAuthStatus, type LinkedInBrowser } from "./browser.ts";
+import type { LinkedInContact } from "./contact.ts";
 import { LINKEDIN_SCOPE } from "./schemas.ts";
 
 // Type Alias
@@ -47,38 +36,19 @@ type LinkedInScope = typeof LINKEDIN_SCOPE;
 // Helper Functions
 
 /**
- * Convert graph nodes to MessageView format
- */
-const toMessageViews = (
-  graph: ThreadGraph<GraphMessage, LinkedInAnchor>,
-): readonly MessageView[] =>
-  graphNodesToMessages(graph.nodes).map((m) => ({
-    id: m.canonicalId,
-    senderId: m.senderId,
-    content: m.content,
-    timestamp: m.timestamp,
-  }));
-
-/**
- * Extract participants from LinkedIn anchor
- */
-const extractParticipants = (anchor: LinkedInAnchor): readonly Participant[] =>
-  anchor.participants.map((id) => ({ id }));
-
-/**
  * Convert ThreadGraph to LinkedInThread
  */
 const toLinkedInThread = (
-  graph: ThreadGraph<GraphMessage, LinkedInAnchor>,
-  accountId: string,
+  graph: ThreadGraph<LinkedInScope, GraphMessage, LinkedInAnchor>,
+  participantId: ParticipantIdType<"linkedin">,
 ): LinkedInThread => {
-  const messages = toMessageViews(graph);
-  const unreadCount = calculateUnreadCount(messages, accountId);
+  const messages = toMessageViews<"linkedin">(graph);
+  const unreadCount = calculateUnreadCount(messages, participantId);
 
   return {
     threadId: graph.id,
     messages,
-    participants: extractParticipants(graph.anchor),
+    participants: extractParticipants<"linkedin">(graph.anchor),
     anchor: graph.anchor,
     unreadCount,
     isSponsored: false,
@@ -90,15 +60,17 @@ const toLinkedInThread = (
 
 export const linkedInBehavior: PlatformBehavior<
   LinkedInScope,
+  "linkedin",
   LinkedInEvent,
-  LinkedInIntent,
   LinkedInAnchor,
   LinkedInThread,
   LinkedInInbox,
   LinkedInAccount,
-  LinkedInBrowser
+  LinkedInBrowser,
+  LinkedInContact
 > = {
   scope: LINKEDIN_SCOPE,
+  identity: "linkedin",
 
   // ─────────────────────────────────────────────────────────────────────────
   // Derivation
@@ -106,20 +78,22 @@ export const linkedInBehavior: PlatformBehavior<
 
   deriveInbox: (
     events: readonly LinkedInEvent[],
-    accountId: AccountId,
+    participantId: ParticipantIdType<"linkedin">,
   ): LinkedInInbox => {
-    const allThreads = buildThreadGraphs<GraphMessage, LinkedInAnchor>(
-      events as readonly StorableEvent[],
-    );
-
-    const linkedInThreads = [...allThreads.values()].filter(
-      (t) => t.scope === LINKEDIN_SCOPE,
+    // Events are pre-filtered by scope via the Projection layer
+    const threads = buildThreadGraphs<
+      LinkedInScope,
+      GraphMessage,
+      LinkedInAnchor
+    >(
+      LINKEDIN_SCOPE,
+      events,
     );
 
     const byThreadId: Record<string, LinkedInIndexMeta> = {};
-    for (const thread of linkedInThreads) {
-      const messages = toMessageViews(thread);
-      const unreadCount = calculateUnreadCount(messages, accountId);
+    for (const thread of threads.values()) {
+      const messages = toMessageViews<"linkedin">(thread);
+      const unreadCount = calculateUnreadCount(messages, participantId);
       byThreadId[thread.id] = {
         lastActivity: thread.lastActivity,
         unreadCount,
@@ -144,7 +118,10 @@ export const linkedInBehavior: PlatformBehavior<
       }
     }
 
-    const pendingInvitations = Math.max(0, sentInvitations - resolvedInvitations);
+    const pendingInvitations = Math.max(
+      0,
+      sentInvitations - resolvedInvitations,
+    );
 
     // Calculate weeklyInvitesRemaining from events
     // LinkedIn allows ~100 invites per week
@@ -176,21 +153,28 @@ export const linkedInBehavior: PlatformBehavior<
     events: readonly LinkedInEvent[],
     threadId: ThreadId,
   ): LinkedInThread | undefined => {
-    const allThreads = buildThreadGraphs<GraphMessage, LinkedInAnchor>(
-      events as readonly StorableEvent[],
+    // Events are pre-filtered by scope via the Projection layer
+    const threads = buildThreadGraphs<
+      LinkedInScope,
+      GraphMessage,
+      LinkedInAnchor
+    >(
+      LINKEDIN_SCOPE,
+      events,
     );
-    const thread = allThreads.get(threadId);
+    const thread = threads.get(threadId);
 
-    if (!thread || thread.scope !== LINKEDIN_SCOPE) {
+    if (!thread) {
       return undefined;
     }
 
     const authEvent = events.find((e) => e.type === "AuthObserved");
-    const accountId = authEvent
-      ? (authEvent as { accountId: string }).accountId
-      : "";
+    const participantId = authEvent
+      ? (authEvent as { participantId: ParticipantIdType<"linkedin"> })
+        .participantId
+      : ParticipantId("linkedin", "");
 
-    return toLinkedInThread(thread, accountId);
+    return toLinkedInThread(thread, participantId);
   },
 
   deriveBrowsers: (
@@ -217,11 +201,10 @@ export const linkedInBehavior: PlatformBehavior<
     for (const event of events) {
       if (event.type === "AuthObserved") {
         const authEvent = event as {
-          configId?: string;
-          browserId?: string;
+          configId: string;
           authenticated: boolean;
         };
-        const configId = authEvent.configId ?? authEvent.browserId;
+        const { configId } = authEvent;
         if (configId) {
           const existing = browserStatus.get(configId);
           browserStatus.set(configId, {
@@ -235,7 +218,7 @@ export const linkedInBehavior: PlatformBehavior<
           configId: string;
           retryAfter?: string;
         };
-        const configId = rateLimitEvent.configId;
+        const { configId } = rateLimitEvent;
         if (configId) {
           const existing = browserStatus.get(configId);
           // Only set rateLimitedUntil if retryAfter is in the future
@@ -273,7 +256,7 @@ export const linkedInBehavior: PlatformBehavior<
     // Map account's browser bindings to LinkedInBrowser
     return account.browserBindings.map((binding) => {
       const status = browserStatus.get(binding.configId) ?? {
-        authStatus: "unknown" as LinkedInAuthStatus,
+        authStatus: "unknown" as const,
         weeklyInvitesSent: 0,
       };
 
@@ -288,92 +271,97 @@ export const linkedInBehavior: PlatformBehavior<
     });
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Execution
-  // ─────────────────────────────────────────────────────────────────────────
+  deriveContact: (
+    events: readonly LinkedInEvent[],
+    participantId: ParticipantIdType<"linkedin">,
+  ): LinkedInContact | undefined => {
+    let name: string | undefined;
+    let headline: string | undefined;
+    let profileUrl: string | undefined;
+    let lastInteraction: string | undefined;
+    let connectionDegree: "1st" | "2nd" | "3rd" | "out" | undefined;
 
-  execute: (
-    intent: LinkedInIntent,
-    browsers: readonly LinkedInBrowser[],
-    preferConfigId?: BrowserConfigId,
-  ): Effect.Effect<
-    { usedConfigId: BrowserConfigId },
-    ExecuteError,
-    BrowserPool
-  > =>
-    Effect.gen(function* () {
-      const pool = yield* BrowserPool;
-
-      // Select browser: prefer specified, then running+authenticated, then any running
-      let selected: LinkedInBrowser | undefined;
-
-      if (preferConfigId) {
-        selected = browsers.find(
-          (b) =>
-            b.configId === preferConfigId &&
-            b.isRunning &&
-            b.authStatus === "authenticated",
+    for (const event of events) {
+      // Extract info from search results
+      if (event.type === "SearchResultsRetrieved") {
+        const searchEvent = event as {
+          results: Array<{ userId: string; name?: string; headline?: string }>;
+        };
+        const match = searchEvent.results.find(
+          (r) => r.userId === participantId,
         );
-      }
-
-      if (!selected) {
-        selected = browsers.find(
-          (b) => b.isRunning && b.authStatus === "authenticated",
-        );
-      }
-
-      if (!selected) {
-        selected = browsers.find((b) => b.isRunning);
-      }
-
-      if (!selected) {
-        return yield* Effect.fail(
-          executeError(ExecuteErrorCode("NoBrowserAvailable"), "No running browser available"),
-        );
-      }
-
-      const configId = selected.configId;
-
-      logger.info(`[LinkedIn] Executing intent: ${intent.type}`, { configId });
-
-      // Map intent type to bridge command
-      const command = (() => {
-        switch (intent.type) {
-          case "SendMessage":
-            return { type: "linkedin:sendMessage", payload: intent };
-          case "Connect":
-            return { type: "linkedin:connect", payload: intent };
-          case "Follow":
-            return { type: "linkedin:follow", payload: intent };
-          case "SyncConversations":
-            return { type: "linkedin:syncConversations", payload: intent };
-          case "PeopleSearch":
-            return { type: "linkedin:peopleSearch", payload: intent };
-          case "RecallMessage":
-            return { type: "linkedin:recallMessage", payload: intent };
-          case "WithdrawInvitation":
-            return { type: "linkedin:withdrawInvitation", payload: intent };
-          case "ViewProfile":
-            return { type: "linkedin:viewProfile", payload: intent };
-          case "AcceptInvitation":
-            return { type: "linkedin:acceptInvitation", payload: intent };
-          case "RejectInvitation":
-            return { type: "linkedin:rejectInvitation", payload: intent };
-          case "SearchCompanies":
-            return { type: "linkedin:searchCompanies", payload: intent };
+        if (match) {
+          if (match.name) name = match.name;
+          if (match.headline) headline = match.headline;
         }
-      })();
+      }
 
-      yield* pool.send(configId, command).pipe(
-        Effect.mapError((err) =>
-          executeError(
-            ExecuteErrorCode("CommandFailed"),
-            `Bridge command failed: ${err.message}`,
-            err,
-          )
-        ),
-      );
+      // Extract info from profile views
+      if (event.type === "ProfileViewed") {
+        const profileEvent = event as {
+          targetUserId: string;
+          profileUrl?: string;
+          viewedAt: string;
+        };
+        if (profileEvent.targetUserId === participantId) {
+          if (profileEvent.profileUrl) profileUrl = profileEvent.profileUrl;
+          if (
+            !lastInteraction ||
+            profileEvent.viewedAt > lastInteraction
+          ) {
+            lastInteraction = profileEvent.viewedAt;
+          }
+        }
+      }
 
-      return { usedConfigId: configId };
-    }),
+      // Track connection status
+      if (event.type === "ConnectionRequestSent") {
+        const connEvent = event as { targetUserId: string };
+        if (connEvent.targetUserId === participantId) {
+          connectionDegree = "out"; // pending
+        }
+      }
+
+      if (event.type === "ConnectionAccepted") {
+        const connEvent = event as { userId: string };
+        if (connEvent.userId === participantId) {
+          connectionDegree = "1st";
+        }
+      }
+
+      // Extract names from message anchor participants
+      if (event.type === "AnchorMessageObserved") {
+        const anchorEvent = event as {
+          anchor: { participants: readonly string[] };
+          senderId: string;
+        };
+        if (anchorEvent.anchor.participants.includes(participantId as string)) {
+          if (
+            !lastInteraction ||
+            event.timestamp > lastInteraction
+          ) {
+            lastInteraction = event.timestamp;
+          }
+          // If they're in a DM with us, they're likely 1st degree
+          if (!connectionDegree) {
+            connectionDegree = "1st";
+          }
+        }
+      }
+    }
+
+    // Only return contact if we found any info
+    if (!name && !headline && !profileUrl && !lastInteraction) {
+      return undefined;
+    }
+
+    return {
+      id: participantId,
+      name,
+      headline,
+      profileUrl,
+      connectionDegree,
+      lastInteraction,
+    };
+  },
 };

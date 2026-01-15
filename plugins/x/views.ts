@@ -8,9 +8,9 @@ import type { XAnchor } from "./schemas.ts";
 // X Thread View
 
 export interface XThread extends BaseThreadView<XAnchor> {
+  readonly isArchived: boolean;
   readonly unreadCount: number;
   readonly lastActivity: string;
-  readonly isArchived: boolean;
 }
 
 // X Inbox Index Metadata
@@ -24,6 +24,6 @@ export interface XIndexMeta {
 // X Inbox View
 
 export interface XInbox extends BaseInboxView<XIndexMeta> {
-  readonly syncedAt: string;
   readonly totalUnread: number;
+  readonly syncedAt: string;
 }

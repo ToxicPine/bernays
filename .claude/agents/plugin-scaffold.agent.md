@@ -12,21 +12,26 @@ tools:
 
 # Plugin Scaffold Agent
 
-Creates new platform plugins following established patterns, keeping your changes **strictly self-contained to the `plugins/` folder**.
+Creates new platform plugins following established patterns, keeping your
+changes **strictly self-contained to the `plugins/` folder**.
 
 ## Pre-Scaffolding Analysis
 
 ### Check Project Context
 
 - Read `HACKS.md` to understand custom patterns or infrastructure deviations
-- Check existing plugins (`plugins/linkedin/`, `plugins/x/`, `plugins/reddit/`) for reference patterns
+- Check existing plugins (`plugins/linkedin/`, `plugins/x/`, `plugins/reddit/`)
+  for reference patterns
 
 ### Study Third-Party Extensions
 
-You may ask the user to help you find browser extensions for the target platform:
+You may ask the user to help you find browser extensions for the target
+platform:
 
-1. Visit Chrome Web Store and search for extensions for automating your target platform
-2. Download a stable, well-maintained extension (look for >100k users, recent updates)
+1. Visit Chrome Web Store and search for extensions for automating your target
+   platform
+2. Download a stable, well-maintained extension (look for >100k users, recent
+   updates)
 3. Unzip and analyze, for example:
    - `manifest.json` - permissions, content script injection points
    - `content_scripts/` - DOM observation patterns
@@ -38,7 +43,8 @@ You may ask the user to help you find browser extensions for the target platform
    - Authentication and session handling
    - Rate limiting considerations
 
-This reference extension significantly improves the accuracy of generated handlers and observers.
+This reference extension significantly improves the accuracy of generated
+handlers and observers.
 
 ## Plugin Structure
 
@@ -64,7 +70,7 @@ backend/browser/src/
    - `plugins/x/` - alternative patterns
    - `plugins/reddit/` - newest addition
 
-2. Understand PlatformDefinition interface:
+3. Understand PlatformDefinition interface:
    ```typescript
    interface PlatformDefinition<TScope, TEvent, TIntent, TAnchor, TThread, TInbox, TAccount, TBrowser> {
      readonly scope: TScope;
@@ -79,14 +85,16 @@ backend/browser/src/
 
 1. Create `plugins/{name}/` directory with all files
 2. Define branded types: `{Name}ThreadId`, `{Name}AccountId`, etc.
-4. Implement behavior with: `deriveInbox`, `deriveThread`, `deriveBrowsers`, `execute`
-5. Update root `deno.json` workspace array
-6. Create extension handlers in `backend/browser/src/handlers/{name}/`
-7. Create observer in `backend/browser/src/observers/{name}.ts`
+3. Implement behavior with: `deriveInbox`, `deriveThread`, `deriveBrowsers`,
+   `execute`
+4. Update root `deno.json` workspace array
+5. Create extension handlers in `backend/browser/src/handlers/{name}/`
+6. Create observer in `backend/browser/src/observers/{name}.ts`
 
 ## Required Updates
 
 After scaffolding:
+
 - Add to `deno.json` workspaces: `"plugins/{name}"`
 - Register in main.ts PLATFORMS array
 - **Update `scripts/view-inbox.ts`** to add the new platform:
@@ -98,6 +106,7 @@ After scaffolding:
 ## Deviations
 
 If the new plugin deviates from standard patterns, document in `HACKS.md`:
+
 - Non-standard threading model
 - Unusual auth flow
 - Platform-specific quirks
@@ -106,6 +115,7 @@ If the new plugin deviates from standard patterns, document in `HACKS.md`:
 ## Validation
 
 Before completing:
+
 - [ ] All files created with correct exports
 - [ ] Schemas extend proper base templates
 - [ ] Behavior implements all required methods

@@ -48,6 +48,16 @@ export {
 export {
   AnchorMessageObservedBase,
   type AnchorMessageObservedBaseType,
+  AuthObservedBase,
+  authObservedBase,
+  type AuthObservedBaseType,
+  type AuthObservedFields,
+  type AuthStatus,
+  AuthStatusSchema,
   MessageObservedBase,
   type MessageObservedBaseType,
+  RateLimitObservedBase,
+  rateLimitObservedBase,
+  type RateLimitObservedBaseType,
+  type RateLimitObservedFields,
 } from "./templates/mod.ts";

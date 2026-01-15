@@ -10,8 +10,6 @@ import {
   LinkedInAnchorSchema,
   type LinkedInEvent,
   LinkedInEventSchema,
-  type LinkedInIntent,
-  LinkedInIntentSchema,
   type LinkedInScope,
 } from "./schemas.ts";
 
@@ -21,23 +19,25 @@ import type { LinkedInInbox, LinkedInThread } from "./views.ts";
 // Account & Browser
 import type { LinkedInAccount } from "./account.ts";
 import type { LinkedInBrowser } from "./browser.ts";
+import type { LinkedInContact } from "./contact.ts";
 
 // Behavior
 import { linkedInBehavior } from "./behavior.ts";
 
 export const linkedInPlatform: PlatformDefinition<
   LinkedInScope,
+  "linkedin",
   LinkedInEvent,
-  LinkedInIntent,
   LinkedInAnchor,
   LinkedInThread,
   LinkedInInbox,
   LinkedInAccount,
-  LinkedInBrowser
+  LinkedInBrowser,
+  LinkedInContact
 > = {
   scope: LINKEDIN_SCOPE,
+  identity: "linkedin",
   eventSchema: LinkedInEventSchema,
-  intentSchema: LinkedInIntentSchema,
   anchorSchema: LinkedInAnchorSchema,
   behavior: linkedInBehavior,
 };
@@ -81,34 +81,6 @@ export {
   LinkedInUserFollowedSchema,
 } from "./schemas.ts";
 
-// Schemas (intents)
-export {
-  type LinkedInAcceptInvitation,
-  LinkedInAcceptInvitationSchema,
-  type LinkedInConnect,
-  LinkedInConnectSchema,
-  type LinkedInFollow,
-  LinkedInFollowSchema,
-  type LinkedInIntent,
-  LinkedInIntentSchema,
-  type LinkedInPeopleSearch,
-  LinkedInPeopleSearchSchema,
-  type LinkedInRecallMessage,
-  LinkedInRecallMessageSchema,
-  type LinkedInRejectInvitation,
-  LinkedInRejectInvitationSchema,
-  type LinkedInSearchCompanies,
-  LinkedInSearchCompaniesSchema,
-  type LinkedInSendMessage,
-  LinkedInSendMessageSchema,
-  type LinkedInSyncConversations,
-  LinkedInSyncConversationsSchema,
-  type LinkedInViewProfile,
-  LinkedInViewProfileSchema,
-  type LinkedInWithdrawInvitation,
-  LinkedInWithdrawInvitationSchema,
-} from "./schemas.ts";
-
 // Views
 export type {
   LinkedInInbox,
@@ -117,7 +89,10 @@ export type {
 } from "./views.ts";
 
 // Browser
-export type { LinkedInAuthStatus, LinkedInBrowser } from "./browser.ts";
+export type { LinkedInBrowser } from "./browser.ts";
+
+// Contact
+export type { LinkedInContact } from "./contact.ts";
 
 // Account
 export {
@@ -126,7 +101,27 @@ export {
   LinkedInAccountStore,
   type LinkedInAccountStoreService,
   makeInMemoryLinkedInAccountStoreLayer,
+  type PostgresLinkedInAccountStoreOptions,
 } from "./account.ts";
 
 // Behavior
 export { linkedInBehavior } from "./behavior.ts";
+
+// Service (Platform Tag & Actions)
+export {
+  ConnectionErrorCode,
+  type ConnectionRequestResult,
+  type InvitationWithdrawnResult,
+  type LinkedInActions,
+  LinkedInPlatform,
+  type LinkedInService,
+  makeLinkedInActions,
+  // Result types
+  type MessageSentResult,
+  ProfileErrorCode,
+  type ProfileViewedResult,
+  // Error codes
+  SendMessageErrorCode,
+  SyncErrorCode,
+  type SyncResult,
+} from "./service.ts";

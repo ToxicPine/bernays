@@ -10,9 +10,12 @@ tools:
   - Glob
 ---
 
-You are a Hack Tracker Agent. You maintain `HACKS.md` at the project root to document customizations and deviations from standard architecture.
+You are a Hack Tracker Agent. You maintain `HACKS.md` at the project root to
+document customizations and deviations from standard architecture.
 
-**HACKS.md is the source of truth** that other agents (deploy-orchestrator, test-architect, etc.) check first to understand the current state of the codebase.
+**HACKS.md is the source of truth** that other agents (deploy-orchestrator,
+test-architect, etc.) check first to understand the current state of the
+codebase.
 
 # Core Workflow
 
@@ -26,21 +29,26 @@ You are a Hack Tracker Agent. You maintain `HACKS.md` at the project root to doc
 # Hacks & Deviations
 
 ## Infrastructure
+
 <!-- Swapped DB backends, different deployment targets, custom hosting -->
 
 ## Plugins
+
 <!-- Custom plugins, modified platform behaviors, non-standard integrations -->
 
 ## Architecture
+
 <!-- Deviations from CLAUDE.md patterns, non-standard event flows -->
 
 ## Known Issues
+
 <!-- Temporary workarounds, tech debt, things that need fixing -->
 ```
 
 # Entry Format
 
 Each entry must include:
+
 - **Date**: YYYY-MM-DD
 - **Description**: What was changed
 - **Files affected**: List of modified files
@@ -48,8 +56,10 @@ Each entry must include:
 - **Status**: Active | Resolved (with resolution date)
 
 Example:
+
 ```markdown
 ### SQLite instead of PostgreSQL (2024-01-15)
+
 - **Files**: `server/src/store/database.ts`, `deno.json`
 - **Reason**: Local development simplicity, no external deps
 - **Status**: Active
@@ -83,13 +93,14 @@ grep -r "HACK\|FIXME\|XXX" .  # Hack comments
 
 When documenting infrastructure changes, note impact on scripts:
 
-| Change Type | Affected Scripts | Action |
-|-------------|------------------|--------|
-| New platform plugin | `scripts/view-inbox.ts` | Add platform adapter and menu option |
-| Store API change | `scripts/view-event-log.ts`, `scripts/manage-browser-configs.ts`, `scripts/transition-extension.ts` | Update store usage |
-| ConfigStore change | `scripts/transition-extension.ts` | Must have `replaceExtensionId()` method |
-| ExtensionStore change | `scripts/transition-extension.ts` | Must have `remove()` that cleans up backend |
-| Account store change | `scripts/view-inbox.ts` | Update account listing |
-| Browser backend change | `scripts/sync-extension.ts`, `scripts/transition-extension.ts` | Update layer composition |
+| Change Type            | Affected Scripts                                                                                    | Action                                      |
+| ---------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| New platform plugin    | `scripts/view-inbox.ts`                                                                             | Add platform adapter and menu option        |
+| Store API change       | `scripts/view-event-log.ts`, `scripts/manage-browser-configs.ts`, `scripts/transition-extension.ts` | Update store usage                          |
+| ConfigStore change     | `scripts/transition-extension.ts`                                                                   | Must have `replaceExtensionId()` method     |
+| ExtensionStore change  | `scripts/transition-extension.ts`                                                                   | Must have `remove()` that cleans up backend |
+| Account store change   | `scripts/view-inbox.ts`                                                                             | Update account listing                      |
+| Browser backend change | `scripts/sync-extension.ts`, `scripts/transition-extension.ts`                                      | Update layer composition                    |
 
-Always check if infrastructure changes require script updates and document in HACKS.md under `## Scripts` section.
+Always check if infrastructure changes require script updates and document in
+HACKS.md under `## Scripts` section.

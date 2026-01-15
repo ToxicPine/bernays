@@ -1,32 +1,81 @@
-# Effect-Based Architecture
+# Bernays Architecture
 
-A comprehensive Effect-TS architecture for the sockpuppet runtime.
+An Effect-TS runtime for sockpuppets—long-lived programs that simulate humans
+interacting with online accounts.
+
+**This document is the authoritative reference for architectural decisions and
+implementation patterns.** For coding conventions and style guides, see
+`CLAUDE.md`.
 
 ---
+
+## Table of Contents
+
+- [Part 1: Conceptual Model](#part-1-conceptual-model)
+  - [The Goal](#the-goal)
+  - [Design Principles](#design-principles)
+  - [The Single Flow](#the-single-flow)
+  - [Durable Primitives](#durable-primitives)
+- [Part 2: Type System](#part-2-type-system)
+  - [Branded Types](#branded-types)
+  - [Event Architecture](#event-architecture)
+  - [Message Graph Model](#message-graph-model)
+  - [View Types](#view-types)
+  - [Platform Types](#platform-types)
+- [Part 3: Layer Implementation](#part-3-layer-implementation)
+  - [Layer 0: Storage](#layer-0-storage)
+  - [Layer 1: Browser Backend](#layer-1-browser-backend)
+  - [Layer 2: Event Flow](#layer-2-event-flow)
+  - [Layer 3: Projection and Injection](#layer-3-projection-and-injection)
+  - [Layer 4: Platform Service](#layer-4-platform-service)
+  - [Layer 5: Sockpuppet](#layer-5-sockpuppet)
+- [Part 4: Reference](#part-4-reference)
+  - [Module Structure](#module-structure)
+  - [Dependency Matrix](#dependency-matrix)
+  - [Key Design Decisions](#key-design-decisions)
+
+---
+
+# Part 1: Conceptual Model
 
 ## The Goal
 
 Build a runtime for **sockpuppets**—long-lived programs that simulate humans
 interacting with online accounts. A sockpuppet wakes up when it wants, checks
-its inbox, decides what to do, acts, and records what it did. The runtime's job
-is to make this feel natural: the sockpuppet shouldn't care about browsers,
-platform APIs, or crash recovery.
+its inbox, decides what to do, acts, and records what it did.
 
-**Core requirement**: You can restart the process at any time and it will
-continue safely. Browser sessions persist externally. Everything the program
-"knows" is in an append-only event log. Anything derivable from the log is not
-stored as mutable state.
+The runtime's job is to make this feel natural: the sockpuppet shouldn't care
+about browsers, platform APIs, or crash recovery.
+
+**Core requirements:**
+
+1. **Restartable between operations**: You can restart the process between any
+   two operations and it will continue safely. Browser sessions persist
+   externally. Everything the program "knows" is in an append-only event log.
+
+2. **Human-like polling**: Sockpuppets poll for updates like humans checking
+   their inbox—no real-time subscriptions. We model humans at desktops, not
+   mobile push notifications.
+
+3. **One sockpuppet per account**: The intended model is 1:1 (one sockpuppet
+   controls one account), though nothing technically prevents multi-account
+   control.
 
 **From the sockpuppet's perspective:**
 
 ```typescript
 const myBot = Effect.gen(function* () {
-  const platform = yield* Platform; // the world I can see and act in
-  const journal = yield* Journal; // my memory
+  const platform = yield* LinkedInPlatform;
+  const journal = yield* Journal;
 
   const inbox = yield* platform.inbox;
   for (const [threadId, meta] of Object.entries(inbox.byThreadId)) {
-    // decide, act, remember
+    const thread = yield* platform.thread(ThreadId(threadId));
+    if (Option.isNone(thread)) continue;
+
+    // Decide, act, remember
+    yield* platform.actions.sendMessage()(thread.value.threadId, "Thanks!");
+    yield* journal.record({ kind: "replied", threadId });
   }
 });
 ```
@@ -37,155 +86,247 @@ Everything else exists to make this possible.
 
 ## Design Principles
 
-1. **Sockpuppets see a simple world**: Just `Platform` (what's happening, how to
-   act) and `Journal` (memory). No databases, no browsers, no streams.
+### 1. Sockpuppets See a Simple World
 
-2. **One flow**: Events flow from extensions through one path to sockpuppets. No
-   separate loops for different event types.
+Sockpuppets interact with two services:
 
-3. **Active services own their lifecycle**: Services that need background work
-   (like consuming streams) start that work when their layer initializes.
+- **Platform** — inbox, threads, browsers, contacts, actions
+- **Journal** — record decisions, restore state on restart
 
-4. **Unified event model**: Bridge events use `scope` + `type`, same as stored
-   events. Auth, messages, rate limits—all platform-scoped, all one flow.
+They never see: EventStore, BrowserPool, Projections, Injection, schemas.
+Everything complex is hidden behind these two interfaces.
 
-5. **Derive everything**: Inbox, threads, auth state, rate limits, contact
-   info—all derived from the same event stream by pure functions.
+### 2. One Flow
 
-6. **Platform-agnostic core**: The runtime doesn't know about LinkedIn or X. It
-   knows about scopes, events, projections, and platform definitions. Platforms
-   plug in.
+Events flow through one path:
+
+```
+Extension → BrowserPool → EventIngestion → Injection → EventStore → Projection → Platform → Sockpuppet
+```
+
+Auth events, message events, rate limit events—all platform-scoped, all the same
+pipe. No separate loops for different event types.
+
+### 3. Derive Everything
+
+Inbox, threads, auth state, rate limits, contacts—all derived from the event
+stream by pure functions. Nothing is stored except the append-only event log.
+
+This enables:
+
+- **Restartability**: Rebuild state by replaying events
+- **Auditability**: Complete history of everything that happened
+- **Consistency**: Single source of truth, no sync issues
+
+### 4. Scope-Based Event Routing
+
+Every event has a `scope` field (e.g., `"linkedin"`, `"x"`). This enables:
+
+- Database-level filtering: `WHERE scope = 'linkedin'`
+- Schema routing: Look up validation schema by scope
+- Type safety: Projections return typed events for their scope
+
+### 5. Platform-Agnostic Core
+
+The runtime knows about `PlatformDefinition`, `PlatformBehavior`, `Projection`.
+It doesn't know about LinkedIn or X specifically. Platforms plug in by
+registering schemas and behaviors.
+
+### 6. No Cross-Platform Identity
+
+`ParticipantId` is platform-bound. The same human on LinkedIn and X has two
+different `ParticipantId` values. Cross-platform identity correlation is out of
+scope.
+
+### 7. Globally Unique ParticipantId
+
+ParticipantId uses the format `"{platform}:{id}"` (e.g., `"linkedin:abc123"`).
+This makes IDs globally unique and self-describing. Journal entries filter by
+participantId alone—no separate platform field needed.
+
+### 8. Accounts Are Bindings, Not Metadata
+
+An account is a **binding** between a platform ID and browser sessions:
+
+```typescript
+interface BaseAccount {
+  readonly id: ParticipantId;
+  readonly browserBindings: readonly BrowserBinding[];
+}
+```
+
+Accounts do NOT store display names, rate limits, or any platform-controlled
+metadata. All dynamic state is derived from events.
+
+### 9. Failures Are Events
+
+No special error handling paths. Extensions observe what happens and emit
+events:
+
+```typescript
+{ scope: "linkedin", type: "RateLimitObserved", retryAfter: "..." }
+{ scope: "linkedin", type: "AuthExpiredObserved", configId: "..." }
+```
+
+The behavior's `deriveBrowsers` folds these events to determine browser status.
+
+### 10. Canonical IDs for Restartability
+
+Message events use deterministic IDs generated from content:
+
+```typescript
+const canonicalId = await hash(scope, threadAnchor, sender, content, timestamp);
+```
+
+Same message observed twice → same ID → deduplicated. This makes restarts safe.
 
 ---
 
 ## The Single Flow
 
-```
-Extension → BrowserPool → EventIngestion → EventStore → Projection → Platform → Sockpuppet
-```
-
-That's it. One path. Auth events, message events, rate limit events—they all
-flow through the same pipe. The projection guarantees typed events; the platform
-service derives everything from that.
-
 ```mermaid
 graph LR
     EXT[Extension] --> BP[BrowserPool]
     BP --> EI[EventIngestion]
-    EI --> ES[(EventStore)]
+    EI --> INJ[Injection]
+    INJ --> ES[(EventStore)]
     ES --> PR[Projection]
     PR --> PL[Platform]
     PL --> SP[Sockpuppet]
 ```
 
+One path. Auth events, message events, rate limit events—all flow through the
+same pipe. EventIngestion enriches and delegates to Injection. Projection
+provides typed access; the platform service derives everything from that.
+
 ---
 
-## The Durable Primitives
+## Durable Primitives
 
-The system rests on two core durable records, plus provider-specific storage:
+The system rests on three durable records:
 
 ```mermaid
 flowchart LR
     subgraph Durable["Durable State"]
-        BC[("Browser Configs<br/>how to connect to each session")]
-        EV[("Events<br/>append-only log")]
-    end
-    subgraph Platform["Platform-Specific"]
-        LA[("LinkedIn Accounts")]
-        XA[("X Accounts")]
+        BC[("Browser Configs")]
+        EV[("Events (append-only)")]
+        AC[("Accounts (bindings)")]
     end
 ```
 
 1. **Browser Configs** — How to connect to each persistent browser session.
-   Shared infrastructure, not platform-specific.
 
-2. **Events** — Append-only log. The **single source of truth**. Everything
-   else—threads, inbox state, auth status, contact info—is derived by folding
-   events.
+2. **Events** — Append-only log. The single source of truth. Everything
+   else—threads, inbox, auth status, contacts—is derived by folding events.
 
-3. **Platform-specific account storage** — Each platform defines its own account
-   type and storage. LinkedIn accounts have different fields than X accounts.
-   The core runtime doesn't impose a structure.
-
-```typescript
-// Each provider defines its own account type
-interface LinkedInAccount {
-  readonly id: ParticipantId;
-  readonly displayName: string;
-  readonly browserBindings: readonly BrowserBinding[];
-  readonly weeklyInviteLimit: number;
-  // ... LinkedIn-specific fields
-}
-
-interface XAccount {
-  readonly id: ParticipantId;
-  readonly handle: string;
-  readonly browserBindings: readonly BrowserBinding[];
-  readonly isVerified: boolean;
-  // ... X-specific fields
-}
-
-// Browser bindings are shared structure
-interface BrowserBinding {
-  readonly configId: BrowserConfigId;
-  readonly metadata: Record<string, unknown>; // e.g., { deviceType: "mobile" }
-}
-```
+3. **Accounts** — Bindings between platform IDs and browsers. Contains only `id`
+   and `browserBindings`. No metadata.
 
 ---
 
+# Part 2: Type System
+
 ## Branded Types
 
-Use branded types to prevent mixing up IDs and other stringly-typed values:
+Branded types prevent mixing up IDs and stringly-typed values at compile time:
 
 ```typescript
 type Brand<T, B extends string> = T & { readonly __brand: B };
 
-type Scope = Brand<string, "Scope">;
+// Constructor pattern
 type ParticipantId = Brand<string, "ParticipantId">;
-type ThreadId = Brand<string, "ThreadId">;
-type EventId = Brand<string, "EventId">;
-type CorrelationId = Brand<string, "CorrelationId">;
-type CanonicalId = Brand<string, "CanonicalId">;
-type BrowserConfigId = Brand<string, "BrowserConfigId">;
-type ExtensionId = Brand<string, "ExtensionId">;
-
-// Constructor functions
-const Scope = (value: string): Scope => value as Scope;
 const ParticipantId = (value: string): ParticipantId => value as ParticipantId;
-const ExtensionId = (value: string): ExtensionId => value as ExtensionId;
-// ... etc
 ```
 
-**Why branded types matter:**
+### Core Branded Types
 
-| Type              | Why                                                                |
-| ----------------- | ------------------------------------------------------------------ |
-| `Scope`           | Extensible string—new platforms added without modifying core types |
-| `ParticipantId`   | Any user on a platform—owned accounts AND external contacts        |
-| `ThreadId`        | Prevent passing a message ID where thread ID expected              |
-| `EventId`         | Deduplication key—must not collide with correlation ID             |
-| `CorrelationId`   | Tracing—links related events across the system                     |
-| `CanonicalId`     | Message identity—distinct from platform's native ID                |
-| `BrowserConfigId` | Don't mix with browser instance IDs                                |
-| `ExtensionId`     | Don't mix extension IDs with other string identifiers              |
+| Type               | Purpose                                                                        |
+| ------------------ | ------------------------------------------------------------------------------ |
+| `Scope`            | Platform identifier. Extensible string—new platforms without modifying core.   |
+| `ParticipantId`    | Any user on a platform (owned accounts AND external contacts). Platform-bound. |
+| `ThreadId`         | Conversation identifier. Prevents mixing with message IDs.                     |
+| `EventId`          | Deduplication key. Deterministic for messages, random for others.              |
+| `CorrelationId`    | Tracing. Links related events across the system.                               |
+| `CanonicalId`      | Message identity. Distinct from platform's native message ID.                  |
+| `BrowserConfigId`  | Browser session identifier. Don't mix with instance IDs.                       |
+| `ExtensionId`      | Browser extension identifier.                                                  |
+| `ExecuteErrorCode` | Effect error codes. Branded for extensibility.                                 |
 
-### ParticipantId: Unified User Identity
+### ParticipantId: Scoped User Identity
 
-`ParticipantId` represents **any user on a platform**—whether it's one of our
-owned accounts or an external contact we're interacting with. This unified type
-enables:
+`ParticipantId` represents **any user on a platform**—owned accounts or external
+contacts. IDs are **platform-prefixed** and carry their scope as a phantom type:
 
-- **Comparison without casting**: `msg.senderId === platform.participantId`
-- **Consistent contact lookup**: Pass any `ParticipantId` to `deriveContact`
-- **Type safety across boundaries**: Prevent mixing user IDs with other strings
+```typescript
+// Phantom type parameter enforces scope at compile time
+type ParticipantId<TScope extends string = string> = string & {
+  readonly __brand: "ParticipantId";
+  readonly __scope: TScope;
+};
 
-The distinction between "our account" and "external contact" is expressed by
-context (e.g., `BaseAccount.id` vs `MessageView.senderId`), not separate types.
+// Constructor enforces the format
+const ParticipantId = <TScope extends string>(
+  scope: TScope,
+  platformId: string,
+): ParticipantId<TScope> => `${scope}:${platformId}` as ParticipantId<TScope>;
 
-`Scope` is a branded string, not a literal union, because the system must be
-extensible. New scopes (platforms, journal, core) can be added without modifying
-core types.
+// Usage
+const linkedInUser = ParticipantId("linkedin", "abc123"); // ParticipantId<"linkedin">
+const xUser = ParticipantId("x", "456def"); // ParticipantId<"x">
+
+// Type error: can't pass X user to LinkedIn function
+// linkedInBehavior.deriveContact(events, xUser);  // ✗ compile error
+```
+
+This enables:
+
+- **Compile-time scope safety**: `ParticipantId<"linkedin">` incompatible with
+  `ParticipantId<"x">`
+- **Global uniqueness**: No collision between platforms
+- **Self-describing**: The ID carries its platform context
+- **Simple journal queries**: Filter by participantId alone, no extra platform
+  field
+
+The distinction between "our account" and "external contact" is contextual
+(field naming, enclosing type), not structural.
+
+### Zod Schema Factory for ParticipantId
+
+Runtime validation ensures the prefix matches the expected scope:
+
+```typescript
+const participantIdSchema = <TScope extends string>(scope: TScope) =>
+  z.string()
+    .refine(
+      (s): s is `${TScope}:${string}` => s.startsWith(`${scope}:`),
+      { message: `ParticipantId must be prefixed with "${scope}:"` },
+    )
+    .transform((s): ParticipantId<TScope> => s as ParticipantId<TScope>);
+
+// Usage in platform schemas
+const LINKEDIN_SCOPE = "linkedin" as const;
+
+const LinkedInAuthObservedSchema = CorrelatedEventSchema.extend({
+  scope: z.literal(LINKEDIN_SCOPE),
+  participantId: participantIdSchema(LINKEDIN_SCOPE), // validates "linkedin:..."
+  // ...
+});
+```
+
+The schema factory ties the Zod validation to the same scope literal used in the
+event schema, ensuring consistency.
+
+### ExecuteErrorCode: Extensible Errors
+
+Effect errors use a branded `ExecuteErrorCode` rather than a fixed union:
+
+```typescript
+type ExecuteErrorCode = Brand<string, "ExecuteErrorCode">;
+const ExecuteErrorCode = (value: string): ExecuteErrorCode =>
+  value as ExecuteErrorCode;
+```
+
+Platforms can define their own error codes without modifying core types.
 
 ---
 
@@ -193,26 +334,26 @@ core types.
 
 ### Scoped Events
 
-Every event carries a **scope** field that identifies which subsystem owns it.
-The scope is a first-class field on the base event type, enabling efficient
-database-level filtering and simple schema routing.
+Every event carries a `scope` field identifying which platform owns it:
 
 ```typescript
-// Well-known scopes
-const JOURNAL_SCOPE = Scope("journal");
-// Platform scopes: Scope("linkedin"), Scope("x"), etc.
+const StorableEventSchema = z.object({
+  scope: z.string().transform(Scope),
+  type: z.string(),
+  eventId: z.string().transform(EventId),
+  timestamp: z.string(),
+});
+
+type StorableEvent = z.infer<typeof StorableEventSchema>;
 ```
 
 **Why a separate scope field?**
 
-- **Database-level filtering**: `WHERE scope = 'linkedin'` pushes filtering to
-  the database instead of fetching all events and filtering in memory
-- **Simpler indexing**: A dedicated `scope` column with `(scope, ts)` index is
-  cleaner than prefix matching on the `type` field
-- **Direct schema routing**: Look up schema by `event.scope`, no string parsing
-- **Clear separation**: `scope` says where it belongs, `type` says what it is
+- Database filtering: `WHERE scope = 'linkedin'` pushes filtering to the DB
+- Schema routing: Look up validation schema by `event.scope`
+- Clear separation: `scope` = where it belongs, `type` = what it is
 
-### The Event Schema Hierarchy
+### Event Schema Hierarchy
 
 Events form an inheritance chain using Zod's `.extend()`:
 
@@ -225,46 +366,21 @@ const StorableEventSchema = z.object({
   timestamp: z.string(),
 });
 
-type StorableEvent = z.infer<typeof StorableEventSchema>;
-
-// Extended: adds correlation/causation for tracing
+// Extended: adds correlation for tracing
 const CorrelatedEventSchema = StorableEventSchema.extend({
   correlationId: z.string().transform(CorrelationId),
   causationId: z.string().transform(CorrelationId).optional(),
 });
-
-type CorrelatedEvent = z.infer<typeof CorrelatedEventSchema>;
 ```
 
-**Convention**: All domain events extend `CorrelatedEventSchema`. The store only
-enforces `StorableEvent`—correlation fields are a convention for tracing, not a
-storage requirement.
+All domain events extend `CorrelatedEventSchema`.
 
 ### Event Templates
 
-Templates provide the **base structure** for common event patterns. Platforms
-extend templates with their scope and platform-specific fields:
+Templates provide base structure for common patterns. Platforms extend with
+their scope and platform-specific fields:
 
 ```typescript
-// templates/anchor-message.ts
-export const AnchorMessageObservedBase = CorrelatedEventSchema.extend({
-  kind: z.literal("anchor"),
-  canonicalId: z.string().transform(CanonicalId),
-  senderId: z.string().transform(ParticipantId),
-  content: z.string().optional(),
-  // scope, type, anchor: platforms add these
-});
-
-// templates/reply-message.ts
-export const ReplyMessageObservedBase = CorrelatedEventSchema.extend({
-  kind: z.literal("reply"),
-  canonicalId: z.string().transform(CanonicalId),
-  senderId: z.string().transform(ParticipantId),
-  predecessorId: z.string().transform(CanonicalId),
-  content: z.string().optional(),
-  // scope, type: platforms add these
-});
-
 // templates/auth.ts
 export const AuthObservedBase = CorrelatedEventSchema.extend({
   configId: z.string().transform(BrowserConfigId),
@@ -272,112 +388,46 @@ export const AuthObservedBase = CorrelatedEventSchema.extend({
   status: z.enum(["authenticated", "expired", "unknown"]),
 });
 
-// templates/rate-limit.ts
-export const RateLimitObservedBase = CorrelatedEventSchema.extend({
-  configId: z.string().transform(BrowserConfigId),
-  participantId: z.string().transform(ParticipantId),
-  retryAfter: z.string().optional(),
-});
-```
-
-Platforms extend these templates:
-
-```typescript
 // plugins/linkedin/schemas.ts
 const LinkedInAuthObservedSchema = AuthObservedBase.extend({
   scope: z.literal("linkedin"),
   type: z.literal("AuthObserved"),
 });
-
-const LinkedInAnchorMessageSchema = AnchorMessageObservedBase.extend({
-  scope: z.literal("linkedin"),
-  type: z.literal("AnchorMessageObserved"),
-  anchor: LinkedInAnchorSchema, // platform-specific anchor shape
-});
-```
-
-### Intent Templates
-
-Just like events, intents have templates that platforms extend. Common intent
-patterns share structure across platforms:
-
-```typescript
-// templates/send-message.ts
-export const SendMessageBase = z.object({
-  threadId: z.string().transform(ThreadId),
-  content: z.string(),
-});
-
-// templates/sync.ts
-export const SyncConversationsBase = z.object({
-  since: z.string().optional(),
-  limit: z.number().optional(),
-});
-```
-
-Platforms extend with their scope and type:
-
-```typescript
-// plugins/linkedin/schemas.ts
-const LinkedInSendMessageSchema = SendMessageBase.extend({
-  scope: z.literal("linkedin"),
-  type: z.literal("SendMessage"),
-});
-
-type LinkedInSendMessage = z.infer<typeof LinkedInSendMessageSchema>;
 ```
 
 ### Platform Event Unions
 
-Each platform defines a discriminated union of all its event types:
+Each platform defines a discriminated union of its event types:
 
 ```typescript
-// plugins/linkedin/schemas.ts
 export const LinkedInEventSchema = z.discriminatedUnion("type", [
   LinkedInAuthObservedSchema,
   LinkedInRateLimitObservedSchema,
   LinkedInAnchorMessageSchema,
   LinkedInReplyMessageSchema,
-  LinkedInConnectionRequestSentSchema,
-  // ... all LinkedIn event types
+  // ...
 ]);
 
 export type LinkedInEvent = z.infer<typeof LinkedInEventSchema>;
-
-export const LinkedInIntentSchema = z.discriminatedUnion("type", [
-  LinkedInSendMessageSchema,
-  LinkedInSyncConversationsSchema,
-  LinkedInSendConnectionRequestSchema,
-  // ... all LinkedIn intent types
-]);
-
-export type LinkedInIntent = z.infer<typeof LinkedInIntentSchema>;
 ```
-
-Each platform's anchor type differs—the discriminated union captures each
-platform's exact shape. The `scope` field is always the same literal within a
-platform's schema, so `type` remains the effective discriminator.
 
 ---
 
 ## Message Graph Model
 
-### Why a Graph, Not a List?
+### Why a Graph?
 
 Platforms don't agree on what a "thread" is:
 
-- **LinkedIn**: Conversations have explicit participant lists in metadata
-- **X/Twitter**: DM threads inferred from conversation_id
-- **Email**: Threads can fork when subject line changes (In-Reply-To headers)
-- **Slack**: Threads can branch from any message
+- **LinkedIn**: Conversations with explicit participant lists
+- **X**: DM threads via conversation_id
+- **Email**: Threads fork on subject change
+- **Slack**: Threads branch from any message
 
-Rather than impose a structure, messages form a graph via `predecessorId`
-references, and each behavior's `deriveThread` walks the graph according to
-platform rules.
+Messages form a graph via `predecessorId` references. Each behavior's
+`deriveThread` walks the graph according to platform rules.
 
-### Base Message Contract
-
-All messages, regardless of platform, must satisfy a minimal shape:
+### Message Types
 
 ```typescript
 interface BaseMessage {
@@ -385,62 +435,23 @@ interface BaseMessage {
   readonly senderId: ParticipantId;
   readonly content?: string;
 }
-```
 
-### Anchor Messages (Thread Roots)
-
-An **anchor message** establishes a thread. It's generic over the anchor type,
-allowing each platform to define its own anchor shape:
-
-```typescript
+// Thread root with platform-specific anchor
 interface AnchorMessage<TAnchor> extends BaseMessage {
   readonly kind: "anchor";
   readonly anchor: TAnchor;
 }
-```
 
-### Reply Messages
-
-Non-root messages reference their predecessor, forming a graph:
-
-```typescript
+// References predecessor, forming a graph
 interface ReplyMessage extends BaseMessage {
   readonly kind: "reply";
   readonly predecessorId: CanonicalId;
 }
-```
 
-### Unified Message Type
-
-```typescript
 type Message<TAnchor> = AnchorMessage<TAnchor> | ReplyMessage;
 ```
 
-### Thread Graph Example
-
-```typescript
-// Root message — carries platform-specific anchor
-{
-  scope: "linkedin",
-  type: "AnchorMessageObserved",
-  kind: "anchor",
-  canonicalId: "abc123",
-  anchor: { conversationId: "conv-1", participants: ["alice", "bob"] },
-  senderId: "alice",  // ParticipantId
-  content: "Hey!",
-}
-
-// Reply — references its predecessor
-{
-  scope: "linkedin",
-  type: "ReplyMessageObserved",
-  kind: "reply",
-  canonicalId: "def456",
-  predecessorId: "abc123",
-  senderId: "bob",  // ParticipantId
-  content: "Hi there!",
-}
-```
+### Example Graph
 
 ```mermaid
 flowchart TB
@@ -451,77 +462,81 @@ flowchart TB
     M1 --> M2 --> M3
 ```
 
-Thread identity = walking `predecessorId` back to a root. The behavior's
-`deriveThread` implements this walk with platform-specific rules.
+Thread identity = walking `predecessorId` back to a root.
 
----
+### Thread Graph Building
 
-## Canonical IDs
-
-Events are deduplicated by `eventId`. For message events, IDs are generated
-**deterministically** from content, so the same message observed twice produces
-the same ID:
+The `buildThreadGraphs` utility processes events into typed thread graphs:
 
 ```typescript
-const hash = async (...parts: string[]): Promise<string> => {
-  const data = new TextEncoder().encode(parts.join("\0"));
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return btoa(String.fromCharCode(...new Uint8Array(digest))).slice(0, 22);
-};
+interface ThreadGraph<
+  TScope extends string = string,
+  TMessage extends GraphMessage = GraphMessage,
+  TAnchor = unknown,
+> {
+  readonly id: ThreadId;
+  readonly scope: TScope; // Typed to the platform scope
+  readonly anchor: TAnchor;
+  readonly nodes: readonly GraphNode<TMessage>[];
+  readonly lastActivity: string;
+}
 
-// Same message → same ID, even across restarts
-const canonicalMessageId = (
-  scope: string,
-  threadAnchor: string,
-  sender: string,
-  content: string,
-  platformTimestamp: string,
-): Promise<CanonicalId> =>
-  hash(scope, threadAnchor, sender, content, platformTimestamp)
-    .then((h) => h as CanonicalId);
+function buildThreadGraphs<TScope, TMessage, TAnchor>(
+  scope: TScope,
+  events: readonly StorableEvent[],
+): Map<ThreadId, ThreadGraph<TScope, TMessage, TAnchor>>;
 ```
 
-**Why this matters for restartability**: Refreshing a page re-observes the same
-messages, but they produce the same canonical IDs and are deduplicated. The
-sockpuppet can restart at any time and the event log remains consistent.
+**Usage in behaviors:**
+
+```typescript
+// Events are pre-filtered by scope via Projection layer
+deriveInbox: ((events: readonly LinkedInEvent[]): LinkedInInbox => {
+  const threads = buildThreadGraphs<"linkedin", GraphMessage, LinkedInAnchor>(
+    "linkedin", // Scope types the returned ThreadGraph
+    events,
+  );
+
+  // No filtering needed—events are already scope-filtered
+  for (const thread of threads.values()) {
+    // thread.scope is typed as "linkedin"
+  }
+});
+```
+
+The scope parameter ensures returned `ThreadGraph` instances are typed with the
+correct scope, providing compile-time safety.
 
 ---
 
-## Base View Types
+## View Types
 
-Views are what sockpuppets see. They're extensible so platforms can add
-platform-specific fields.
+Views are what sockpuppets see—derived from events, extensible per platform.
 
 ### Inbox View
 
-The inbox view is an extensible index—shows which threads exist with metadata
-for sorting/filtering, but doesn't contain the threads themselves:
+An index of threads with metadata for sorting/filtering:
 
 ```typescript
 interface BaseInboxView<TThreadSummary = Record<string, never>> {
   readonly byThreadId: Readonly<Record<string, TThreadSummary>>;
 }
 
-// Platform extends with specific thread summary
-interface LinkedInThreadSummary {
-  readonly lastActivityAt: string;
-  readonly unreadCount: number;
-  readonly isSponsored: boolean;
-}
-
+// Platform extends
 interface LinkedInInbox extends BaseInboxView<LinkedInThreadSummary> {
   readonly syncedAt: string;
   readonly pendingInvitations: number;
-  readonly weeklyInvitesRemaining: number;
 }
 ```
 
 ### Thread View
 
 ```typescript
-interface Participant {
-  readonly id: ParticipantId;
-  readonly name?: string;
+interface BaseThreadView<TAnchor> {
+  readonly threadId: ThreadId;
+  readonly messages: readonly MessageView[];
+  readonly participants: readonly Participant[];
+  readonly anchor: TAnchor;
 }
 
 interface MessageView {
@@ -531,113 +546,153 @@ interface MessageView {
   readonly timestamp: string;
 }
 
-interface BaseThreadView<TAnchor> {
-  readonly threadId: ThreadId;
-  readonly messages: readonly MessageView[];
-  readonly participants: readonly Participant[];
-  readonly anchor: TAnchor;
-}
-
-// Platform extends with specific fields
-interface LinkedInAnchor {
-  readonly conversationId: string;
-  readonly participants: readonly ParticipantId[];
-}
-
-interface LinkedInThread extends BaseThreadView<LinkedInAnchor> {
-  readonly unreadCount: number;
-  readonly isSponsored: boolean;
-}
-```
-
-Threads are fetched via `deriveThread(threadId)` when the sockpuppet views a
-conversation. Platform-specific fields (like `isSponsored`) influence sockpuppet
-decisions.
-
-### Contact View
-
-Sockpuppets often need information about participants beyond just their ID. The
-contact view provides what we know about a participant from observed events:
-
-```typescript
-interface BaseContact {
+interface Participant {
   readonly id: ParticipantId;
   readonly name?: string;
 }
+```
 
-// Platform extends with specific fields
-interface LinkedInContact extends BaseContact {
-  readonly headline?: string;
-  readonly profileUrl?: string;
-  readonly connectionDegree?: "1st" | "2nd" | "3rd" | "out";
-  readonly lastInteraction?: string;
+### Contact View
+
+Information about participants derived from observed events. Scoped to platform:
+
+```typescript
+interface BaseContact<TScope extends string = string> {
+  readonly id: ParticipantId<TScope>;
+  readonly name?: string;
 }
 
-interface XContact extends BaseContact {
-  readonly handle?: string;
-  readonly isVerified?: boolean;
-  readonly followerCount?: number;
-  readonly followingCount?: number;
+// Platform extends with scope
+interface LinkedInContact extends BaseContact<"linkedin"> {
+  readonly headline?: string;
+  readonly profileUrl?: string;
 }
 ```
 
-Contact info is derived from events like `ProfileViewed`, `SearchResultsRetrieved`,
-`ConnectionRequestSent`, etc. The behavior folds these events to build a picture
-of each participant.
+### Account View
 
----
-
-## PlatformBehavior
-
-The behavior is **pure logic**—no schemas. It operates on types provided by the
-PlatformDefinition that owns it. Different platforms have different semantics;
-the behavior encapsulates this so sockpuppets just see generic views.
+Binding between platform ID and browser sessions. Scoped to platform:
 
 ```typescript
-// Base types - platforms extend these with their own fields
-interface BaseIntent<TScope extends Scope = Scope> {
-  readonly scope: TScope;
-  readonly type: string;
-}
-
-interface BaseAccount {
-  readonly id: ParticipantId;
+interface BaseAccount<TScope extends string = string> {
+  readonly id: ParticipantId<TScope>;
   readonly browserBindings: readonly BrowserBinding[];
 }
 
+// Platform extends with scope
+interface LinkedInAccount extends BaseAccount<"linkedin"> {}
+```
+
+### Browser View
+
+Platform-specific browser status derived from auth/rate-limit events:
+
+```typescript
 interface BaseBoundBrowser {
   readonly configId: BrowserConfigId;
   readonly isRunning: boolean;
   readonly metadata: Record<string, unknown>;
 }
 
-interface BaseContact {
-  readonly id: ParticipantId;
-  readonly name?: string;
+// Platform extends
+interface LinkedInBrowser extends BaseBoundBrowser {
+  readonly authStatus: "authenticated" | "expired" | "unknown";
+  readonly rateLimitedUntil?: string;
+}
+```
+
+---
+
+## Platform Types
+
+### PlatformMethod: Curried Effects
+
+All platform effects follow a curried pattern for consistent browser selection:
+
+```typescript
+interface ExecuteOptions {
+  readonly preferConfigId?: BrowserConfigId;
 }
 
+type PlatformMethod<
+  TArgs extends readonly unknown[],
+  TResult,
+  TError,
+> = (
+  options?: ExecuteOptions,
+) => (...args: TArgs) => Effect.Effect<TResult, TError>;
+```
+
+**Usage:**
+
+```typescript
+// Default browser selection
+yield * platform.actions.sendMessage()(threadId, content);
+
+// Explicit browser preference
+yield *
+  platform.actions.sendMessage({ preferConfigId: mobileId })(threadId, content);
+```
+
+The curried pattern ensures type-level enforcement: every effect must accept
+`ExecuteOptions` first.
+
+### ActionsRecord: Constrained Actions
+
+Platform actions are constrained to only contain `PlatformMethod` types:
+
+```typescript
+type ActionsRecord = Record<
+  string,
+  PlatformMethod<readonly unknown[], unknown, unknown>
+>;
+
+interface LinkedInActions extends ActionsRecord {
+  readonly sendMessage: PlatformMethod<
+    [ThreadId, string],
+    MessageSentResult,
+    SendMessageError
+  >;
+  readonly syncInbox: PlatformMethod<[since?: string], SyncResult, SyncError>;
+  readonly sendConnectionRequest: PlatformMethod<
+    [ParticipantId<"linkedin">, string?],
+    ConnectionResult,
+    ConnectionError
+  >;
+}
+```
+
+TypeScript enforces that all properties in `LinkedInActions` are valid
+`PlatformMethod` types.
+
+### PlatformBehavior: Pure Derivation
+
+Pure derivation functions over event streams. Two scope parameters:
+
+- **TScope**: The `scope` field on events (e.g., `"linkedin"` or
+  `"linkedindojo"`)
+- **TIdentity**: The identity namespace for ParticipantIds (e.g., `"linkedin"`)
+
+For production platforms, these are the same. For dojo, they differ.
+
+```typescript
 interface PlatformBehavior<
-  TScope extends Scope,
+  TScope extends string,
+  TIdentity extends string,
   TEvent extends StorableEvent & { scope: TScope },
-  TIntent extends BaseIntent<TScope>,
   TAnchor,
   TThread extends BaseThreadView<TAnchor>,
   TInbox extends BaseInboxView<unknown>,
-  // Account provides: id (who to derive for), browserBindings (which browsers
-  // this account can use, with metadata like device type, geo, etc.)
-  TAccount extends BaseAccount,
-  TBrowser extends BaseBoundBrowser = BaseBoundBrowser,
-  TContact extends BaseContact = BaseContact,
+  TAccount extends BaseAccount<TIdentity>,
+  TBrowser extends BaseBoundBrowser,
+  TContact extends BaseContact<TIdentity>,
 > {
   readonly scope: TScope;
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Derivation — fold events into views
-  // ─────────────────────────────────────────────────────────────────────────
+  readonly identity: TIdentity;
 
   readonly deriveInbox: (
     events: readonly TEvent[],
-    participantId: ParticipantId,
+    participantId: ParticipantId<TIdentity>,
   ) => TInbox;
 
   readonly deriveThread: (
@@ -651,83 +706,45 @@ interface PlatformBehavior<
     runningConfigIds: ReadonlySet<BrowserConfigId>,
   ) => readonly TBrowser[];
 
-  /**
-   * Derive contact info from events for a participant.
-   * Returns what we know about this user from observed events.
-   * Optional—platforms without rich contact info can omit this.
-   */
   readonly deriveContact?: (
     events: readonly TEvent[],
-    participantId: ParticipantId,
+    participantId: ParticipantId<TIdentity>,
   ) => TContact | undefined;
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Execution — run intents via browser (behavior owns browser selection)
-  // ─────────────────────────────────────────────────────────────────────────
-
-  readonly execute: (
-    intent: TIntent,
-    browsers: readonly TBrowser[],
-    preferConfigId?: BrowserConfigId,
-  ) => Effect.Effect<
-    { usedConfigId: BrowserConfigId },
-    ExecuteError,
-    BrowserPool
-  >;
 }
 ```
 
-**Why the behavior owns browser selection**: Different platforms have different
-criteria for what makes a browser "usable"—auth status, rate limits, geo,
-session freshness, etc. The behavior's `deriveBrowsers` attaches
-platform-specific status to each browser, and `execute` picks the best one based
-on platform logic. No hardcoded universal assumptions about auth or rate limits.
+**Usage:**
 
-**Why deriveContact exists**: Sockpuppets need to make decisions based on who
-they're talking to. The `deriveContact` method folds events to build a picture
-of each participant—name, profile URL, connection degree, etc. This is derived
-from the same event stream as everything else.
+| Platform     | TScope           | TIdentity    | Notes                                     |
+| ------------ | ---------------- | ------------ | ----------------------------------------- |
+| LinkedIn     | `"linkedin"`     | `"linkedin"` | Same (production)                         |
+| X            | `"x"`            | `"x"`        | Same (production)                         |
+| linkedindojo | `"linkedindojo"` | `"linkedin"` | Different (dojo shares LinkedIn identity) |
 
----
+### PlatformDefinition: Schema + Behavior
 
-## PlatformDefinition
-
-A **PlatformDefinition** is the registration unit for a platform. It bundles:
-
-- **Schemas** — the contract (what events/intents look like)
-- **Behavior** — how to derive views from events, select browsers, execute
-  intents
-- **Account type** — platform-specific account structure
-- **Browser type** — platform-specific browser view (extends BaseBoundBrowser)
-- **Contact type** — platform-specific contact view (extends BaseContact)
-
-The type parameters enforce that the behavior operates on events matching the
-declared scope.
+Registration unit for a platform. Contains only schemas and behavior—no actions:
 
 ```typescript
 interface PlatformDefinition<
-  TScope extends Scope,
+  TScope extends string,
+  TIdentity extends string,
   TEvent extends StorableEvent & { scope: TScope },
-  TIntent extends BaseIntent<TScope>,
   TAnchor,
   TThread extends BaseThreadView<TAnchor>,
   TInbox extends BaseInboxView<unknown>,
-  TAccount extends BaseAccount,
-  TBrowser extends BaseBoundBrowser = BaseBoundBrowser,
-  TContact extends BaseContact = BaseContact,
+  TAccount extends BaseAccount<TIdentity>,
+  TBrowser extends BaseBoundBrowser,
+  TContact extends BaseContact<TIdentity>,
 > {
   readonly scope: TScope;
-
-  // Schemas — the contract for this scope
+  readonly identity: TIdentity;
   readonly eventSchema: z.ZodType<TEvent>;
-  readonly intentSchema: z.ZodType<TIntent>;
   readonly anchorSchema: z.ZodType<TAnchor>;
-
-  // Behavior — how to derive views, select browsers, and execute intents
   readonly behavior: PlatformBehavior<
     TScope,
+    TIdentity,
     TEvent,
-    TIntent,
     TAnchor,
     TThread,
     TInbox,
@@ -736,91 +753,42 @@ interface PlatformDefinition<
     TContact
   >;
 }
-
-// Type-erased definition for schema collection (doesn't need full type info)
-type AnyPlatform = PlatformDefinition<
-  Scope,
-  StorableEvent,
-  BaseIntent,
-  unknown,
-  BaseThreadView<unknown>,
-  BaseInboxView<unknown>,
-  BaseAccount,
-  BaseBoundBrowser,
-  BaseContact
->;
 ```
 
-The constraint `TEvent extends StorableEvent & { scope: TScope }` ensures
-compile-time safety: you cannot register a schema containing events with the
-wrong scope literal.
+### PlatformService: What Sockpuppets Use
 
-The `TAccount` constraint requires `id` and `browserBindings` (shared structure
-needed by the platform service), but allows platform-specific fields. The
-`TBrowser` constraint ensures browsers have at least `configId` and `isRunning`.
-The `TContact` constraint ensures contacts have at least `id`.
+Each platform exports its own service factory. Actions are created in the
+service layer, not the definition:
 
-### Example Definition
+````typescript
+interface PlatformService<
+  TScope extends string,
+  TIdentity extends string,
+  TActions extends ActionsRecord,
+  TInbox extends BaseInboxView<unknown>,
+  TThread extends BaseThreadView<unknown>,
+  TBrowser extends BaseBoundBrowser,
+  TContact extends BaseContact<TIdentity>,
+> {
+  readonly scope: TScope;
+  readonly identity: TIdentity;
+  readonly participantId: ParticipantId<TIdentity>;
 
-```typescript
-// plugins/linkedin/mod.ts
-export const linkedInPlatform: PlatformDefinition<
-  typeof LINKEDIN_SCOPE,
-  LinkedInEvent,
-  LinkedInIntent,
-  LinkedInAnchor,
-  LinkedInThread,
-  LinkedInInbox,
-  LinkedInAccount,
-  LinkedInBrowser,
-  LinkedInContact
-> = {
-  scope: LINKEDIN_SCOPE,
-  eventSchema: LinkedInEventSchema,
-  intentSchema: LinkedInIntentSchema,
-  anchorSchema: LinkedInAnchorSchema,
-  behavior: linkedInBehavior,
-};
+  // Derived views
+  readonly inbox: Effect.Effect<TInbox>;
+  readonly thread: (id: ThreadId) => Effect.Effect<Option<TThread>>;
+  readonly browsers: Effect.Effect<readonly TBrowser[]>;
+  readonly contact: (id: ParticipantId<TIdentity>) => Effect.Effect<Option<TContact>>;
 
-// plugins/linkedin/browser.ts
-interface LinkedInBrowser extends BaseBoundBrowser {
-  readonly authStatus: "authenticated" | "expired" | "unknown";
-  readonly rateLimitedUntil: string | undefined;
-  readonly weeklyInvitesRemaining: number | undefined;
+  // Platform-specific actions
+  readonly actions: TActions;
 }
-
-// plugins/linkedin/contact.ts
-interface LinkedInContact extends BaseContact {
-  readonly headline?: string;
-  readonly profileUrl?: string;
-  readonly connectionDegree?: "1st" | "2nd" | "3rd" | "out";
-  readonly lastInteraction?: string;
-}
-
-// plugins/linkedin/account.ts
-interface LinkedInAccount {
-  readonly id: ParticipantId;
-  readonly displayName: string;
-  readonly browserBindings: readonly BrowserBinding[];
-  readonly weeklyInviteLimit: number;
-  readonly profileUrl: string;
-}
-
-// Each platform has its own account store
-interface LinkedInAccountStoreService {
-  readonly get: (id: ParticipantId) => Effect.Effect<Option<LinkedInAccount>>;
-  readonly list: () => Effect.Effect<readonly LinkedInAccount[]>;
-  readonly upsert: (account: LinkedInAccount) => Effect.Effect<void>;
-}
-class LinkedInAccountStore extends Context.Tag("LinkedInAccountStore")<
-  LinkedInAccountStore,
-  LinkedInAccountStoreService
->() {}
-```
 
 ---
 
-## System Architecture
+# Part 3: Layer Implementation
+
+## System Overview
 
 ```mermaid
 graph TB
@@ -837,11 +805,12 @@ graph TB
     end
 
     subgraph "Layer 2: Event Flow"
-        ER[EventIngestion]
+        EI[EventIngestion]
     end
 
     subgraph "Layer 3: Projections"
-        PR[Projection per scope]
+        PR[Projection]
+        INJ[Injection]
     end
 
     subgraph "Layer 4: Platform"
@@ -850,7 +819,7 @@ graph TB
     end
 
     subgraph "Layer 5: Sockpuppet"
-        SP[Sockpuppet Fiber]
+        SP[Sockpuppet]
     end
 
     ES --> DB
@@ -858,29 +827,26 @@ graph TB
     BB --> CS
     BB --> BP
     BB --> EX
-    ER --> BP
-    ER --> ES
+    EI --> BP
+    EI --> INJ
+    INJ --> ES
     PR --> ES
     PL --> PR
     PL --> BP
-    JN --> ES
+    JN --> INJ
     SP --> PL
     SP --> JN
-```
-
-Note: Account storage is provider-specific and not shown here. Each provider
-(LinkedIn, X) defines its own account type and storage mechanism. BrowserBackend
-bundles BrowserPool and ExtensionStore together to ensure compatibility between
-implementations (e.g., Browserbase, local Playwright).
+````
 
 ---
 
 ## Layer 0: Storage
 
-Raw persistence. Schema-agnostic. The foundation everything else builds on.
+Raw persistence. Schema-agnostic.
+
+### Database
 
 ```typescript
-// Database - raw SQL access
 interface DatabaseService {
   readonly query: <T>(
     sql: string,
@@ -891,9 +857,15 @@ interface DatabaseService {
     params?: unknown[],
   ) => Effect.Effect<void, DatabaseError>;
 }
-class Database extends Context.Tag("Database")<Database, DatabaseService>() {}
 
-// EventStore - append-only log, schema-agnostic
+class Database extends Context.Tag("Database")<Database, DatabaseService>() {}
+```
+
+### EventStore
+
+Append-only log, validates base shape only:
+
+```typescript
 type EventQuery =
   | { readonly tag: "all" }
   | { readonly tag: "byScope"; readonly scope: Scope; readonly since?: string }
@@ -907,35 +879,22 @@ interface EventStoreService {
     q: EventQuery,
   ) => Effect.Effect<readonly StorableEvent[], EventStoreError>;
 }
+
 class EventStore
   extends Context.Tag("EventStore")<EventStore, EventStoreService>() {}
+```
 
-// ConfigStore - browser configs (shared infrastructure)
+### ConfigStore
+
+Browser configurations:
+
+```typescript
 interface BrowserConfig {
   readonly id: BrowserConfigId;
-  readonly context: string; // Browserbase session ID
-  readonly extensionIds: readonly ExtensionId[]; // extensions loaded in this browser
+  readonly context: string;
+  readonly extensionIds: readonly ExtensionId[];
   readonly proxy?: ProxyConfig;
 }
-
-// ExtensionStore - extension metadata (admin/setup, not used by runtime)
-interface ExtensionMeta {
-  readonly id: ExtensionId;
-  readonly name: string;
-  readonly version: string;
-  readonly uri: string; // where to load from
-}
-
-interface ExtensionStoreService {
-  readonly list: () => Effect.Effect<readonly ExtensionMeta[]>;
-  readonly get: (id: ExtensionId) => Effect.Effect<Option<ExtensionMeta>>;
-  readonly upsert: (meta: ExtensionMeta) => Effect.Effect<void>;
-  readonly remove: (id: ExtensionId) => Effect.Effect<void>;
-}
-class ExtensionStore extends Context.Tag("ExtensionStore")<
-  ExtensionStore,
-  ExtensionStoreService
->() {}
 
 interface ConfigStoreService {
   readonly get: (
@@ -948,159 +907,80 @@ interface ConfigStoreService {
   readonly upsert: (
     config: BrowserConfig,
   ) => Effect.Effect<void, ConfigStoreError>;
-  readonly replaceExtensionId: (
+  readonly upgradeExtension: (
     oldId: ExtensionId,
     newId: ExtensionId,
   ) => Effect.Effect<number, ConfigStoreError>;
 }
+
 class ConfigStore
   extends Context.Tag("ConfigStore")<ConfigStore, ConfigStoreService>() {}
 ```
 
-The store validates base shape on append (has `scope`, `type`, `eventId`,
-`timestamp`) but doesn't care about platform-specific fields. The `byScope`
-queries push filtering to the database layer for efficiency.
-
-**Note**: Account storage is provider-specific. Each provider defines its own
-account service (e.g., `LinkedInAccountStore`, `XAccountStore`) with
-platform-appropriate fields and storage.
-
-### Extension Transition Utility
-
-The `transitionExtension` utility in `store/extension-transition.ts` handles
-replacing one extension ID with another across all browser configs, then
-cleaning up the old extension from the extension store. It uses the service
-interfaces, so it works with any ConfigStore + ExtensionStore implementation
-combination (Postgres+Browserbase, in-memory+local, etc.).
-
-```typescript
-export const transitionExtension = (
-  fromId: ExtensionId,
-  toId: ExtensionId,
-): Effect.Effect<TransitionResult, ConfigStoreError, ConfigStore | ExtensionStore>
-```
-
-This pattern—operational utilities that compose services—keeps implementation
-details out of scripts while maintaining testability with in-memory stores.
-
 ---
 
-## Layer 1: Connectivity (Browser Backend)
+## Layer 1: Browser Backend
 
-Browser lifecycle, bridge communication, and extension management are bundled
-into a single **BrowserBackend**. This ensures compatibility—different backends
-(Browserbase, local Playwright, etc.) handle extensions differently, so both
-services must come from the same implementation.
+Browser lifecycle and extension management bundled together to ensure
+implementation compatibility.
+
+### BrowserPool
 
 ```typescript
-interface BridgeEvent {
-  readonly scope: string;
-  readonly type: string;
-  readonly [key: string]: unknown;
-}
-
 interface TaggedBridgeEvent {
   readonly configId: BrowserConfigId;
   readonly event: BridgeEvent;
 }
 
 interface BrowserPoolService {
-  // Lifecycle
   readonly launch: (
     configId: BrowserConfigId,
   ) => Effect.Effect<void, BrowserError>;
   readonly stop: (
     configId: BrowserConfigId,
   ) => Effect.Effect<void, BrowserError>;
-
-  // State
   readonly isRunning: (configId: BrowserConfigId) => Effect.Effect<boolean>;
-
-  // Commands
   readonly send: (
     configId: BrowserConfigId,
-    command: { type: string; payload: unknown },
-  ) => Effect.Effect<unknown, BrowserError | BridgeError>;
-
-  // Event stream - all events from all running browsers
+    command: BrowserCommand,
+  ) => Effect.Effect<unknown, BrowserError>;
   readonly events: Stream.Stream<TaggedBridgeEvent, BrowserError>;
 }
+
 class BrowserPool
   extends Context.Tag("BrowserPool")<BrowserPool, BrowserPoolService>() {}
 ```
 
 ### BrowserBackend
 
-The backend bundles pool and extension store together, ensuring they're
-compatible:
+Bundles pool and extension store:
 
 ```typescript
-// Backend bundles both services - pick a backend, get both
 interface BrowserBackend {
   readonly pool: BrowserPoolService;
   readonly extensions: ExtensionStoreService;
 }
 
-// Browserbase implementation
-const makeBrowserbaseBackend = (
-  apiKey: string,
-): Effect.Effect<BrowserBackend, never, ConfigStore> =>
-  Effect.gen(function* () {
-    const configStore = yield* ConfigStore;
-    return {
-      pool: createBrowserbasePool(apiKey, configStore),
-      extensions: createBrowserbaseExtensionStore(apiKey),
-    };
-  });
-
-// Local Playwright implementation (extensions loaded from filesystem)
-const makeLocalBackend = (
-  extensionsDir: string,
-): Effect.Effect<BrowserBackend, never, ConfigStore> =>
-  Effect.gen(function* () {
-    const configStore = yield* ConfigStore;
-    return {
-      pool: createLocalPool(configStore),
-      extensions: createLocalExtensionStore(extensionsDir),
-    };
-  });
-
-// Layer that provides both services from a backend
-const BrowserBackendLive = (backend: BrowserBackend) =>
-  Layer.mergeAll(
-    Layer.succeed(BrowserPool, backend.pool),
-    Layer.succeed(ExtensionStore, backend.extensions),
-  );
+// Implementations provide both together
+const makeBrowserbaseBackend: Effect.Effect<BrowserBackend, never, ConfigStore>;
+const makeLocalBackend: Effect.Effect<BrowserBackend, never, ConfigStore>;
 ```
-
-The pool doesn't know about platforms—it just manages browsers and exposes what
-they emit. The extension store is for admin workflows (querying/uploading
-extensions); the runtime uses `BrowserConfig.extensionIds` which is set during
-browser setup.
 
 ---
 
 ## Layer 2: Event Flow
 
-The **EventIngestion** bridges connectivity and storage. It's an _active_
-service—when its layer initializes, it starts consuming the event stream.
-
-```mermaid
-graph LR
-    BP[BrowserPool.events] --> ER[EventIngestion]
-    ER --> |validate + enrich| ES[(EventStore)]
-```
+**EventIngestion** consumes the browser event stream, enriches with server-side
+fields, and delegates to Injection:
 
 ```typescript
-interface EventIngestionService {
-  // The router is active - consuming happens on construction
-}
+interface EventIngestionService {}
+
 class EventIngestion extends Context.Tag("EventIngestion")<
   EventIngestion,
   EventIngestionService
 >() {}
 
-// Schemas come from providers - they're static values, not services
 const makeEventIngestion = (
   schemas: ReadonlyMap<Scope, z.ZodType<StorableEvent>>,
 ) =>
@@ -1110,37 +990,31 @@ const makeEventIngestion = (
       const pool = yield* BrowserPool;
       const store = yield* EventStore;
 
+      // Build Injection per scope
+      const injections = new Map(
+        [...schemas.entries()].map(([scope, schema]) => [
+          scope,
+          makeInjection(scope, schema, store),
+        ]),
+      );
+
       yield* Effect.forkScoped(
         pool.events.pipe(
           Stream.runForEach(({ configId, event }) =>
             Effect.gen(function* () {
               const scope = Scope(event.scope);
-              const schema = schemas.get(scope);
-              if (!schema) {
-                yield* Effect.logWarning("Unknown scope, dropping event", {
-                  scope,
-                });
-                return;
-              }
+              const injection = injections.get(scope);
+              if (!injection) return;
 
               const enriched = {
                 ...event,
                 eventId: EventId(crypto.randomUUID()),
                 timestamp: new Date().toISOString(),
+                correlationId: genCorrelationId(),
                 configId,
               };
 
-              const result = schema.safeParse(enriched);
-              if (!result.success) {
-                yield* Effect.logWarning("Validation failed", {
-                  scope,
-                  type: event.type,
-                  errors: result.error.issues,
-                });
-                return;
-              }
-
-              yield* store.append([result.data]);
+              yield* injection.append(enriched);
             })
           ),
         ),
@@ -1151,285 +1025,228 @@ const makeEventIngestion = (
   );
 ```
 
-**Schema ownership**: Schemas are defined by platforms, but they're static
-values—just Zod types. They flow up via static imports at layer composition
-time, not service dependencies.
-
 ---
 
-## Layer 3: Projections
+## Layer 3: Projection and Injection
 
-Projections provide **type-safe, filtered access** to the event store. The
-platform service doesn't filter or validate—the projection guarantees it.
+Symmetric, type-safe access to the event store.
+
+```mermaid
+flowchart LR
+    subgraph EventStore
+        PR[Projection]
+        INJ[Injection]
+    end
+    PR -->|"validate → TEvent[]"| READ[Readers]
+    WRITE[Writers] -->|"validate → append"| INJ
+```
+
+### Projection (validated reads)
+
+Projections filter events by scope at the database level, returning only
+validated, typed events for a specific platform:
 
 ```typescript
 interface Projection<TEvent extends StorableEvent> {
   readonly scope: Scope;
-  readonly query: (
-    since?: string,
-  ) => Effect.Effect<readonly TEvent[], EventStoreError>;
+  readonly query: (since?: string) => Effect.Effect<readonly TEvent[], EventStoreError>;
 }
 
 const makeProjection = <TEvent extends StorableEvent>(
   scope: Scope,
   schema: z.ZodType<TEvent>,
-): Effect.Effect<Projection<TEvent>, never, EventStore> =>
-  Effect.gen(function* () {
-    const store = yield* EventStore;
-
-    return {
-      scope,
-      query: (since) =>
-        Effect.gen(function* () {
-          const raw = yield* store.query({ tag: "byScope", scope, since });
-          return raw.flatMap((e) => {
-            const result = schema.safeParse(e);
-            return result.success ? [result.data] : [];
-          });
-        }),
-    };
-  });
+): Effect.Effect<Projection<TEvent>, never, EventStore>;
 ```
 
-**Why projections exist**: Type safety at the service boundary. The platform
-service yields a projection and gets typed events—guaranteed. No filtering, no
-validation, no "what if the wrong events leak through."
+**IMPORTANT**: Projections guarantee scope-filtered events. Behaviors receive
+`LinkedInEvent[]`, not `StorableEvent[]`. No scope checks are needed inside
+behavior functions—the filtering happens upstream in the projection layer.
 
-Projections guarantee:
+### Injection (validated writes)
 
-1. Filtering by scope at the database level
-2. Zod validation against the scope's schema
-3. Type narrowing to the scope's event union
+```typescript
+interface Injection<TEvent extends StorableEvent> {
+  readonly scope: Scope;
+  readonly append: (event: TEvent) => Effect.Effect<void, InjectionError>;
+  readonly appendBatch: (events: readonly TEvent[]) => Effect.Effect<void, InjectionError>;
+}
 
-Events that fail validation are filtered out with a warning.
+const makeInjection = <TEvent extends StorableEvent>(
+  scope: Scope,
+  schema: z.ZodType<TEvent>,
+  store: EventStoreService,
+): Injection<TEvent>;
+```
 
 ---
 
 ## Layer 4: Platform Service
 
-The platform service combines projection, behavior, and browser pool into what
-sockpuppets actually use. It's **generic over the platform definition's types**,
-including the platform-specific browser and contact types.
+Each platform exports a typed Context.Tag and an actions factory. The generic
+`makePlatformService` handles derivation; platforms provide their actions.
+
+### Platform Context Tags
+
+Each platform defines its own typed Context.Tag for type-safe access:
 
 ```typescript
-interface PlatformService<
-  TEvent extends StorableEvent,
-  TIntent extends BaseIntent,
-  TAnchor,
-  TThread extends BaseThreadView<TAnchor>,
-  TInbox extends BaseInboxView<unknown>,
-  TAccount extends BaseAccount,
-  TBrowser extends BaseBoundBrowser,
-  TContact extends BaseContact,
-> {
-  readonly scope: Scope;
-  readonly participantId: ParticipantId;
-  readonly account: TAccount;
+// plugins/linkedin/service.ts
 
-  // The world - all derived from one event stream
-  readonly inbox: Effect.Effect<TInbox>;
-  readonly thread: (id: ThreadId) => Effect.Effect<Option<TThread>>;
-  readonly browsers: Effect.Effect<readonly TBrowser[]>; // platform-specific browser type
-  readonly contact: (id: ParticipantId) => Effect.Effect<Option<TContact>>; // contact lookup
+// Type alias for the fully-typed service
+export type LinkedInService = PlatformService<
+  "linkedin",
+  "linkedin",
+  LinkedInActions,
+  LinkedInInbox,
+  LinkedInThread,
+  LinkedInBrowser,
+  LinkedInContact
+>;
 
-  // How I act - behavior owns browser selection
-  readonly execute: (
-    intent: TIntent,
-    options?: { preferConfigId?: BrowserConfigId },
-  ) => Effect.Effect<{ usedConfigId: BrowserConfigId }, ExecuteError>;
-}
+// Typed context tag - sockpuppets yield this for type-safe access
+export class LinkedInPlatform extends Context.Tag("linkedin/Platform")<
+  LinkedInPlatform,
+  LinkedInService
+>() {}
 ```
 
-### Implementation
+### Actions Factory
 
-The platform service delegates browser derivation, contact lookup, and browser
-selection entirely to the behavior. No hardcoded assumptions about auth, rate
-limits, or contact info structure.
+Each platform defines an actions factory that creates curried `PlatformMethod`
+implementations:
 
 ```typescript
-const makePlatformService = <
-  TScope extends Scope,
-  TEvent extends StorableEvent & { scope: TScope },
-  TIntent extends BaseIntent<TScope>,
-  TAnchor,
-  TThread extends BaseThreadView<TAnchor>,
-  TInbox extends BaseInboxView<unknown>,
-  TAccount extends BaseAccount,
-  TBrowser extends BaseBoundBrowser,
-  TContact extends BaseContact,
+// plugins/linkedin/actions.ts
+
+export interface LinkedInActions extends ActionsRecord {
+  readonly sendMessage: PlatformMethod<
+    [ThreadId, string],
+    MessageSentResult,
+    SendMessageError
+  >;
+  readonly syncInbox: PlatformMethod<[since?: string], SyncResult, SyncError>;
+}
+
+export const makeLinkedInActions = (
+  pool: BrowserPoolService,
+  account: LinkedInAccount,
+): LinkedInActions => ({
+  sendMessage: (options) => (threadId, content) =>
+    Effect.gen(function* () {
+      const configId = options?.preferConfigId ?? selectBrowser(account);
+      yield* pool.send(configId, { type: "sendMessage", threadId, content });
+      return { success: true };
+    }),
+
+  syncInbox: (options) => (since) =>
+    Effect.gen(function* () {
+      const configId = options?.preferConfigId ?? selectBrowser(account);
+      yield* pool.send(configId, { type: "syncInbox", since });
+      return { synced: true };
+    }),
+});
+```
+
+### Platform Layer Factory
+
+The `makePlatformLayer` function is generic over the context tag, maintaining
+full type safety:
+
+```typescript
+// runtime/sockpuppet/platform-runtime.ts
+
+export const makePlatformLayer = <
+  TTag extends Context.Tag<any, PlatformService<any, any, any, any, any, any, any>>,
+  TService extends Context.Tag.Service<TTag>,
 >(
-  platform: PlatformDefinition<
-    TScope,
-    TEvent,
-    TIntent,
-    TAnchor,
-    TThread,
-    TInbox,
-    TAccount,
-    TBrowser,
-    TContact
-  >,
-  account: TAccount,
-  projection: Projection<TEvent>,
-): Effect.Effect<
-  PlatformService<
-    TEvent,
-    TIntent,
-    TAnchor,
-    TThread,
-    TInbox,
-    TAccount,
-    TBrowser,
-    TContact
-  >,
-  never,
-  BrowserPool
-> =>
-  Effect.gen(function* () {
-    const pool = yield* BrowserPool;
-    const behavior = platform.behavior;
+  tag: TTag,
+  config: PlatformRuntimeConfig<...>,
+  actions: TService["actions"],
+): Layer.Layer<TTag> => {
+  const projection = makeProjection(config.platform.scope, config.platform.eventSchema, config.eventStore);
+  const browserPoolLayer = Layer.succeed(BrowserPool, config.browserPool);
 
-    const queryEvents = projection.query();
+  const serviceEffect = makePlatformService(config.platform, config.account, projection, actions);
 
-    // Get which browsers are currently running
-    const getRunningConfigIds = Effect.gen(function* () {
-      const results = yield* Effect.forEach(
-        account.browserBindings,
-        (binding) =>
-          Effect.gen(function* () {
-            const running = yield* pool.isRunning(binding.configId);
-            return running ? binding.configId : null;
-          }),
-      );
-      return new Set(
-        results.filter((id): id is BrowserConfigId => id !== null),
-      );
-    });
+  return Layer.effect(tag, serviceEffect).pipe(Layer.provide(browserPoolLayer));
+};
+```
 
-    // Behavior derives browsers with platform-specific status
-    const getBrowsers = Effect.gen(function* () {
-      const events = yield* queryEvents;
-      const runningIds = yield* getRunningConfigIds;
-      return behavior.deriveBrowsers(events, account, runningIds);
-    });
+### Usage in Sockpuppets
 
-    return {
-      scope: platform.scope,
-      participantId: account.id,
-      account,
+Sockpuppets use the platform-specific tag for type-safe access:
 
-      browsers: getBrowsers,
+```typescript
+const linkedInBot = Effect.gen(function* () {
+  // Type-safe: platform.actions has sendMessage, syncInbox with correct types
+  const platform = yield* LinkedInPlatform;
+  const journal = yield* Journal;
 
-      inbox: Effect.gen(function* () {
-        const events = yield* queryEvents;
-        return behavior.deriveInbox(events, account.id);
-      }),
+  // TypeScript knows platform.actions.sendMessage exists and its signature
+  yield* platform.actions.sendMessage()(threadId, "Hello!");
+});
+```
 
-      thread: (threadId) =>
-        Effect.gen(function* () {
-          const events = yield* queryEvents;
-          return Option.fromNullable(behavior.deriveThread(events, threadId));
-        }),
+### Creating a Platform Layer
 
-      contact: (participantId) =>
-        Effect.gen(function* () {
-          if (!behavior.deriveContact) {
-            return Option.none();
-          }
-          const events = yield* queryEvents;
-          return Option.fromNullable(
-            behavior.deriveContact(events, participantId),
-          );
-        }),
+```typescript
+// When running a sockpuppet
+const actions = makeLinkedInActions(browserPool, account);
 
-      // Behavior owns browser selection and execution
-      execute: (intent, options) =>
-        Effect.gen(function* () {
-          const browsers = yield* getBrowsers;
-          return yield* behavior.execute(
-            intent,
-            browsers,
-            options?.preferConfigId,
-          );
-        }),
-    };
-  });
+const platformLayer = makePlatformLayer(LinkedInPlatform, {
+  platform: linkedInPlatform,
+  account,
+  eventStore,
+  browserPool,
+}, actions);
+
+const journalLayer = makeJournalLayer({
+  participantId: account.id,
+  eventStore,
+});
+const layer = Layer.merge(platformLayer, journalLayer);
+
+await Effect.runPromise(Effect.provide(linkedInBot, layer));
 ```
 
 ### Journal
 
-The sockpuppet's memory. Writes directly to EventStore (journal entries don't
-come from bridges).
+Sockpuppet memory. Uses a single `"journal"` scope:
 
 ```typescript
 interface JournalEntry extends StorableEvent {
-  readonly scope: typeof JOURNAL_SCOPE;
+  readonly scope: Scope; // always "journal"
   readonly type: "Entry";
-  readonly participantId: ParticipantId;
+  readonly participantId: ParticipantId; // globally unique, e.g. "linkedin:abc123"
   readonly kind: string;
   readonly [key: string]: unknown;
 }
 
 interface JournalService {
-  readonly record: (
-    entry: { kind: string; [k: string]: unknown },
-  ) => Effect.Effect<void, JournalError>;
-  readonly entries: (
-    since?: string,
-  ) => Effect.Effect<readonly JournalEntry[], JournalError>;
+  readonly record: (entry: { kind: string; [k: string]: unknown }) => Effect.Effect<void, JournalError>;
+  readonly entries: (since?: string) => Effect.Effect<readonly JournalEntry[], JournalError>;
 }
+
 class Journal extends Context.Tag("Journal")<Journal, JournalService>() {}
 
-const makeJournalLive = (participantId: ParticipantId) =>
-  Layer.effect(
-    Journal,
-    Effect.gen(function* () {
-      const store = yield* EventStore;
-
-      return {
-        record: (entry) =>
-          store.append([
-            {
-              ...entry,
-              scope: JOURNAL_SCOPE,
-              type: "Entry",
-              eventId: EventId(crypto.randomUUID()),
-              timestamp: new Date().toISOString(),
-              participantId,
-            },
-          ]),
-
-        entries: (since) =>
-          Effect.gen(function* () {
-            const all = yield* store.query({
-              tag: "byScope",
-              scope: JOURNAL_SCOPE,
-              since,
-            });
-            return all.filter(
-              (e): e is JournalEntry =>
-                e.scope === JOURNAL_SCOPE &&
-                (e as JournalEntry).participantId === participantId,
-            );
-          }),
-      };
-    }),
-  );
+const makeJournal = (
+  participantId: ParticipantId,
+): Effect.Effect<JournalService, never, Injection<JournalEntry>>;
 ```
 
-**Why a separate journal?** The global event log records what happened in the
-world. The journal records what the _sockpuppet_ decided and did. On restart,
-the sockpuppet folds its journal to reconstruct its own state.
+**Why this works:** ParticipantId is globally unique (`"linkedin:abc123"`).
+Journal queries filter by participantId alone—no platform field needed. Entries
+from different platforms never collide.
 
 ---
 
 ## Layer 5: Sockpuppet
 
-The human-like agent. Sees only its platform service and journal.
+The human-like agent. Sees only Platform and Journal.
 
 ```typescript
-const myBot = Effect.gen(function* () {
-  const platform = yield* Platform;
+const linkedInBot = Effect.gen(function* () {
+  const platform = yield* LinkedInPlatform;
   const journal = yield* Journal;
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1443,26 +1260,22 @@ const myBot = Effect.gen(function* () {
   );
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Check what devices are available (browser status is platform-specific)
+  // Check available browsers
   // ─────────────────────────────────────────────────────────────────────────
-  const browsers = yield* platform.browsers; // LinkedInBrowser[]
-
-  // Platform-specific status fields (e.g., authStatus, rateLimitedUntil)
-  // are attached by the behavior's deriveBrowsers function
+  const browsers = yield* platform.browsers;
   const usable = browsers.filter((b) =>
     b.isRunning && b.authStatus === "authenticated"
   );
 
   if (usable.length === 0) {
-    yield* journal.record({ kind: "waiting", reason: "no_browsers_available" });
+    yield* journal.record({ kind: "waiting", reason: "no_browsers" });
     yield* Effect.sleep(Duration.minutes(5));
     return;
   }
 
-  // Sockpuppet can use browser bindings metadata for its own decisions
+  // Pick browser based on time of day
   const mobile = usable.find((b) => b.metadata.deviceType === "mobile");
   const desktop = usable.find((b) => b.metadata.deviceType === "desktop");
-
   const hour = new Date().getHours();
   const preferred = hour >= 7 && hour < 18
     ? (mobile ?? desktop)
@@ -1482,20 +1295,18 @@ const myBot = Effect.gen(function* () {
     const lastMsg = thread.value.messages.at(-1);
     if (!lastMsg || lastMsg.senderId === platform.participantId) continue;
 
-    // Look up who sent the message
+    // Look up sender
     const sender = yield* platform.contact(lastMsg.senderId);
     if (Option.isSome(sender)) {
       yield* Effect.log(`Message from: ${sender.value.name ?? "unknown"}`);
     }
 
-    yield* platform.execute(
-      {
-        scope: platform.scope,
-        type: "SendMessage",
-        threadId: ThreadId(threadId),
-        content: "Thanks!",
-      },
-      { preferConfigId: preferred?.configId },
+    // Send reply with browser preference
+    yield* platform.actions.sendMessage({
+      preferConfigId: preferred?.configId,
+    })(
+      ThreadId(threadId),
+      "Thanks for reaching out!",
     );
 
     yield* journal.record({ kind: "replied", threadId });
@@ -1508,368 +1319,125 @@ const myBot = Effect.gen(function* () {
 
 ---
 
-## Layer Composition
-
-```typescript
-// ─────────────────────────────────────────────────────────────────────────────
-// Collect schemas from all platform definitions (static imports)
-// ─────────────────────────────────────────────────────────────────────────────
-import { linkedInPlatform } from "@plugins/linkedin/mod.ts";
-import { xPlatform } from "@plugins/x/mod.ts";
-import { JournalEntrySchema, JOURNAL_SCOPE } from "./journal/schemas.ts";
-
-const PLATFORMS: readonly AnyPlatform[] = [linkedInPlatform, xPlatform];
-
-const SCHEMAS: ReadonlyMap<Scope, z.ZodType<StorableEvent>> = new Map([
-  ...PLATFORMS.map((p) => [p.scope, p.eventSchema] as const),
-  [JOURNAL_SCOPE, JournalEntrySchema],
-]);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Layer 0: Storage (core infrastructure)
-// ─────────────────────────────────────────────────────────────────────────────
-const StorageLive = Layer.mergeAll(
-  DatabaseLive,
-  EventStoreLive.pipe(Layer.provide(DatabaseLive)),
-  ConfigStoreLive.pipe(Layer.provide(DatabaseLive)),
-);
-
-// Platform-specific account stores (each platform defines its own)
-const LinkedInAccountStoreLive = /* ... */;
-const XAccountStoreLive = /* ... */;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Layer 1: Browser Backend (provides BrowserPool + ExtensionStore)
-// ─────────────────────────────────────────────────────────────────────────────
-const backend = await Effect.runPromise(
-  makeBrowserbaseBackend(process.env.BROWSERBASE_API_KEY!).pipe(
-    Effect.provide(ConfigStoreLive),
-  ),
-);
-const BrowserBackendLive = Layer.mergeAll(
-  Layer.succeed(BrowserPool, backend.pool),
-  Layer.succeed(ExtensionStore, backend.extensions),
-);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Layer 2: Event Flow (schemas from providers)
-// ─────────────────────────────────────────────────────────────────────────────
-const EventFlowLive = makeEventIngestion(SCHEMAS).pipe(
-  Layer.provide(BrowserBackendLive),
-  Layer.provide(StorageLive),
-);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Compose infrastructure
-// ─────────────────────────────────────────────────────────────────────────────
-const InfrastructureLive = Layer.mergeAll(
-  StorageLive,
-  BrowserBackendLive,
-  EventFlowLive,
-  // Platform-specific account stores
-  LinkedInAccountStoreLive,
-  XAccountStoreLive,
-);
-```
-
-**Schema flow**: Schemas are static values defined by providers, imported at the
-top level, and passed to EventIngestion for write validation. Projections use
-the same schemas for read validation. No circular dependencies—schemas are just
-values.
-
----
-
-## Main Entry Point
-
-Each provider has its own account store. The main entry point loads accounts
-from each provider and spawns sockpuppets accordingly.
-
-```typescript
-const main = Effect.gen(function* () {
-  // Each provider loads its own accounts
-  const linkedInAccounts = yield* LinkedInAccountStore.pipe(
-    Effect.flatMap((store) => store.list()),
-  );
-  const xAccounts = yield* XAccountStore.pipe(
-    Effect.flatMap((store) => store.list()),
-  );
-
-  yield* Effect.log(`Found ${linkedInAccounts.length} LinkedIn accounts`);
-  yield* Effect.log(`Found ${xAccounts.length} X accounts`);
-
-  // Spawn LinkedIn sockpuppets
-  yield* Effect.forEach(
-    linkedInAccounts,
-    (account) => spawnSockpuppet(linkedInPlatform, account),
-    { concurrency: "unbounded" },
-  );
-
-  // Spawn X sockpuppets
-  yield* Effect.forEach(
-    xAccounts,
-    (account) => spawnSockpuppet(xPlatform, account),
-    { concurrency: "unbounded" },
-  );
-
-  yield* Effect.log("All sockpuppets started");
-  yield* Effect.never;
-});
-
-// Generic sockpuppet spawner
-const spawnSockpuppet = <
-  TScope extends Scope,
-  TEvent extends StorableEvent & { scope: TScope },
-  TIntent extends BaseIntent<TScope>,
-  TAnchor,
-  TThread extends BaseThreadView<TAnchor>,
-  TInbox extends BaseInboxView<unknown>,
-  TAccount extends BaseAccount,
-  TBrowser extends BaseBoundBrowser,
-  TContact extends BaseContact,
->(
-  platform: PlatformDefinition<
-    TScope,
-    TEvent,
-    TIntent,
-    TAnchor,
-    TThread,
-    TInbox,
-    TAccount,
-    TBrowser,
-    TContact
-  >,
-  account: TAccount,
-) =>
-  Effect.gen(function* () {
-    yield* Effect.log(`Starting sockpuppet`, {
-      scope: platform.scope,
-      participantId: account.id,
-    });
-
-    // Create projection for this scope
-    const projection = yield* makeProjection(
-      platform.scope,
-      platform.eventSchema,
-    );
-
-    // Create platform service
-    const platformService = yield* makePlatformService(
-      platform,
-      account,
-      projection,
-    );
-
-    // Create layers
-    const PlatformLive = Layer.succeed(Platform, platformService);
-    const JournalLive = makeJournalLive(account.id);
-    const layers = Layer.merge(PlatformLive, JournalLive);
-
-    // Run sockpuppet
-    yield* myBot.pipe(
-      Effect.forever,
-      Effect.retry(Schedule.exponential("1 second").pipe(Schedule.jittered)),
-      Effect.catchAll((e) =>
-        Effect.logError("Sockpuppet crashed", {
-          participantId: account.id,
-          error: e,
-        })
-      ),
-      Effect.provide(layers),
-      Effect.forkDaemon,
-    );
-  });
-
-// Run
-Effect.runPromise(
-  main.pipe(Effect.provide(InfrastructureLive)),
-).catch(console.error);
-```
-
----
-
-## Information Flow
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  Extension observes something (auth, message, rate limit, anything)     │
-│       │                                                                 │
-│       │  { scope: "linkedin", type: "AuthObserved", ... }               │
-│       │  { scope: "linkedin", type: "AnchorMessageObserved", ... }      │
-│       │  { scope: "x", type: "RateLimitObserved", ... }                 │
-│       ↓                                                                 │
-│  BrowserPool receives, tags with configId                               │
-│       ↓                                                                 │
-│  EventIngestion looks up schema by scope, validates, stores             │
-│       ↓                                                                 │
-│  EventStore                                                             │
-│       ↓                                                                 │
-│  Projection filters by scope, validates, returns typed events           │
-│       ↓                                                                 │
-│  Platform service uses behavior to derive EVERYTHING:                   │
-│       ├── behavior.deriveInbox(events)      → inbox view                │
-│       ├── behavior.deriveThread(events)     → thread view               │
-│       ├── behavior.deriveBrowsers(events)   → browser status            │
-│       └── behavior.deriveContact(events)    → contact info              │
-│       ↓                                                                 │
-│  behavior.execute() owns browser selection and execution                │
-│       ↓                                                                 │
-│  Sockpuppet sees unified view                                           │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
----
+# Part 4: Reference
 
 ## Module Structure
 
 ```
-# Project root
-plugins/                         # Platform plugins (separate package)
+plugins/                         # Platform plugins
 ├── linkedin/
-│   ├── mod.ts                   # linkedInPlatform export
-│   ├── schemas.ts               # LinkedInEventSchema, LinkedInIntentSchema
-│   ├── behavior.ts              # linkedInBehavior implementation
-│   ├── views.ts                 # LinkedInInbox, LinkedInThread, LinkedInAnchor
-│   ├── browser.ts               # LinkedInBrowser (extends BaseBoundBrowser)
-│   ├── contact.ts               # LinkedInContact (extends BaseContact)
-│   └── account.ts               # LinkedInAccount, LinkedInAccountStore
-└── x/
-    ├── mod.ts                   # xPlatform export
-    ├── schemas.ts               # XEventSchema, XIntentSchema
-    ├── behavior.ts              # xBehavior implementation
-    ├── views.ts                 # XInbox, XThread, XAnchor
-    ├── browser.ts               # XBrowser (extends BaseBoundBrowser)
-    ├── contact.ts               # XContact (extends BaseContact)
-    └── account.ts               # XAccount, XAccountStore
+│   ├── mod.ts                   # Platform definition export
+│   ├── schemas.ts               # Event schemas
+│   ├── behavior.ts              # Pure derivation functions
+│   ├── actions.ts               # Platform actions (sendMessage, etc.)
+│   ├── contact.ts               # LinkedInContact type
+│   └── account.ts               # LinkedInAccount, store
+├── x/
+│   └── ...                      # Same structure
+└── reddit/
+    └── ...                      # Same structure
 
 backend/server/src/
-├── core/                        # Core utilities
-│   ├── mod.ts                   # Barrel exports
-│   ├── branded.ts               # Brand<T,B>, all branded type constructors
-│   └── hashing.ts               # Deterministic ID generation
-│
-├── events/                      # Event definitions
-│   ├── mod.ts                   # StorableEvent, CorrelatedEvent schemas
-│   └── templates/               # Base schemas for platforms to extend
-│       ├── mod.ts
-│       ├── anchor-message.ts    # AnchorMessageObservedBase
-│       ├── reply-message.ts     # ReplyMessageObservedBase
-│       ├── auth.ts              # AuthObservedBase
-│       └── rate-limit.ts        # RateLimitObservedBase
-│
-├── intents/                     # Intent definitions
-│   ├── mod.ts                   # BaseIntent
-│   └── templates/               # Base schemas for platforms to extend
-│       ├── mod.ts
-│       ├── send-message.ts      # SendMessageBase
-│       └── sync.ts              # SyncConversationsBase
-│
-├── views/                       # View type definitions
-│   ├── mod.ts                   # Barrel exports
-│   ├── inbox.ts                 # BaseInboxView<TThreadSummary>
-│   ├── thread.ts                # BaseThreadView<TAnchor>, MessageView, Participant
-│   ├── browser.ts               # BaseBoundBrowser (platforms extend this)
-│   └── contact.ts               # BaseContact (platforms extend this)
-│
-├── store/                       # Storage layer (core infrastructure)
-│   ├── mod.ts                   # EventStore, ConfigStore interfaces
-│   ├── event-store.ts           # EventStoreService, EventStoreLive
-│   ├── config-store.ts          # ConfigStoreService, ConfigStoreLive
-│   └── database.ts              # DatabaseService, DatabaseLive
-│
-├── backend/                     # Browser backend (bundles pool + extensions)
-│   ├── mod.ts                   # BrowserBackend, BrowserPoolService, ExtensionStoreService
-│   ├── types.ts                 # BridgeEvent, BridgeError, ExtensionMeta
-│   ├── browserbase/             # Browserbase implementation
-│   │   ├── mod.ts               # makeBrowserbaseBackend
-│   │   ├── pool.ts              # Browserbase pool implementation
-│   │   └── extensions.ts        # Browserbase extension store
-│   └── local/                   # Local Playwright implementation (LEAVE BLANK FOR NOW)
-│       ├── mod.ts               # makeLocalBackend
-│       ├── pool.ts              # Local pool implementation
-│       └── extensions.ts        # Filesystem-based extension store
-│
-├── routing/                     # Event routing
-│   ├── mod.ts                   # Barrel exports
-│   └── router.ts                # EventIngestionService, makeEventIngestion
-│
-├── projections/                 # Typed store access
-│   ├── mod.ts                   # Barrel exports
-│   └── projection.ts            # Projection<TEvent>, makeProjection
-│
-├── platforms/                   # Platform service & core types
-│   ├── mod.ts                   # PlatformDefinition, AnyPlatform, PlatformBehavior
-│   └── service.ts               # PlatformService, makePlatformService
-│
-├── journal/                     # Sockpuppet memory
-│   ├── mod.ts                   # Barrel exports
-│   ├── schemas.ts               # JournalEntrySchema, JOURNAL_SCOPE
-│   └── service.ts               # JournalService, makeJournalLive
-│
+├── core/                        # Branded types, utilities
+├── events/                      # StorableEvent, CorrelatedEvent, templates
+├── views/                       # Base view types (inbox, thread, contact, browser)
+├── store/                       # EventStore, ConfigStore, Database
+├── backend/                     # BrowserBackend, BrowserPool, ExtensionStore
+├── routing/                     # EventIngestion
+├── projections/                 # Projection, Injection
+├── platforms/                   # PlatformDefinition, PlatformService, PlatformBehavior
+├── journal/                     # Journal service
 └── main.ts                      # Entry point, layer composition
+
+scripts/                         # CLI and TUI scripts
+├── lib/
+│   ├── cli/                     # Logger, env, shell utilities
+│   ├── tui/                     # Ink components, hooks
+│   └── platforms/               # Platform store registry
+└── ...                          # Individual scripts
 ```
 
 ---
 
 ## Dependency Matrix
 
-| Layer | Service                | Depends On              | Responsibility                            |
-| ----- | ---------------------- | ----------------------- | ----------------------------------------- |
-| 0     | `Database`             | —                       | Raw SQL access                            |
-| 0     | `EventStore`           | Database                | Append-only event log                     |
-| 0     | `ConfigStore`          | Database                | Browser configs (includes extensionIds)   |
-| —     | `LinkedInAccountStore` | Database                | LinkedIn accounts (provider-specific)     |
-| —     | `XAccountStore`        | Database                | X accounts (provider-specific)            |
-| 1     | `BrowserBackend`       | ConfigStore             | Bundles BrowserPool + ExtensionStore      |
-| 1     | `BrowserPool`          | (via backend)           | Browser lifecycle, commands, event stream |
-| 1     | `ExtensionStore`       | (via backend)           | Extension metadata (admin/setup)          |
-| 2     | `EventIngestion`       | BrowserPool, EventStore | Consumes stream, validates, stores        |
-| 3     | `Projection`           | EventStore              | Type-safe filtered view per scope         |
-| 4     | `Platform`             | Projection, BrowserPool | What sockpuppets use                      |
-| 4     | `Journal`              | EventStore              | Sockpuppet decision log                   |
-
-Platform-specific account stores are not part of the core layer hierarchy—each
-platform defines and manages its own.
+| Layer | Service          | Depends On              | Responsibility                       |
+| ----- | ---------------- | ----------------------- | ------------------------------------ |
+| 0     | `Database`       | —                       | Raw SQL access                       |
+| 0     | `EventStore`     | Database                | Append-only event log                |
+| 0     | `ConfigStore`    | Database                | Browser configs                      |
+| 1     | `BrowserBackend` | ConfigStore             | Bundles BrowserPool + ExtensionStore |
+| 2     | `EventIngestion` | BrowserPool, Injection  | Consumes stream, enriches, stores    |
+| 3     | `Projection`     | EventStore              | Type-safe filtered reads             |
+| 3     | `Injection`      | EventStore              | Type-safe validated writes           |
+| 4     | `Platform`       | Projection, BrowserPool | Derivation + actions for sockpuppets |
+| 4     | `Journal`        | Injection               | Sockpuppet decision log              |
+| 5     | `Sockpuppet`     | Platform, Journal       | Human-like agent                     |
 
 ---
 
-## Key Design Points
+## Key Design Decisions
 
-1. **One flow**: Events flow from extension to sockpuppet through one path.
-   Auth, messages, rate limits—all platform-scoped, all the same pipe.
+### Why `Scope` is a Branded String
 
-2. **Platform-agnostic core**: The runtime knows about `PlatformDefinition`,
-   `PlatformBehavior`, `Projection`. It doesn't know about LinkedIn or X.
+Extensibility. New platforms can be added without modifying core types. A union
+would require core changes for each platform.
 
-3. **Platform definitions bundle schemas + behavior**: Each platform defines its
-   types (events, intents, anchor, views, contacts) and behavior (derivation,
-   execution).
+### Why Projections and Injections Exist
 
-4. **Platform-specific account storage**: Each platform defines its own account
-   type and store. LinkedIn accounts have different fields than X accounts. The
-   core doesn't impose a monolithic account type.
+Type safety at boundaries. Platform services get typed events from Projection—
+guaranteed. Writers go through Injection—validated. No path to read wrong events
+or write malformed ones.
 
-5. **Projections for type safety**: Platform service gets typed events from the
-   projection—guaranteed. No manual filtering or validation.
+Projections also handle scope filtering at the database level (via
+`WHERE scope = 'linkedin'`). This means behaviors receive pre-filtered events
+and never need to check `event.scope` manually. The filtering responsibility
+lives in one place (projection layer), not scattered across behavior functions.
 
-6. **Templates for consistency**: Event and intent templates ensure platforms
-   follow common patterns while allowing platform-specific extensions.
+### Why Browser Bindings Are on Accounts
 
-7. **Message graph for flexibility**: `predecessorId` links form a graph; each
-   behavior walks it according to platform-specific threading rules.
+An account can be logged into multiple browsers (mobile, desktop). The
+sockpuppet decides which to use based on its own logic. Browser bindings connect
+accounts to their available browsers.
 
-8. **Canonical IDs for restartability**: Deterministic hashing means the same
-   message observed twice produces the same ID—safe to restart anytime.
+### Why Behaviors Are Pure Functions
 
-9. **Active services own lifecycle**: EventIngestion starts consuming when its
-   layer initializes. No manual daemon forking in main.
+Behaviors have no state, no side effects. They're pure derivation over event
+streams. Testable, predictable, easy to reason about.
 
-10. **Sockpuppets are isolated**: They see `Platform` and `Journal`. Everything
-    else is hidden.
+### Why ParticipantId Is Platform-Prefixed
 
-11. **Unified ParticipantId**: One type for all users—owned accounts and external
-    contacts. Context distinguishes them, not separate branded types.
+The format `"{platform}:{id}"` makes IDs globally unique and self-describing.
+Journal entries filter by participantId alone—no extra platform field. IDs from
+different platforms never collide (`"linkedin:123"` vs `"x:123"`).
 
-12. **Contact derivation**: `deriveContact` folds events to build a picture of
-    each participant. Sockpuppets can look up who they're talking to.
+### Why Events Have Both `eventId` and `correlationId`
+
+- `eventId`: Deduplication key, deterministic for messages
+- `correlationId`: Tracing, links related events
+
+Different purposes, must not be confused.
+
+### Why Actions Are Curried
+
+The pattern `(options?) => (...args) => Effect` ensures type-level enforcement
+that all actions accept `ExecuteOptions`. No forgetting the parameter.
+
+### Why Actions Live in `actions` Property
+
+The constraint `TActions extends ActionsRecord` ensures all properties are valid
+`PlatformMethod` types. TypeScript enforces the shape at definition time.
+
+### Why TScope and TIdentity Are Separate
+
+`PlatformBehavior` has two scope parameters:
+
+- **TScope**: The `scope` field on events (e.g., `"linkedin"`, `"linkedindojo"`)
+- **TIdentity**: The scope for `ParticipantId` types (e.g., `"linkedin"`)
+
+For production platforms, these are identical (`"linkedin"` / `"linkedin"`). For
+dojo (training environment), they differ: events use `"linkedindojo"` scope but
+share `"linkedin"` identity for ParticipantIds.
+
+This separation allows dojo to reuse the same participant identity system while
+keeping its events distinct in the store.

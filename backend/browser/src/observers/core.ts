@@ -1,44 +1,10 @@
 // packages/browser/src/observers/core.ts
 
-declare global {
-  interface Window {
-    __bridgeEvent: (message: BridgeMessage) => Promise<void>;
-    __registerCommand: <TReq, TRes>(
-      command: string,
-      handler: (payload: TReq) => Promise<CommandResult<TRes>>,
-    ) => void;
-    __emitObservation: (type: string, payload: unknown) => void;
-    __observerContext: ObserverContext;
-  }
-}
-
-type BridgeMessage = {
-  v: 1;
-  type: "request" | "response" | "event";
-  requestId?: string;
-  correlationId?: string;
-  payload?: unknown;
-  error?: {
-    code: string;
-    message: string;
-    details?: unknown;
-  };
-};
-
-type CommandResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; error: { code: string; message: string; details?: unknown } };
-
-// Observer Context
-
-export interface ObserverContext {
-  browserId: string;
-  tabId: string;
-}
+import type { BridgeMessage, ObserverContext } from "../core/types.ts";
 
 // Initialize Observer Context (set by master when injecting)
 window.__observerContext = {
-  browserId: "unknown",
+  configId: "unknown",
   tabId: "unknown",
 };
 
@@ -55,7 +21,7 @@ window.__emitObservation = (type: string, payload: unknown): void => {
     correlationId: crypto.randomUUID(),
     payload: {
       type,
-      browserId: window.__observerContext.browserId,
+      configId: window.__observerContext.configId,
       tabId: window.__observerContext.tabId,
       timestamp: new Date().toISOString(),
       ...(payload as object),
@@ -74,7 +40,7 @@ export interface AuthObserveParams {
 }
 
 export interface AuthObserveResult {
-  accountId: string;
+  participantId: string;
   canRead: boolean;
   canWrite: boolean;
   issue?: string;

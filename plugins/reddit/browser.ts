@@ -3,9 +3,20 @@
 
 import type { BaseBoundBrowser } from "@bernays/server/views";
 
-// Auth Status
+// Reddit Auth Status
 
-export type RedditAuthStatus = "authenticated" | "expired" | "unknown";
+/**
+ * Reddit-specific authentication status.
+ * - "authenticated": Valid Reddit session
+ * - "shadowbanned": Account exists but content hidden
+ * - "expired": Session expired or logged out
+ * - "unknown": Initial state before auth check
+ */
+export type RedditAuthStatus =
+  | "authenticated"
+  | "shadowbanned"
+  | "expired"
+  | "unknown";
 
 // Reddit Browser
 

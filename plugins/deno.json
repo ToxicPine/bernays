@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "exports": {
     "./linkedin": "./linkedin/mod.ts",
+    "./linkedindojo": "./linkedindojo/mod.ts",
     "./x": "./x/mod.ts"
   },
   "imports": {

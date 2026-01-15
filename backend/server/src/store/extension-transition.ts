@@ -31,7 +31,11 @@ export interface TransitionResult {
 export const transitionExtension = (
   fromId: ExtensionId,
   toId: ExtensionId,
-): Effect.Effect<TransitionResult, ConfigStoreError, ConfigStore | ExtensionStore> =>
+): Effect.Effect<
+  TransitionResult,
+  ConfigStoreError,
+  ConfigStore | ExtensionStore
+> =>
   Effect.gen(function* () {
     const configStore = yield* ConfigStore;
     const extensionStore = yield* ExtensionStore;

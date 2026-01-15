@@ -3,7 +3,6 @@
 
 // Branded Types
 export {
-  AccountId,
   type Brand,
   BrowserConfigId,
   CanonicalId,
@@ -11,8 +10,13 @@ export {
   CorrelationId,
   EventId,
   ExtensionId,
+  getParticipantPlatformId,
+  getParticipantScope,
   IntentId,
   isUUID,
+  ParticipantId,
+  ParticipantIdFromString,
+  participantIdSchema,
   Scope,
   ThreadId,
 } from "./branded.ts";
@@ -52,3 +56,11 @@ export {
   type Identifiable,
   type StoreService,
 } from "./store-factory.ts";
+
+// Platform Account Store Factory
+export {
+  type AccountStoreService,
+  createPlatformAccountStore,
+  type PlatformAccountStoreConfig,
+  type PostgresAccountStoreOptions,
+} from "./platform-account-store.ts";

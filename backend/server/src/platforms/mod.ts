@@ -4,8 +4,8 @@
 import { Effect } from "effect";
 import { z } from "@zod/zod";
 import type {
-  AccountId,
   BrowserConfigId,
+  ParticipantId,
   Scope,
   ThreadId,
 } from "$/core/branded.ts";
@@ -13,25 +13,13 @@ import type { StorableEvent } from "$/store/mod.ts";
 import type { BaseInboxView } from "$/views/inbox.ts";
 import type { BaseThreadView } from "$/views/thread.ts";
 import type { BaseAccount, BaseBoundBrowser } from "$/views/browser.ts";
-import type { BrowserPool } from "$/backend/mod.ts";
+import type { BaseContact } from "$/views/contact.ts";
 
-export {
-  makePlatformService,
-  Platform,
-  type PlatformService,
-} from "./service.ts";
+export { makePlatformService, type PlatformService } from "./service.ts";
 
-// Base Intent
-
-/**
- * Base intent shape - all platform intents must satisfy this.
- */
-export interface BaseIntent<TScope extends Scope = Scope> {
-  readonly scope: TScope;
-  readonly type: string;
-}
-
+// =============================================================================
 // Execute Error
+// =============================================================================
 
 export type ExecuteErrorCode = string & { readonly _brand: "ExecuteErrorCode" };
 
@@ -52,32 +40,78 @@ export const executeError = (
   cause?: unknown,
 ): ExecuteError => ({ _tag: "ExecuteError", code, message, cause });
 
-// Platform Behavior
+// =============================================================================
+// Platform Method (Curried Effects)
+// =============================================================================
 
 /**
- * PlatformBehavior encapsulates pure logic for a platform.
- * It operates on types provided by the PlatformDefinition.
+ * Options for executing a platform action.
+ * Allows specifying which browser to prefer.
+ */
+export interface ExecuteOptions {
+  readonly preferConfigId?: BrowserConfigId;
+}
+
+/**
+ * All platform effects follow a curried pattern for consistent browser selection.
  *
- * The behavior owns:
- * - Derivation: building views from events
- * - Browser selection: deciding which browser to use
- * - Execution: sending intents to browsers
+ * Usage:
+ * ```typescript
+ * // Default browser selection
+ * yield* platform.actions.sendMessage()(threadId, content);
  *
- * Different platforms have different semantics for auth, rate limits,
- * threading, etc. The behavior encapsulates this so sockpuppets just
- * see generic views.
+ * // Explicit browser preference
+ * yield* platform.actions.sendMessage({ preferConfigId: mobileId })(threadId, content);
+ * ```
+ */
+export type PlatformMethod<
+  TArgs extends readonly unknown[],
+  TResult,
+  TError,
+> = (
+  options?: ExecuteOptions,
+) => (...args: TArgs) => Effect.Effect<TResult, TError>;
+
+/**
+ * Constraint for platform action records.
+ * Actions are objects where each property is a PlatformMethod.
+ *
+ * Note: We use `object` instead of `Record<string, PlatformMethod<...>>` because
+ * the index signature in Record causes type conflicts with specific action interfaces.
+ * The constraint is enforced structurally when actions are used.
+ */
+// deno-lint-ignore ban-types
+export type ActionsRecord = object;
+
+// =============================================================================
+// Platform Behavior (Pure Derivation)
+// =============================================================================
+
+/**
+ * PlatformBehavior encapsulates pure derivation logic for a platform.
+ *
+ * Two scope parameters enable the "dojo" pattern:
+ * - TScope: The `scope` field on events (e.g., "linkedin" or "linkedindojo")
+ * - TIdentity: The identity namespace for ParticipantIds (e.g., "linkedin")
+ *
+ * For production platforms, these are the same.
+ * For dojo, they differ (events scoped to dojo, but identity shared with production).
+ *
+ * The behavior only does pure derivation. Actions live in the service layer.
  */
 export interface PlatformBehavior<
-  TScope extends Scope,
+  TScope extends string,
+  TIdentity extends string,
   TEvent extends StorableEvent & { readonly scope: TScope },
-  TIntent extends BaseIntent<TScope>,
   TAnchor,
   TThread extends BaseThreadView<TAnchor>,
   TInbox extends BaseInboxView<unknown>,
-  TAccount extends BaseAccount,
+  TAccount extends BaseAccount<TIdentity>,
   TBrowser extends BaseBoundBrowser = BaseBoundBrowser,
+  TContact extends BaseContact<TIdentity> = BaseContact<TIdentity>,
 > {
   readonly scope: TScope;
+  readonly identity: TIdentity;
 
   // ─────────────────────────────────────────────────────────────────────────
   // Derivation — fold events into views (pure functions)
@@ -89,7 +123,7 @@ export interface PlatformBehavior<
    */
   readonly deriveInbox: (
     events: readonly TEvent[],
-    accountId: AccountId,
+    participantId: ParticipantId<TIdentity>,
   ) => TInbox;
 
   /**
@@ -115,89 +149,87 @@ export interface PlatformBehavior<
     runningConfigIds: ReadonlySet<BrowserConfigId>,
   ) => readonly TBrowser[];
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Execution — run intents via browser (behavior owns browser selection)
-  // ─────────────────────────────────────────────────────────────────────────
-
   /**
-   * Execute an intent using one of the available browsers.
-   * The behavior owns browser selection logic (based on auth, rate limits, etc.)
+   * Derive contact info from events for a specific participant.
+   * Optional - not all platforms have rich contact info.
    *
-   * @param intent - The intent to execute
-   * @param browsers - Available browsers with platform-specific status
-   * @param preferConfigId - Optional preferred browser config ID
-   * @returns Effect that yields the used browser config ID
+   * @param events - All events for this scope
+   * @param participantId - The participant to look up
+   * @returns Contact info or undefined if not found
    */
-  readonly execute: (
-    intent: TIntent,
-    browsers: readonly TBrowser[],
-    preferConfigId?: BrowserConfigId,
-  ) => Effect.Effect<
-    { readonly usedConfigId: BrowserConfigId },
-    ExecuteError,
-    BrowserPool
-  >;
+  readonly deriveContact?: (
+    events: readonly TEvent[],
+    participantId: ParticipantId<TIdentity>,
+  ) => TContact | undefined;
 }
 
-// Platform Definition
+// =============================================================================
+// Platform Definition (Schema + Behavior)
+// =============================================================================
 
 /**
  * PlatformDefinition is the registration unit for a platform.
- * It bundles:
- * - Schemas: the contract (what events/intents look like)
- * - Behavior: how to derive views, select browsers, execute intents
+ * It bundles schemas and behavior only - no actions.
  *
- * Type parameters enforce compile-time safety: you cannot register
- * a schema containing events with the wrong scope literal.
+ * Actions are created in the service layer (makeXxxService factories).
+ *
+ * Type parameters:
+ * - TScope: Event scope (e.g., "linkedin", "linkedindojo")
+ * - TIdentity: Participant identity namespace (e.g., "linkedin")
  */
 export interface PlatformDefinition<
-  TScope extends Scope,
+  TScope extends string,
+  TIdentity extends string,
   TEvent extends StorableEvent & { readonly scope: TScope },
-  TIntent extends BaseIntent<TScope>,
   TAnchor,
   TThread extends BaseThreadView<TAnchor>,
   TInbox extends BaseInboxView<unknown>,
-  TAccount extends BaseAccount,
+  TAccount extends BaseAccount<TIdentity>,
   TBrowser extends BaseBoundBrowser = BaseBoundBrowser,
+  TContact extends BaseContact<TIdentity> = BaseContact<TIdentity>,
 > {
   readonly scope: TScope;
+  readonly identity: TIdentity;
 
-  // Schemas — the contract for this scope
   readonly eventSchema: z.ZodType<TEvent>;
-  readonly intentSchema: z.ZodType<TIntent>;
   readonly anchorSchema: z.ZodType<TAnchor>;
 
-  // Behavior — how to derive views, select browsers, and execute intents
   readonly behavior: PlatformBehavior<
     TScope,
+    TIdentity,
     TEvent,
-    TIntent,
     TAnchor,
     TThread,
     TInbox,
     TAccount,
-    TBrowser
+    TBrowser,
+    TContact
   >;
 }
 
+// =============================================================================
 // Type-Erased Platform
+// =============================================================================
 
 /**
  * Type-erased platform definition for schema collection.
  * Used when you need to work with platforms without knowing their specific types.
  */
 export type AnyPlatform = PlatformDefinition<
-  Scope,
-  StorableEvent & { readonly scope: Scope },
-  BaseIntent,
+  string,
+  string,
+  StorableEvent & { readonly scope: string },
   unknown,
   BaseThreadView<unknown>,
   BaseInboxView<unknown>,
-  BaseAccount,
-  BaseBoundBrowser
+  BaseAccount<string>,
+  BaseBoundBrowser,
+  BaseContact<string>
 >;
 
+// =============================================================================
 // Platform Registry
+// =============================================================================
 
 /**
  * Collects platform definitions and provides schema lookup.
@@ -207,7 +239,6 @@ export interface PlatformRegistry {
   readonly getEventSchema: (
     scope: Scope,
   ) => z.ZodType<StorableEvent> | undefined;
-  readonly getIntentSchema: (scope: Scope) => z.ZodType<BaseIntent> | undefined;
   readonly get: (scope: Scope) => AnyPlatform | undefined;
 }
 
@@ -219,7 +250,6 @@ export const createPlatformRegistry = (
   return {
     platforms,
     getEventSchema: (scope) => byScope.get(scope)?.eventSchema,
-    getIntentSchema: (scope) => byScope.get(scope)?.intentSchema,
     get: (scope) => byScope.get(scope),
   };
 };

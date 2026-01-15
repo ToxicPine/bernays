@@ -3,9 +3,20 @@
 
 import type { BaseBoundBrowser } from "@bernays/server/views";
 
-// Auth Status
+// X Auth Status
 
-export type XAuthStatus = "authenticated" | "expired" | "unknown";
+/**
+ * X-specific authentication status.
+ * - "authenticated": Valid X session with full access
+ * - "restricted": Authenticated but with limited functionality
+ * - "expired": Session expired or logged out
+ * - "unknown": Initial state before auth check
+ */
+export type XAuthStatus =
+  | "authenticated"
+  | "restricted"
+  | "expired"
+  | "unknown";
 
 // X Browser
 

@@ -2,47 +2,15 @@
 
 ## Document Purpose
 
-This document provides **coding standards and design principles** for bernays. 
-For detailed architectural specifications, layer definitions, and implementation 
-patterns, see `ARCHITECTURE.md`.
+This document provides **coding standards and conventions** for bernays. For
+architectural decisions, type system design, and implementation patterns, see
+`ARCHITECTURE.md`.
 
 **This document covers**:
 
-1. System goals and core requirements
-2. Coding style and conventions
-3. Design principles and non-obvious decisions
-4. Architectural overview (lightweight, with references)
-
----
-
-## The Goal
-
-Build a runtime for **sockpuppets**—long-lived programs that simulate humans
-interacting with online accounts. A sockpuppet wakes up when it wants, checks
-its inbox, decides what to do, acts, and records what it did. The runtime's job
-is to make this feel natural: the sockpuppet shouldn't care about browsers,
-platform APIs, or crash recovery.
-
-**Core requirement**: You can restart the process at any time and it will
-continue safely. Browser sessions persist externally. Everything the program
-"knows" is in an append-only event log. Anything derivable from the log is not
-stored as mutable state.
-
-**From the sockpuppet's perspective**:
-
-```typescript
-const myBot = Effect.gen(function* () {
-  const platform = yield* Platform; // the world I can see and act in
-  const journal = yield* Journal; // my memory
-
-  const inbox = yield* platform.inbox;
-  for (const [threadId, meta] of Object.entries(inbox.byThreadId)) {
-    // decide, act, remember
-  }
-});
-```
-
-Everything else exists to make this possible.
+1. Coding style and conventions
+2. Script conventions
+3. Quick reference guides
 
 ---
 
@@ -146,52 +114,55 @@ const ExtendedSchema = BaseSchema.extend({ extra: z.number() });
 
 ### Branded Types
 
-Use branded types to prevent mixing up IDs and other stringly-typed values:
+Use branded types to prevent mixing up IDs and stringly-typed values. See
+`ARCHITECTURE.md` for the full list and rationale.
 
 ```typescript
 type Brand<T, B extends string> = T & { readonly __brand: B };
 
-type Scope = Brand<string, "Scope">;
-type AccountId = Brand<string, "AccountId">;
+// Simple branded type
 type ThreadId = Brand<string, "ThreadId">;
-type EventId = Brand<string, "EventId">;
-type CorrelationId = Brand<string, "CorrelationId">;
-type CanonicalId = Brand<string, "CanonicalId">;
-type BrowserConfigId = Brand<string, "BrowserConfigId">;
-type ExtensionId = Brand<string, "ExtensionId">;
+const ThreadId = (value: string): ThreadId => value as ThreadId;
 
-// Constructor functions
-const Scope = (value: string): Scope => value as Scope;
-const AccountId = (value: string): AccountId => value as AccountId;
-const ExtensionId = (value: string): ExtensionId => value as ExtensionId;
+// Scoped branded type (ParticipantId carries platform scope)
+type ParticipantId<TScope extends string = string> = string & {
+  readonly __brand: "ParticipantId";
+  readonly __scope: TScope;
+};
+const ParticipantId = <TScope extends string>(
+  scope: TScope,
+  platformId: string,
+): ParticipantId<TScope> => `${scope}:${platformId}` as ParticipantId<TScope>;
 ```
 
-**Where to use branded types**:
+**Core branded types**:
 
-| Type              | Why                                                    |
-| ----------------- | ------------------------------------------------------ |
-| `Scope`           | Extensible string—new platforms without modifying core |
-| `AccountId`       | Don't mix with user IDs or other identifiers           |
-| `ThreadId`        | Prevent passing a message ID where thread ID expected  |
-| `EventId`         | Deduplication key—must not collide with correlation ID |
-| `CorrelationId`   | Tracing—links related events across the system         |
-| `CanonicalId`     | Message identity—distinct from platform's native ID    |
-| `BrowserConfigId` | Don't mix with browser instance IDs                    |
-| `ExtensionId`     | Don't mix extension IDs with other identifiers         |
+| Type                    | Purpose                                        |
+| ----------------------- | ---------------------------------------------- |
+| `Scope`                 | Platform identifier (extensible)               |
+| `ParticipantId<TScope>` | Any user on a platform, scoped for type safety |
+| `ThreadId`              | Conversation identifier                        |
+| `EventId`               | Deduplication key                              |
+| `CorrelationId`         | Tracing across events                          |
+| `CanonicalId`           | Message identity                               |
+| `BrowserConfigId`       | Browser session identifier                     |
+| `ExtensionId`           | Browser extension identifier                   |
+| `ExecuteErrorCode`      | Effect error codes (extensible)                |
 
-Branded types catch bugs at compile time where plain strings would silently pass
-the wrong value. Use Zod's `.transform()` to cast strings to branded types.
+Use Zod's `.transform()` to cast strings to branded types at validation
+boundaries. For `ParticipantId`, use the `participantIdSchema(scope)` factory to
+validate the prefix matches the expected scope.
 
 ### Naming Conventions
 
-| Category | Pattern                     | Examples                                           |
-| -------- | --------------------------- | -------------------------------------------------- |
-| Events   | `{What}{Verb}` + context    | `AuthObserved`, `MessageSent`, `RateLimitObserved` |
-| Intents  | `{Verb}{What}`              | `SendMessage`, `SyncConversations`                 |
-| Schemas  | `{TypeName}Schema`          | `LinkedInEventSchema`, `SendMessageSchema`         |
-| Services | `{Domain}Service`           | `BrowserPoolService`, `JournalService`             |
-| Tags     | `{Domain}` (no suffix)      | `BrowserPool`, `Journal`, `Platform`               |
-| Views    | `{What}` or `{Scope}{What}` | `LinkedInBrowser`, `LinkedInInbox`                 |
+| Category | Pattern                     | Examples                                            |
+| -------- | --------------------------- | --------------------------------------------------- |
+| Events   | `{What}{Verb}` + context    | `AuthObserved`, `MessageSent`, `RateLimitObserved`  |
+| Schemas  | `{TypeName}Schema`          | `LinkedInEventSchema`, `SendMessageSchema`          |
+| Services | `{Domain}Service`           | `BrowserPoolService`, `JournalService`              |
+| Tags     | `{Domain}` (no suffix)      | `BrowserPool`, `Journal`, `Platform`                |
+| Views    | `{What}` or `{Scope}{What}` | `LinkedInBrowser`, `LinkedInInbox`                  |
+| Actions  | verb phrase                 | `sendMessage`, `syncInbox`, `sendConnectionRequest` |
 
 ### Module Organization
 
@@ -215,269 +186,260 @@ import { BrowserPool } from "$/connectivity/pool.ts";
 
 ---
 
-## Design Principles
+## Script Conventions
 
-### 1. Sockpuppets See a Simple World
+Scripts in `scripts/` are first-class citizens with consistent patterns. Two
+types exist: CLI scripts (`.ts`) for automation and TUI scripts (`.tsx`) for
+interactive terminal UIs.
 
-Sockpuppets interact with two services only:
+### File Structure
 
-- `Platform` — inbox, threads, browsers, execute
-- `Journal` — record decisions, restore state
-
-They never see: EventStore, BrowserPool, Projections, Behaviors, schemas.
-Everything complex is hidden behind these two interfaces.
-
-### 2. One Flow
-
-Events flow through one path:
-
-```
-Extension → BrowserPool → EventIngestion → EventStore → Projection → Platform → Sockpuppet
-```
-
-Auth events, message events, rate limit events—all platform-scoped, all the same
-pipe. No separate loops for different event types.
-
-### 3. Derive Everything
-
-Inbox, threads, auth state, rate limits—all derived from the same event stream
-by pure adapter functions. Nothing is stored except the append-only event log.
-This enables:
-
-- **Restartability**: Rebuild state by replaying events
-- **Auditability**: Complete history of everything that happened
-- **Consistency**: Single source of truth, no sync issues
-
-### 4. Scope-Based Event Routing
-
-Every event has a `scope` field (e.g., `"linkedin"`, `"journal"`). This enables:
-
-- Database-level filtering: `WHERE scope = 'linkedin'`
-- Schema routing: Look up validation schema by scope
-- Type safety: Projections return typed events for their scope
-
-### 5. Platform-Agnostic Core
-
-The runtime knows about `PlatformDefinition`, `PlatformBehavior`, `Projection`.
-It doesn't know about LinkedIn or X specifically. Platforms plug in by
-registering:
-
-- **Schemas**: Event/intent validation (the contract)
-- **Behavior**: Derivation and execution (the pure functions)
-- **Account storage**: Platform-specific fields
-
-### 6. Active Services Own Their Lifecycle
-
-Services that need background work (like consuming streams) start that work when
-their layer initializes. No manual daemon forking in main.
+Every script follows this layout:
 
 ```typescript
-const makeEventIngestion = (schemas) =>
-  Layer.scoped(
-    EventIngestion,
-    Effect.gen(function* () {
-      // Start consuming on layer init
-      yield* Effect.forkScoped(
-        pool.events.pipe(Stream.runForEach(processEvent)),
-      );
-      return {};
-    }),
-  );
-```
+#!/usr/bin/env -S deno run -A
+// =============================================================================
+// my-script.ts — Short Description of Script (Title Case)
+// =============================================================================
+//
+// Usage:
+//   deno run -A scripts/my-script.ts [options]
+//
+// Options:
+//   --option       Description of Option (Title Case)
+//   --help, -h     Show This Help
+//
+// Examples:
+//   deno run -A scripts/my-script.ts --option value
+//
+// =============================================================================
 
-### 7. Canonical IDs for Restartability
+import { parseArgs } from "@std/cli";
+import { createLogger, die } from "./lib/cli/mod.ts";
 
-Message events use deterministic IDs generated from content:
+// =============================================================================
+// Types
+// =============================================================================
 
-```typescript
-const canonicalId = await hash(scope, threadAnchor, sender, content, timestamp);
-```
+interface MyConfig {
+  readonly silent: boolean;
+  readonly optionValue: string;
+}
 
-Same message observed twice → same ID → deduplicated. This is what makes
-restarts safe.
+// =============================================================================
+// Main
+// =============================================================================
 
-### 8. Failures Are Events
+export async function myScript(config: MyConfig): Promise<void> {
+  const log = createLogger(config.silent);
+  // ...
+}
 
-No special error handling. Extensions observe what happens and emit events:
+// =============================================================================
+// CLI
+// =============================================================================
 
-```typescript
-{ scope: "linkedin", type: "RateLimitObserved", retryAfter: "..." }
-{ scope: "linkedin", type: "AuthExpiredObserved", configId: "..." }
-```
+if (import.meta.main) {
+  const args = parseArgs(Deno.args, {
+    string: ["option"],
+    boolean: ["silent", "help"],
+    alias: { s: "silent", h: "help" },
+  });
 
-The behavior's `deriveBrowsers` function folds these events to determine which
-browsers are usable, with platform-specific status attached.
+  if (args.help) {
+    console.log(`Usage: ...`);
+    Deno.exit(0);
+  }
 
-### 9. Journal for Sockpuppet State
+  if (!args.option) die("--option Is Required");
 
-The global event log records world state. The journal records sockpuppet
-decisions. On restart, sockpuppets fold their journal to restore their own
-state:
-
-```typescript
-const past = yield * journal.entries();
-const repliedThreads = new Set(
-  past.filter((e) => e.kind === "replied").map((e) => e.threadId),
-);
-```
-
-### 10. Accounts Are Bindings, Not Metadata
-
-An account is a **binding** between a persistent platform ID and browser sessions.
-It contains only:
-
-- `id`: The platform's persistent identifier (LinkedIn member ID, X user ID)
-- `browserBindings`: Which browsers are logged into this account
-
-**Accounts do NOT store:**
-
-- Display names, handles, profile URLs (can change, observed from events)
-- Follower counts, verification status (dynamic, observed from events)
-- Rate limits, invite limits (platform-imposed, derived from rate limit events)
-- Any metadata the platform controls
-
-All dynamic platform state is derived from the event stream. The account store
-only tracks "this ID exists and uses these browsers."
-
----
-
-## Architectural Overview
-
-> **Full details**: See `EFFECT_ARCHITECTURE.md` for complete layer definitions,
-> interfaces, and implementation patterns.
-
-### Layer Stack
-
-```
-Layer 0: Storage        — Database, EventStore, ConfigStore
-Layer 1: Browser Backend — BrowserBackend (bundles BrowserPool + ExtensionStore)
-Layer 2: Event Flow      — EventIngestion (consumes stream, validates, stores)
-Layer 3: Projections     — Typed, filtered access to EventStore per scope
-Layer 4: Platform        — What sockpuppets use (Platform + Journal services)
-Layer 5: Sockpuppet      — The human-like agent
-```
-
-BrowserBackend bundles pool and extension store together to ensure compatibility
-between implementations (e.g., Browserbase stores extensions for you, local
-Playwright loads from filesystem).
-
-### Key Types
-
-| Type                      | Purpose                                                      |
-| ------------------------- | ------------------------------------------------------------ |
-| `StorableEvent`           | Base event shape: `scope`, `type`, `eventId`, `timestamp`    |
-| `BaseIntent<TScope>`      | Base intent shape: `scope`, `type`                           |
-| `BaseAccount`             | Complete account: `id` + `browserBindings` (no other fields) |
-| `BaseBoundBrowser`        | Base browser view: `configId`, `isRunning`, `metadata`       |
-| `Projection<TEvent>`      | Type-safe filtered access to events by scope                 |
-| `PlatformDefinition<...>` | Registration unit: schemas + behavior for a platform         |
-| `PlatformBehavior<...>`   | Derivation + browser selection + execution for a platform    |
-| `PlatformService<...>`    | What sockpuppets use: inbox, thread, browsers, execute       |
-| `BrowserBackend`          | Bundles BrowserPool + ExtensionStore (ensures compatibility) |
-
-### PlatformDefinition Interface
-
-Platform definitions bundle everything needed for a platform:
-
-```typescript
-interface PlatformDefinition<TScope, TEvent, TIntent, TAnchor, TThread, TInbox, TAccount, TBrowser> {
-  readonly scope: TScope;
-  readonly eventSchema: z.ZodType<TEvent>;
-  readonly intentSchema: z.ZodType<TIntent>;
-  readonly anchorSchema: z.ZodType<TAnchor>;
-  readonly behavior: PlatformBehavior<...>;
+  await myScript({ silent: args.silent ?? false, optionValue: args.option });
 }
 ```
 
-The behavior provides pure derivation and execution:
+**Key elements**:
 
-- `deriveInbox(events, accountId)` → inbox view
-- `deriveThread(events, threadId)` → thread view
-- `deriveBrowsers(events, account, runningIds)` → platform-specific browser
-  status
-- `execute(intent, browsers, preferConfigId?)` → browser selection + execution
+- Shebang with `deno run -A` (or specific permissions)
+- Header: `filename.ts — Short Description` (em-dash `—`, not hyphen)
+- Separator: `//` + 77 `=` characters (80 chars total)
+- Section names in Title Case: `Types`, `Config`, `Main`, `CLI`
+- Config interface with `readonly` properties
+- Exported main function (testable without CLI)
+- `import.meta.main` guard for CLI entry
 
-### Message Graph Model
+### Capitalization Conventions
 
-Messages form a graph via `predecessorId` references:
+All user-facing messages use **Title Case**:
 
-- **Anchor messages**: Thread roots with platform-specific anchor data
-- **Reply messages**: Reference their predecessor
+| Context                    | Case       | Examples                                    |
+| -------------------------- | ---------- | ------------------------------------------- |
+| Section separators         | Title Case | `// Types`, `// Main`, `// Browserbase API` |
+| Header description         | Title Case | `sync.ts — Sync Extension to Browserbase`   |
+| `log.section()`            | Title Case | `"Finding Latest Extension Zip"`            |
+| `log.info()` / `log.dim()` | Title Case | `"Uploading New Extension..."`              |
+| `log.ok()` / `log.warn()`  | Title Case | `"Build Complete"`, `"Missing Config"`      |
+| `die()` / `statusOk()`     | Title Case | `"Database Not Ready"`                      |
+| Help text sections         | ALL CAPS   | `USAGE`, `OPTIONS`, `COMMANDS`, `EXAMPLES`  |
+| Help text descriptions     | Title Case | `"Old Extension ID to Replace (required)"`  |
 
-Each behavior's `deriveThread` walks the graph according to platform-specific
-threading rules.
-
-### Templates
-
-Event and intent templates provide base schemas that platforms extend:
+**Help text format**:
 
 ```typescript
-// Base template
-const AuthObservedBase = CorrelatedEventSchema.extend({
-  configId: z.string().transform(BrowserConfigId),
-  accountId: z.string().transform(AccountId),
-  status: z.enum(["authenticated", "expired", "unknown"]),
-});
+const help = `
+my-script — Short Description
 
-// Platform extends with scope and type
-const LinkedInAuthObservedSchema = AuthObservedBase.extend({
-  scope: z.literal("linkedin"),
-  type: z.literal("AuthObserved"),
+USAGE
+  bernays my-script [OPTIONS]
+
+OPTIONS
+  --from <id>     Old ID to Replace (required)
+  --to <id>       New ID to Use (required)
+  --silent, -s    Suppress Non-Error Output
+  --dry-run       Show What Would Be Done
+  --help, -h      Show This Help
+
+EXAMPLES
+  bernays my-script --from abc --to xyz
+`.trim();
+```
+
+### CLI Argument Handling
+
+Always use `@std/cli`'s `parseArgs`:
+
+```typescript
+import { parseArgs } from "@std/cli";
+
+const args = parseArgs(Deno.args, {
+  string: ["db-url", "from", "to"], // Named args with values
+  boolean: ["silent", "dry-run", "help"], // Boolean flags
+  alias: { s: "silent", h: "help" }, // Short aliases
 });
 ```
 
----
+**Validation pattern**:
 
-## Non-Obvious Decisions
+```typescript
+if (args.help) {
+  console.log(buildHelp());
+  Deno.exit(0);
+}
 
-### Why `Scope` is a Branded String, Not a Union
+if (!args.from) die("--from <id> is required");
+if (!args.to) die("--to <id> is required");
+```
 
-The system must be extensible. New platforms can be added without modifying core
-types. A union type would require changing core code for each new platform.
+### Shared Utilities
 
-### Why Projections Exist
+Scripts use shared utilities from `scripts/lib/`:
 
-Type safety at service boundaries. The platform service yields a projection and
-gets typed events—guaranteed. No filtering logic, no "what if wrong events leak
-through."
+| Module                    | Purpose                                                     |
+| ------------------------- | ----------------------------------------------------------- |
+| `cli/log.ts`              | `createLogger()`, `die()`, `statusOk/Warn/Err()`, `Spinner` |
+| `cli/env.ts`              | `loadDotenv()`, `writeDotenv()`, `requireEnv()`, `getEnv()` |
+| `cli/shell.ts`            | `runCommand()`, `runWithSpinner()`, `commandExists()`       |
+| `tui/ink.tsx`             | React/Ink components for TUI scripts                        |
+| `tui/hooks.tsx`           | `useListNavigation()`, `usePagination()`                    |
+| `tui/keybindings.tsx`     | `createBindings()`, `useKeyHandler()`                       |
+| `platforms/stores.ts`     | Platform account store registry                             |
+| `platforms/providers.tsx` | Platform TUI provider registry                              |
 
-### Why Browser Bindings Are on Accounts
+Import from barrel files:
 
-An account can be logged into multiple browsers (mobile, desktop). The
-sockpuppet decides which to use based on its own logic (time of day, rate
-limits, etc.). Browser bindings connect accounts to their available browsers.
+```typescript
+import { createLogger, die, loadDotenv, runCommand } from "./lib/cli/mod.ts";
+import { createBindings, useListNavigation } from "./lib/tui/mod.ts";
+import { getStoreFactory } from "./lib/platforms/mod.ts";
+```
 
-### Why Behaviors Are Pure Functions
+### Logging Conventions
 
-Behaviors have no state, no side effects (except `execute`). They're pure
-derivation over event streams. This makes them testable, predictable, and easy
-to reason about.
+All messages use **Title Case**:
 
-### Why the Journal Is Separate
+```typescript
+const log = createLogger(config.silent);
 
-World events (what happened) vs. agent decisions (what the sockpuppet did).
-These are different concerns. The journal is just a projection filtered by
-`scope: "journal"` and `accountId`.
+log.section("Building Extension"); // Magenta ==> header
+log.info("Processing Files..."); // Cyan [INFO]
+log.ok("Build Complete"); // Green [OK]
+log.warn("Missing Optional Config"); // Yellow [WARN]
+log.error("Build Failed"); // Red [ERR] to stderr
+log.dim("  Extra Detail Here"); // Dimmed text
 
-### Why Events Have Both `eventId` and `correlationId`
+// Final status (deploy-style output)
+statusOk("Extension Deployed"); // Green ✓
+statusWarn("Partial Success"); // Yellow ⚠
+statusErr("Deployment Failed"); // Red ✗
+die("Database URL Required"); // Red ✗ + exit(1)
+```
 
-- `eventId`: Deduplication key, deterministic for messages
-- `correlationId`: Tracing, links related events (an intent and its outcomes)
+### Error Handling
 
-They serve different purposes and must not be confused.
+Use `die()` for fatal errors—it logs (Title Case) and exits with code 1:
+
+```typescript
+import { die } from "./lib/cli/mod.ts";
+
+// Required argument missing (Title Case)
+if (!args.configId) die("--config-id Is Required");
+
+// File not found (Title Case)
+try {
+  content = await Deno.readTextFile(filepath);
+} catch (err) {
+  if (err instanceof Deno.errors.NotFound) {
+    die(`File Not Found: ${filepath}`);
+  }
+  throw err;
+}
+
+// Zod validation failure
+const result = MySchema.safeParse(data);
+if (!result.success) {
+  log.error("Validation Failed:");
+  for (const issue of result.error.issues) {
+    log.error(`  ${issue.path.join(".")}: ${issue.message}`);
+  }
+  Deno.exit(1);
+}
+```
+
+### Dry-Run Support
+
+Scripts that modify state should support `--dry-run`:
+
+```typescript
+if (config.dryRun) {
+  log.warn("DRY RUN - No changes will be made");
+  log.info(`Would update ${count} records`);
+  return;
+}
+```
+
+### Script Naming
+
+| Category      | Pattern               | Examples                                       |
+| ------------- | --------------------- | ---------------------------------------------- |
+| Script files  | `kebab-case.ts`       | `build-extension.ts`, `load-accounts.ts`       |
+| TUI scripts   | `kebab-case.tsx`      | `view-inbox.tsx`, `manage-browser-configs.tsx` |
+| Config types  | `PascalCase + Config` | `BuildConfig`, `SyncConfig`                    |
+| Main function | verb or noun          | `build()`, `sync()`, `transition()`            |
 
 ---
 
 ## Quick Reference
 
-### Creating a New Platform Definition
+### Creating a New Platform Plugin
 
-1. Define schemas in `plugins/{platform}/schemas.ts`
-2. Implement behavior in `plugins/{platform}/behavior.ts`
-3. Define views in `plugins/{platform}/views.ts`
-4. Create account store in `plugins/{platform}/account.ts` (uses BaseAccount—no custom fields)
-5. Export platform definition in `plugins/{platform}/mod.ts`
-6. Register in `main.ts` PLATFORMS array
+1. Create `plugins/{platform}/` directory
+2. Define schemas in `schemas.ts` (events extending templates)
+3. Implement derivation in `behavior.ts` (`deriveInbox`, `deriveThread`,
+   `deriveBrowsers`, `deriveContact`)
+4. Implement actions in `actions.ts` (curried `PlatformMethod` functions)
+5. Define contact type in `contact.ts` (extends `BaseContact`)
+6. Create account store in `account.ts` (uses `BaseAccount`)
+7. Export platform definition in `mod.ts`
+8. Register in `main.ts` PLATFORMS array
 
 ### Adding a New Event Type
 
@@ -486,26 +448,43 @@ They serve different purposes and must not be confused.
 3. Add to platform's discriminated union schema
 4. Update behavior derivation functions as needed
 
-### Adding a New Intent Type
+### Adding a New Platform Action
 
-1. Create or extend template in `intents/templates/`
-2. Extend in platform's `schemas.ts`
-3. Add to platform's intent union schema
-4. Implement handling in behavior's `execute` function
+1. Define result type for the action
+2. Define error type (using branded `ExecuteErrorCode`)
+3. Add to platform's actions interface as
+   `PlatformMethod<TArgs, TResult, TError>`
+4. Implement in `actions.ts` following curried pattern:
+   `(options?) => (...args) => Effect`
+5. Wire into `makeActions` in platform definition
 
-### Agents
+### Creating a New Script
+
+1. Create file in `scripts/` with kebab-case name (`.ts` for CLI, `.tsx` for
+   TUI)
+2. Add shebang and header comment block with usage, options, examples
+3. Define `Config` interface with `readonly` properties
+4. Import from `./lib/cli/mod.ts` or `./lib/tui/mod.ts`
+5. Export main function that accepts config (for testability)
+6. Add `import.meta.main` guard with `parseArgs()` handling
+7. Use `createLogger()` for output, `die()` for fatal errors
+8. Support `--help` and `--silent` flags; add `--dry-run` if modifying state
+
+---
+
+## Agents
 
 Specialized agents in `.claude/agents/` handle cross-cutting concerns:
 
-| Agent | Use When |
-|-------|----------|
-| `plugin-scaffold` | Creating new platform plugins |
+| Agent                 | Use When                                        |
+| --------------------- | ----------------------------------------------- |
+| `plugin-scaffold`     | Creating new platform plugins                   |
 | `deploy-orchestrator` | Changing deployment backends, updating Justfile |
-| `hack-tracker` | Documenting deviations in HACKS.md |
-| `test-architect` | Writing tests for store, backend, projections |
-| `codebase-auditor` | Checking layer boundaries, import discipline |
-| `campaign-planner` | Planning sockpuppet campaigns |
-| `proxy-setup` | Configuring Tailscale proxy infrastructure |
+| `hack-tracker`        | Documenting deviations in HACKS.md              |
+| `test-architect`      | Writing tests for store, backend, projections   |
+| `codebase-auditor`    | Checking layer boundaries, import discipline    |
+| `campaign-planner`    | Planning sockpuppet campaigns                   |
+| `proxy-setup`         | Configuring Tailscale proxy infrastructure      |
 
-When changing infrastructure (DB, browser backend), check `deploy-orchestrator` and
-`hack-tracker` agents for script dependencies that may need updates.
+When changing infrastructure (DB, browser backend), check `deploy-orchestrator`
+and `hack-tracker` agents for script dependencies that may need updates.

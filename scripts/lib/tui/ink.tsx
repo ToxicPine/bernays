@@ -2,9 +2,15 @@
 // Ink Components — Shared React components for TUI scripts
 // =============================================================================
 
-import { type FC, type ReactNode, useState, useEffect, useCallback } from "react";
-import { render, Box, Text, useStdout } from "ink";
-import { clearScreen } from "./tui.ts";
+import {
+  type FC,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
+import { Box, render, Text, useStdout } from "ink";
+import { clearScreen } from "./terminal.ts";
 
 // =============================================================================
 // Terminal Size Hook
@@ -98,10 +104,14 @@ export const truncate = (s: string, maxLen: number): string =>
  */
 export const scopeColor = (scope: string): string => {
   switch (scope) {
-    case "linkedin": return "cyan";
-    case "x": return "magenta";
-    case "journal": return "yellow";
-    default: return "white";
+    case "linkedin":
+      return "cyan";
+    case "x":
+      return "magenta";
+    case "journal":
+      return "yellow";
+    default:
+      return "white";
   }
 };
 
@@ -125,7 +135,12 @@ export interface AppError {
 export const toAppError = (e: unknown, title: string): AppError => {
   // Handle Effect-style errors with _tag
   if (e && typeof e === "object" && "_tag" in e) {
-    const tagged = e as { _tag: string; message?: string; code?: string; cause?: unknown };
+    const tagged = e as {
+      _tag: string;
+      message?: string;
+      code?: string;
+      cause?: unknown;
+    };
     return {
       title,
       message: tagged.message || tagged.code || tagged._tag,
@@ -156,7 +171,10 @@ export const toAppError = (e: unknown, title: string): AppError => {
   }
 
   // Handle AppError passthrough
-  if (e && typeof e === "object" && "title" in e && "message" in e && "recoverable" in e) {
+  if (
+    e && typeof e === "object" && "title" in e && "message" in e &&
+    "recoverable" in e
+  ) {
     return e as AppError;
   }
 
@@ -184,23 +202,28 @@ export interface AsyncOperationState<T> {
 /**
  * Hook to manage async operation state with error handling.
  */
-export const useAsyncOperation = <T,>(initialData: T | null = null): AsyncOperationState<T> => {
+export const useAsyncOperation = <T,>(
+  initialData: T | null = null,
+): AsyncOperationState<T> => {
   const [data, setData] = useState<T | null>(initialData);
   const [error, setError] = useState<AppError | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const run = useCallback(async (fn: () => Promise<T>, errorTitle = "Operation Failed") => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await fn();
-      setData(result);
-    } catch (e) {
-      setError(toAppError(e, errorTitle));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const run = useCallback(
+    async (fn: () => Promise<T>, errorTitle = "Operation Failed") => {
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await fn();
+        setData(result);
+      } catch (e) {
+        setError(toAppError(e, errorTitle));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
 
   const clearError = useCallback(() => setError(null), []);
 
@@ -245,9 +268,7 @@ export const ErrorBanner: FC<{
   >
     <Text bold color="red">{error.title}</Text>
     <Text color="red">{error.message}</Text>
-    {error.details && (
-      <Text dimColor>{truncate(error.details, 80)}</Text>
-    )}
+    {error.details && <Text dimColor>{truncate(error.details, 80)}</Text>}
     {onDismiss && error.recoverable && (
       <Text dimColor italic>Press any key to dismiss</Text>
     )}
@@ -296,8 +317,7 @@ export const MenuItem: FC<{
   <Box>
     <Text color={selected ? "green" : "white"}>
       {selected ? "> " : "  "}
-      <Text bold>[{idx + 1}]</Text>{" "}
-      <Text color={color}>{label}</Text>
+      <Text bold>[{idx + 1}]</Text> <Text color={color}>{label}</Text>
     </Text>
   </Box>
 );
@@ -305,7 +325,9 @@ export const MenuItem: FC<{
 /**
  * Loading indicator.
  */
-export const Loading: FC<{ message?: string }> = ({ message = "Loading..." }) => (
+export const Loading: FC<{ message?: string }> = (
+  { message = "Loading..." },
+) => (
   <Box>
     <Text color="cyan">{message}</Text>
   </Box>
@@ -314,9 +336,9 @@ export const Loading: FC<{ message?: string }> = ({ message = "Loading..." }) =>
 /**
  * Empty state message.
  */
-export const Empty: FC<{ message?: string }> = ({ message = "No items found." }) => (
-  <Text dimColor>{message}</Text>
-);
+export const Empty: FC<{ message?: string }> = (
+  { message = "No items found." },
+) => <Text dimColor>{message}</Text>;
 
 // =============================================================================
 // App Runner

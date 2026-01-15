@@ -3,16 +3,18 @@
 
 import { z } from "@zod/zod";
 import {
-  type AccountId,
-  type CanonicalId,
-  type IntentId,
+  CanonicalId,
+  IntentId,
+  participantIdSchema,
   Scope,
-  type ThreadId,
+  ThreadId,
 } from "@bernays/server/core";
 import { CorrelationMetadataSchema } from "@bernays/server/events";
 import {
   AnchorMessageObservedBase,
+  authObservedBase,
   MessageObservedBase,
+  rateLimitObservedBase,
 } from "@bernays/server/events";
 import {
   SendMessageBase,
@@ -32,18 +34,16 @@ const linkedInScopeSchema = z.literal("linkedin").transform(() =>
 
 export const LinkedInAnchorSchema = z.object({
   conversationId: z.string(),
-  participants: z.array(z.string()),
+  participants: z.array(participantIdSchema("linkedin")),
 });
 
 export type LinkedInAnchor = z.infer<typeof LinkedInAnchorSchema>;
 
 // Event Schemas
 
-export const LinkedInAuthObservedSchema = CorrelationMetadataSchema.extend({
+export const LinkedInAuthObservedSchema = authObservedBase("linkedin").extend({
   scope: linkedInScopeSchema,
   type: z.literal("AuthObserved"),
-  accountId: z.string().transform((val) => val as AccountId),
-  browserId: z.string(),
   tabId: z.string(),
   authenticated: z.boolean(),
   canRead: z.boolean(),
@@ -57,7 +57,7 @@ export const LinkedInAnchorMessageObservedSchema = AnchorMessageObservedBase
     scope: linkedInScopeSchema,
     type: z.literal("AnchorMessageObserved"),
     anchor: LinkedInAnchorSchema,
-    threadId: z.string().transform((val) => val as ThreadId),
+    threadId: z.string().transform(ThreadId),
   });
 
 export type LinkedInAnchorMessageObserved = z.infer<
@@ -67,7 +67,7 @@ export type LinkedInAnchorMessageObserved = z.infer<
 export const LinkedInMessageObservedSchema = MessageObservedBase.extend({
   scope: linkedInScopeSchema,
   type: z.literal("MessageObserved"),
-  threadId: z.string().transform((val) => val as ThreadId),
+  threadId: z.string().transform(ThreadId),
 });
 
 export type LinkedInMessageObserved = z.infer<
@@ -77,8 +77,8 @@ export type LinkedInMessageObserved = z.infer<
 export const LinkedInMessageMutatedSchema = CorrelationMetadataSchema.extend({
   scope: linkedInScopeSchema,
   type: z.literal("MessageMutated"),
-  canonicalId: z.string().transform((val) => val as CanonicalId),
-  threadId: z.string().transform((val) => val as ThreadId),
+  canonicalId: z.string().transform(CanonicalId),
+  threadId: z.string().transform(ThreadId),
   mutation: z.enum(["deleted", "edited"]),
   editedContent: z.string().optional(),
 });
@@ -90,8 +90,8 @@ export type LinkedInMessageMutated = z.infer<
 export const LinkedInMessageSentSchema = CorrelationMetadataSchema.extend({
   scope: linkedInScopeSchema,
   type: z.literal("MessageSent"),
-  threadId: z.string().transform((val) => val as ThreadId),
-  canonicalId: z.string().transform((val) => val as CanonicalId),
+  threadId: z.string().transform(ThreadId),
+  canonicalId: z.string().transform(CanonicalId),
   content: z.string(),
 });
 
@@ -101,7 +101,7 @@ export const LinkedInConversationsSyncedSchema = CorrelationMetadataSchema
   .extend({
     scope: linkedInScopeSchema,
     type: z.literal("ConversationsSynced"),
-    accountId: z.string().transform((val) => val as AccountId),
+    participantId: participantIdSchema("linkedin"),
     threadCount: z.number(),
     syncedAt: z.iso.datetime(),
   });
@@ -170,16 +170,12 @@ export type LinkedInActionConfirmed = z.infer<
   typeof LinkedInActionConfirmedSchema
 >;
 
-export const LinkedInRateLimitObservedSchema = CorrelationMetadataSchema.extend(
-  {
+export const LinkedInRateLimitObservedSchema = rateLimitObservedBase("linkedin")
+  .extend({
     scope: linkedInScopeSchema,
     type: z.literal("RateLimitObserved"),
-    configId: z.string(),
-    accountId: z.string().transform((val) => val as AccountId),
-    retryAfter: z.iso.datetime().optional(),
     limitType: z.enum(["weekly_invites", "daily_messages", "searches"]),
-  },
-);
+  });
 
 export type LinkedInRateLimitObserved = z.infer<
   typeof LinkedInRateLimitObservedSchema
@@ -257,20 +253,20 @@ export type LinkedInEvent = z.infer<typeof LinkedInEventSchema>;
 
 const LinkedInIntentBase = z.object({
   scope: linkedInScopeSchema,
-  intentId: z.uuid().transform((val) => val as IntentId),
+  intentId: z.uuid().transform(IntentId),
   timestamp: z.iso.datetime(),
 });
 
-export const LinkedInSendMessageSchema = LinkedInIntentBase.merge(
-  SendMessageBase,
+export const LinkedInSendMessageSchema = LinkedInIntentBase.extend(
+  SendMessageBase.shape,
 ).extend({
   type: z.literal("SendMessage"),
 });
 
 export type LinkedInSendMessage = z.infer<typeof LinkedInSendMessageSchema>;
 
-export const LinkedInSyncConversationsSchema = LinkedInIntentBase.merge(
-  SyncConversationsBase,
+export const LinkedInSyncConversationsSchema = LinkedInIntentBase.extend(
+  SyncConversationsBase.shape,
 ).extend({
   type: z.literal("SyncConversations"),
 });
@@ -305,7 +301,7 @@ export type LinkedInPeopleSearch = z.infer<typeof LinkedInPeopleSearchSchema>;
 export const LinkedInRecallMessageSchema = LinkedInIntentBase.extend({
   type: z.literal("RecallMessage"),
   messageId: z.string(),
-  threadId: z.string().transform((val) => val as ThreadId),
+  threadId: z.string().transform(ThreadId),
 });
 
 export type LinkedInRecallMessage = z.infer<typeof LinkedInRecallMessageSchema>;

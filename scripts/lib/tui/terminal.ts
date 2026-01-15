@@ -48,10 +48,12 @@ const readLine = async (prompt: string): Promise<string> => {
 export const readSecret = async (prompt: string): Promise<string> => {
   write(prompt);
   try {
-    await new Deno.Command("stty", { args: ["-echo"], stdin: "inherit" }).output();
+    await new Deno.Command("stty", { args: ["-echo"], stdin: "inherit" })
+      .output();
     const buf = new Uint8Array(1024);
     const n = await Deno.stdin.read(buf);
-    await new Deno.Command("stty", { args: ["echo"], stdin: "inherit" }).output();
+    await new Deno.Command("stty", { args: ["echo"], stdin: "inherit" })
+      .output();
     writeln();
     if (n === null) return "";
     return decoder.decode(buf.subarray(0, n)).trim();

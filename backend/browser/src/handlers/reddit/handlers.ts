@@ -120,15 +120,19 @@ const findInShadowRoot = (
 
 window.__registerCommand<
   void,
-  { authenticated: boolean; userId?: string; isBanned?: boolean; bannedReason?: string }
+  {
+    authenticated: boolean;
+    userId?: string;
+    isBanned?: boolean;
+    bannedReason?: string;
+  }
 >("reddit:checkAuth", async () => {
   try {
     const token = extractAccessToken();
     const username = extractCurrentUsername();
     const banStatus = checkBanStatus();
 
-    const isLoginPage =
-      window.location.pathname.includes("/login") ||
+    const isLoginPage = window.location.pathname.includes("/login") ||
       document.querySelector('input[name="username"]') !== null;
 
     if (isLoginPage || !token) {
@@ -194,7 +198,10 @@ window.__registerCommand<
         inputField.dispatchEvent(new Event("input", { bubbles: true }));
 
         // Find and click send button
-        const sendButton = findInShadowRoot(chatContainer, 'button[type="submit"]');
+        const sendButton = findInShadowRoot(
+          chatContainer,
+          'button[type="submit"]',
+        );
         if (sendButton instanceof HTMLButtonElement) {
           sendButton.click();
 
@@ -334,9 +341,9 @@ window.__registerCommand<
         })),
         lastMessage: channel.last_message
           ? {
-              content: channel.last_message.message,
-              timestamp: new Date(channel.last_message.created_at).toISOString(),
-            }
+            content: channel.last_message.message,
+            timestamp: new Date(channel.last_message.created_at).toISOString(),
+          }
           : undefined,
         unreadCount: channel.unread_message_count,
       }),
@@ -403,9 +410,13 @@ window.__registerCommand<
 
           for (const comment of comments) {
             const author = comment.data?.author;
-            if (author && author !== "[deleted]" && author !== "AutoModerator") {
+            if (
+              author && author !== "[deleted]" && author !== "AutoModerator"
+            ) {
               users.push({
-                userId: `t2_${comment.data.author_fullname?.split("_")[1] || author}`,
+                userId: `t2_${
+                  comment.data.author_fullname?.split("_")[1] || author
+                }`,
                 username: author,
               });
             }
@@ -431,7 +442,9 @@ window.__registerCommand<
           const author = post.data?.author;
           if (author && author !== "[deleted]" && author !== "AutoModerator") {
             users.push({
-              userId: `t2_${post.data.author_fullname?.split("_")[1] || author}`,
+              userId: `t2_${
+                post.data.author_fullname?.split("_")[1] || author
+              }`,
               username: author,
             });
           }

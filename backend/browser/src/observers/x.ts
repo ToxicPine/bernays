@@ -2,20 +2,7 @@
 // X/Twitter-specific observer for auth status and DM detection.
 // Uses DOM observation since X doesn't have a clean API.
 
-type CommandResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; error: { code: string; message: string; details?: unknown } };
-
-declare global {
-  interface Window {
-    __registerCommand: <TReq, TRes>(
-      command: string,
-      handler: (payload: TReq) => Promise<CommandResult<TRes>>,
-    ) => void;
-    __emitObservation: (type: string, payload: unknown) => void;
-    __observerContext: { browserId: string; tabId: string };
-  }
-}
+import { wrapCommandError } from "../core/types.ts";
 
 // Selectors
 
@@ -56,7 +43,7 @@ interface XAuthParams {
 }
 
 interface XAuthResult {
-  accountId: string;
+  participantId: string;
   canRead: boolean;
   canWrite: boolean;
   issue?: string;
@@ -71,7 +58,7 @@ window.__registerCommand<XAuthParams, XAuthResult>(
       if (!loggedIn) {
         window.__emitObservation("AuthObserved", {
           platform: "x",
-          accountId: "",
+          participantId: "x:",
           canRead: false,
           canWrite: false,
           issue: "signed-out",
@@ -80,7 +67,7 @@ window.__registerCommand<XAuthParams, XAuthResult>(
         return {
           ok: true,
           value: {
-            accountId: "",
+            participantId: "x:",
             canRead: false,
             canWrite: false,
             issue: "signed-out",
@@ -89,6 +76,7 @@ window.__registerCommand<XAuthParams, XAuthResult>(
       }
 
       const userId = extractCurrentUserId() ?? "unknown";
+      const participantId = `x:${userId}`;
 
       // Check for Suspension Notice
       const isSuspended = document.body.textContent?.toLowerCase().includes(
@@ -99,7 +87,7 @@ window.__registerCommand<XAuthParams, XAuthResult>(
       if (isSuspended) {
         window.__emitObservation("AuthObserved", {
           platform: "x",
-          accountId: userId,
+          participantId,
           canRead: false,
           canWrite: false,
           issue: "suspended",
@@ -108,7 +96,7 @@ window.__registerCommand<XAuthParams, XAuthResult>(
         return {
           ok: true,
           value: {
-            accountId: userId,
+            participantId,
             canRead: false,
             canWrite: false,
             issue: "suspended",
@@ -123,7 +111,7 @@ window.__registerCommand<XAuthParams, XAuthResult>(
       if (isRateLimited) {
         window.__emitObservation("AuthObserved", {
           platform: "x",
-          accountId: userId,
+          participantId,
           canRead: true,
           canWrite: false,
           issue: "rate-limited",
@@ -132,7 +120,7 @@ window.__registerCommand<XAuthParams, XAuthResult>(
         return {
           ok: true,
           value: {
-            accountId: userId,
+            participantId,
             canRead: true,
             canWrite: false,
             issue: "rate-limited",
@@ -142,7 +130,7 @@ window.__registerCommand<XAuthParams, XAuthResult>(
 
       window.__emitObservation("AuthObserved", {
         platform: "x",
-        accountId: userId,
+        participantId,
         canRead: true,
         canWrite: true,
       });
@@ -150,20 +138,13 @@ window.__registerCommand<XAuthParams, XAuthResult>(
       return {
         ok: true,
         value: {
-          accountId: userId,
+          participantId,
           canRead: true,
           canWrite: true,
         },
       };
     } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      return {
-        ok: false,
-        error: {
-          code: "Unknown",
-          message: error.message,
-        },
-      };
+      return wrapCommandError(err);
     }
   },
 );
@@ -219,7 +200,7 @@ window.__registerCommand<XMessagesParams, XMessagesResult>(
             canonicalId: platformId,
             platformId,
             threadId,
-            senderId: "unknown", // Hard to Extract Reliably
+            senderId: "x:unknown", // Hard to Extract Reliably
             content,
             timestamp: new Date().toISOString(),
             own: false,
@@ -232,14 +213,7 @@ window.__registerCommand<XMessagesParams, XMessagesResult>(
         value: { messageCount },
       };
     } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      return {
-        ok: false,
-        error: {
-          code: "Unknown",
-          message: error.message,
-        },
-      };
+      return wrapCommandError(err);
     }
   },
 );
@@ -258,7 +232,7 @@ const setupAuthMonitor = (): void => {
       if (!currentAuthState) {
         window.__emitObservation("AuthObserved", {
           platform: "x",
-          accountId: "",
+          participantId: "x:",
           canRead: false,
           canWrite: false,
           issue: "signed-out",
@@ -281,7 +255,7 @@ const setupAuthMonitor = (): void => {
       if (!currentAuthState) {
         window.__emitObservation("AuthObserved", {
           platform: "x",
-          accountId: "",
+          participantId: "x:",
           canRead: false,
           canWrite: false,
           issue: "signed-out",

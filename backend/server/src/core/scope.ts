@@ -3,13 +3,10 @@
 
 import { Scope } from "./branded.ts";
 
-/** Core framework scope - for runtime lifecycle events */
-export const CORE_SCOPE = Scope("core");
-
-/** Journal scope - for sockpuppet journal entries */
-export const JOURNAL_SCOPE = Scope("journal");
-
 import { z } from "@zod/zod";
 
-/** Zod schema for Scope branded type */
+export const CORE_SCOPE = Scope("core");
+
+export const JOURNAL_SCOPE = Scope("journal");
+
 export const ScopeSchema = z.string().min(1).transform((val) => Scope(val));

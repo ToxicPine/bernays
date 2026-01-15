@@ -180,11 +180,11 @@ test-machine-destroy:
 ext-build *args:
     @deno run -A scripts/build-extension.ts --zip {{args}}
 
-# Sync Extension to Browserbase (keeps old extension for graceful transition)
+# Sync Extension to Browserbase
 ext-sync *args: (ext-build "--silent")
     @deno run -A scripts/sync-extension.ts {{args}}
 
-# Transition from old extension to new (updates DB configs, deletes old)
+# Transition from Old Extension to New
 ext-transition *args:
     @deno run -A scripts/transition-extension.ts {{args}}
 

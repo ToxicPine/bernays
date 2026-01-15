@@ -14,6 +14,7 @@ export {
 export {
   AuthObservedBase,
   type AuthObservedBase as AuthObservedBaseType,
+  authObservedBase,
   type AuthObservedFields,
   type AuthStatus,
   AuthStatusSchema,
@@ -22,5 +23,6 @@ export {
 export {
   RateLimitObservedBase,
   type RateLimitObservedBase as RateLimitObservedBaseType,
+  rateLimitObservedBase,
   type RateLimitObservedFields,
 } from "./rate-limit.ts";

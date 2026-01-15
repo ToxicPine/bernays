@@ -64,7 +64,10 @@ export const writeDotenv = (
     for (const line of lines) {
       const trimmed = line.trim();
       if (trimmed.startsWith(`${key}=`)) {
-        const existingValue = trimmed.slice(key.length + 1).replace(/^["']|["']$/g, "");
+        const existingValue = trimmed.slice(key.length + 1).replace(
+          /^["']|["']$/g,
+          "",
+        );
         if (existingValue === value) {
           return false;
         }

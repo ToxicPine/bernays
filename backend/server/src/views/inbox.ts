@@ -8,8 +8,9 @@
  * Generic over TThreadSummary to allow platform-specific index fields.
  *
  * Platforms extend this with platform-specific inbox metadata:
- * - LinkedIn: syncedAt, pendingInvitations, weeklyInvitesRemaining
- * - X: unreadDMs, etc.
+ * - LinkedIn: pendingInvitations, weeklyInvitesRemaining
+ * - X: totalUnread
+ * - Reddit: unreadTotal
  */
 export interface BaseInboxView<TThreadSummary = Record<string, never>> {
   readonly byThreadId: Readonly<Record<string, TThreadSummary>>;

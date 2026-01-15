@@ -3,8 +3,14 @@
 
 import type { BaseBoundBrowser } from "@bernays/server/views";
 
-// Auth Status
+// LinkedIn Auth Status
 
+/**
+ * LinkedIn-specific authentication status.
+ * - "authenticated": Valid LinkedIn session
+ * - "expired": Session cookie expired or invalidated
+ * - "unknown": Initial state before auth check
+ */
 export type LinkedInAuthStatus = "authenticated" | "expired" | "unknown";
 
 // LinkedIn Browser

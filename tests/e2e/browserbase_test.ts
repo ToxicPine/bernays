@@ -4,41 +4,46 @@
 import { assertGreaterOrEqual } from "@std/assert";
 import { Effect, Layer } from "effect";
 import {
+  type BridgeMessage,
   cleanupTestData,
   createSession,
+  type E2EConfig,
   loadConfig,
   setupBridge,
+  type TestSession,
   validateBrowserbase,
   validateDatabase,
   waitForExtension,
-  type BridgeMessage,
-  type E2EConfig,
-  type TestSession,
 } from "../lib/mod.ts";
 import {
+  type ConfigStoreService,
   configurePostgresEventStore,
   createPostgresConfigStore,
   type EventStore,
-  type ConfigStoreService,
   type StorableEvent,
 } from "@bernays/server/store";
 import {
-  makeBrowserbaseBackend,
   type BrowserPoolService,
+  makeBrowserbaseBackend,
 } from "@bernays/server/backend";
 import {
-  makePlatformLayer,
-  makeJournalLayer,
-  Platform,
   Journal,
+  makeJournalLayer,
+  makePlatformLayer,
 } from "@bernays/server/runtime";
 import {
-  linkedInPlatform,
   createPostgresLinkedInAccountStore,
   type LinkedInAccount,
   type LinkedInAccountStoreService,
+  LinkedInPlatform,
+  linkedInPlatform,
+  makeLinkedInActions,
 } from "@bernays/plugins/linkedin";
-import { AccountId, BrowserConfigId, ExtensionId } from "@bernays/server/core";
+import {
+  BrowserConfigId,
+  ExtensionId,
+  ParticipantId,
+} from "@bernays/server/core";
 
 const TEST_ACCOUNT_ID = "e2e-browserbase-account";
 const TEST_BROWSER_ID = "e2e-browserbase-browser";
@@ -60,7 +65,10 @@ let ctx: Context | undefined;
 Deno.test.beforeAll(async () => {
   const config = await loadConfig();
   await validateDatabase(config.databaseUrl);
-  await validateBrowserbase(config.browserbaseApiKey, config.browserbaseProjectId);
+  await validateBrowserbase(
+    config.browserbaseApiKey,
+    config.browserbaseProjectId,
+  );
 
   const eventStore = await Effect.runPromise(
     configurePostgresEventStore({ databaseUrl: config.databaseUrl }),
@@ -83,13 +91,13 @@ Deno.test.beforeAll(async () => {
   );
 
   const account: LinkedInAccount = {
-    id: AccountId(TEST_ACCOUNT_ID),
+    id: ParticipantId("linkedin", TEST_ACCOUNT_ID),
     browserBindings: [
-      { configId: BrowserConfigId(TEST_BROWSER_ID), metadata: { deviceType: "desktop" } },
+      {
+        configId: BrowserConfigId(TEST_BROWSER_ID),
+        metadata: { deviceType: "desktop" },
+      },
     ],
-    displayName: "E2E Test",
-    profileUrl: "https://www.linkedin.com/in/e2e-test",
-    weeklyInviteLimit: 100,
   };
   await Effect.runPromise(accountStore.upsert(account));
 
@@ -121,7 +129,9 @@ Deno.test({
   sanitizeResources: false,
   sanitizeOps: false,
   fn: async (t) => {
-    if (!ctx) throw new Error("Context not initialized - check beforeAll errors");
+    if (!ctx) {
+      throw new Error("Context not initialized - check beforeAll errors");
+    }
 
     await t.step("create session", async () => {
       ctx!.session = await createSession(ctx!.config);
@@ -134,9 +144,9 @@ Deno.test({
     await t.step("verify bidirectional communication", async () => {
       const { send, events, cleanup } = await setupBridge(ctx!.session!.page);
 
-      // Set context so events are tagged with our browser ID
+      // Set context so events are tagged with our config ID
       await send("observe:setContext", {
-        browserId: TEST_BROWSER_ID,
+        configId: TEST_BROWSER_ID,
         tabId: "e2e-test",
       });
 
@@ -159,7 +169,9 @@ Deno.test({
       // Verify we got the exact event we sent
       if (!echoEvent) {
         console.log("Events received:", JSON.stringify(events, null, 2));
-        throw new Error(`Expected TestEcho event with echoId=${echoId}, got ${events.length} events`);
+        throw new Error(
+          `Expected TestEcho event with echoId=${echoId}, got ${events.length} events`,
+        );
       }
     });
 
@@ -173,19 +185,21 @@ Deno.test({
     });
 
     await t.step("run sockpuppet", async () => {
-      const platformLayer = makePlatformLayer({
+      const actions = makeLinkedInActions(ctx!.browserPool, ctx!.account);
+      const platformLayer = makePlatformLayer(LinkedInPlatform, {
         platform: linkedInPlatform,
         account: ctx!.account,
         eventStore: ctx!.eventStore,
         browserPool: ctx!.browserPool,
+        actions,
       });
       const journalLayer = makeJournalLayer({
-        accountId: ctx!.account.id,
+        participantId: ctx!.account.id,
         eventStore: ctx!.eventStore,
       });
 
       const program = Effect.gen(function* () {
-        const platform = yield* Platform;
+        const platform = yield* LinkedInPlatform;
         const journal = yield* Journal;
         const inbox = yield* platform.inbox;
         const threads = Object.keys(inbox.byThreadId).length;

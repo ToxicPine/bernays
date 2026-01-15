@@ -24,10 +24,13 @@ export const colors = {
 export const bold = (s: string): string => `${colors.bold}${s}${colors.reset}`;
 export const dim = (s: string): string => `${colors.dim}${s}${colors.reset}`;
 export const red = (s: string): string => `${colors.red}${s}${colors.reset}`;
-export const green = (s: string): string => `${colors.green}${s}${colors.reset}`;
-export const yellow = (s: string): string => `${colors.yellow}${s}${colors.reset}`;
+export const green = (s: string): string =>
+  `${colors.green}${s}${colors.reset}`;
+export const yellow = (s: string): string =>
+  `${colors.yellow}${s}${colors.reset}`;
 export const cyan = (s: string): string => `${colors.cyan}${s}${colors.reset}`;
-export const magenta = (s: string): string => `${colors.magenta}${s}${colors.reset}`;
+export const magenta = (s: string): string =>
+  `${colors.magenta}${s}${colors.reset}`;
 
 // =============================================================================
 // Logger Factory
@@ -47,7 +50,8 @@ export const createLogger = (silent: boolean = false): Logger => ({
   ok: (msg: string) => !silent && console.log(`${green("[OK]")} ${msg}`),
   warn: (msg: string) => !silent && console.log(`${yellow("[WARN]")} ${msg}`),
   error: (msg: string) => console.error(`${red("[ERR]")} ${msg}`),
-  section: (msg: string) => !silent && console.log(`\n${magenta("==>")} ${msg}`),
+  section: (msg: string) =>
+    !silent && console.log(`\n${magenta("==>")} ${msg}`),
   dim: (msg: string) => !silent && console.log(dim(msg)),
 });
 
@@ -62,7 +66,8 @@ export const isTty = (): boolean => Deno.stdout.isTerminal();
 // =============================================================================
 
 export class Spinner {
-  private frames = "\u280B\u2819\u2839\u2838\u283C\u2834\u2826\u2827\u2807\u280F";
+  private frames =
+    "\u280B\u2819\u2839\u2838\u283C\u2834\u2826\u2827\u2807\u280F";
   private intervalId?: number;
   private frameIndex = 0;
 
@@ -73,7 +78,9 @@ export class Spinner {
     this.intervalId = setInterval(() => {
       const frame = this.frames[this.frameIndex % this.frames.length];
       Deno.stdout.writeSync(
-        new TextEncoder().encode(`\r${colors.cyan}${frame}${colors.reset} ${label}\x1b[K`),
+        new TextEncoder().encode(
+          `\r${colors.cyan}${frame}${colors.reset} ${label}\x1b[K`,
+        ),
       );
       this.frameIndex++;
     }, 100);
@@ -103,6 +110,9 @@ export const die = (message: string): never => {
 // Status Line Helpers (for deploy-style output)
 // =============================================================================
 
-export const statusOk = (msg: string): void => console.log(`${green("\u2713")} ${msg}`);
-export const statusWarn = (msg: string): void => console.log(`${yellow("\u26A0")} ${msg}`);
-export const statusErr = (msg: string): void => console.error(`${red("\u2717")} ${msg}`);
+export const statusOk = (msg: string): void =>
+  console.log(`${green("\u2713")} ${msg}`);
+export const statusWarn = (msg: string): void =>
+  console.log(`${yellow("\u26A0")} ${msg}`);
+export const statusErr = (msg: string): void =>
+  console.error(`${red("\u2717")} ${msg}`);

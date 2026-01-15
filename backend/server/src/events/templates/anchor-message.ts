@@ -2,7 +2,12 @@
 // Template for anchor (root) message events
 
 import { z } from "@zod/zod";
-import type { CanonicalId, CorrelationId, EventId } from "$/core/branded.ts";
+import {
+  CanonicalId,
+  CorrelationId,
+  EventId,
+  ParticipantIdFromString,
+} from "$/core/mod.ts";
 
 /**
  * Base schema for anchor message events.
@@ -13,11 +18,11 @@ import type { CanonicalId, CorrelationId, EventId } from "$/core/branded.ts";
  */
 export const AnchorMessageObservedBase = z.object({
   kind: z.literal("anchor"),
-  eventId: z.uuid().transform((val) => val as EventId),
-  correlationId: z.uuid().transform((val) => val as CorrelationId),
+  eventId: z.uuid().transform(EventId),
+  correlationId: z.uuid().transform(CorrelationId),
   timestamp: z.iso.datetime(),
-  canonicalId: z.string().transform((val) => val as CanonicalId),
-  senderId: z.string(),
+  canonicalId: z.string().transform(CanonicalId),
+  senderId: z.string().transform(ParticipantIdFromString),
   content: z.string().optional(),
 });
 

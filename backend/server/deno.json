@@ -35,6 +35,7 @@
     "strictFunctionTypes": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
+    "skipLibCheck": true,
     "paths": {
       "$/*": ["./src/*"]
     }

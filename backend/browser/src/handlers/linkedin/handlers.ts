@@ -436,8 +436,7 @@ window.__registerCommand<
   { success: boolean; profileData?: unknown }
 >("linkedin:viewProfile", async (payload) => {
   try {
-    const profileUrl =
-      payload.profileUrl ||
+    const profileUrl = payload.profileUrl ||
       `https://www.linkedin.com/in/${payload.targetUserId}/`;
 
     // Navigate to profile to register view

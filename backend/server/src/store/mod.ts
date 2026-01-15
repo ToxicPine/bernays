@@ -4,7 +4,7 @@
 import { z } from "@zod/zod";
 import type { Result } from "$/core/result.ts";
 import { type Scope, Scope as makeScope } from "$/core/branded.ts";
-import type { EventId } from "$/core/branded.ts";
+import { EventId } from "$/core/branded.ts";
 
 export type EventStoreErrorCode =
   | "AppendFailed"
@@ -40,7 +40,7 @@ export const createEventStoreError = (
 export const StorableEventSchema = z.object({
   scope: z.string().min(1).transform((val) => makeScope(val)),
   type: z.string().min(1),
-  eventId: z.uuid().transform((val) => val as EventId),
+  eventId: z.uuid().transform(EventId),
   timestamp: z.iso.datetime(),
 });
 

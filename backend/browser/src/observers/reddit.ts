@@ -1,20 +1,7 @@
 // packages/browser/src/observers/reddit.ts
 // Reddit-specific observer for auth status and message detection.
 
-type CommandResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; error: { code: string; message: string; details?: unknown } };
-
-declare global {
-  interface Window {
-    __registerCommand: <TReq, TRes>(
-      command: string,
-      handler: (payload: TReq) => Promise<CommandResult<TRes>>,
-    ) => void;
-    __emitObservation: (type: string, payload: unknown) => void;
-    __observerContext: { browserId: string; tabId: string };
-  }
-}
+import { wrapCommandError } from "../core/types.ts";
 
 // Helpers
 
@@ -137,12 +124,11 @@ const checkRateLimit = (): { isLimited: boolean; retryAfter?: string } => {
     if (match) {
       const value = parseInt(match[1], 10);
       const unit = match[2];
-      const ms =
-        unit === "hour"
-          ? value * 3600000
-          : unit === "minute"
-            ? value * 60000
-            : value * 1000;
+      const ms = unit === "hour"
+        ? value * 3600000
+        : unit === "minute"
+        ? value * 60000
+        : value * 1000;
       const retryAfter = new Date(Date.now() + ms).toISOString();
       return { isLimited: true, retryAfter };
     }
@@ -163,7 +149,7 @@ interface RedditAuthParams {
 }
 
 interface RedditAuthResult {
-  accountId: string;
+  participantId: string;
   canRead: boolean;
   canWrite: boolean;
   issue?: string;
@@ -179,15 +165,14 @@ window.__registerCommand<RedditAuthParams, RedditAuthResult>(
       const rateLimit = checkRateLimit();
 
       // Check for login page
-      const isLoginPage =
-        window.location.pathname.includes("/login") ||
+      const isLoginPage = window.location.pathname.includes("/login") ||
         document.querySelector('input[name="username"]') !== null;
 
       if (isLoginPage || !hasToken) {
         // Emit signed-out observation
         window.__emitObservation("AuthObserved", {
           platform: "reddit",
-          accountId: "",
+          participantId: "reddit:",
           canRead: false,
           canWrite: false,
           issue: "signed-out",
@@ -196,7 +181,7 @@ window.__registerCommand<RedditAuthParams, RedditAuthResult>(
         return {
           ok: true,
           value: {
-            accountId: "",
+            participantId: "reddit:",
             canRead: false,
             canWrite: false,
             issue: "signed-out",
@@ -205,12 +190,13 @@ window.__registerCommand<RedditAuthParams, RedditAuthResult>(
       }
 
       const userId = username ?? "unknown";
+      const participantId = `reddit:${userId}`;
 
       // Check for ban
       if (banStatus.isBanned) {
         window.__emitObservation("AuthObserved", {
           platform: "reddit",
-          accountId: userId,
+          participantId,
           canRead: false,
           canWrite: false,
           issue: "banned",
@@ -221,7 +207,7 @@ window.__registerCommand<RedditAuthParams, RedditAuthResult>(
         return {
           ok: true,
           value: {
-            accountId: userId,
+            participantId,
             canRead: false,
             canWrite: false,
             issue: "banned",
@@ -233,7 +219,7 @@ window.__registerCommand<RedditAuthParams, RedditAuthResult>(
       if (rateLimit.isLimited) {
         window.__emitObservation("AuthObserved", {
           platform: "reddit",
-          accountId: userId,
+          participantId,
           canRead: true,
           canWrite: false,
           issue: "rate-limited",
@@ -242,7 +228,7 @@ window.__registerCommand<RedditAuthParams, RedditAuthResult>(
         // Also emit rate limit event
         window.__emitObservation("RateLimitObserved", {
           platform: "reddit",
-          browserId: window.__observerContext?.browserId ?? "unknown",
+          configId: window.__observerContext?.configId ?? "unknown",
           retryAfter: rateLimit.retryAfter,
           limitType: "general",
         });
@@ -250,7 +236,7 @@ window.__registerCommand<RedditAuthParams, RedditAuthResult>(
         return {
           ok: true,
           value: {
-            accountId: userId,
+            participantId,
             canRead: true,
             canWrite: false,
             issue: "rate-limited",
@@ -266,7 +252,7 @@ window.__registerCommand<RedditAuthParams, RedditAuthResult>(
       if (hasCaptcha) {
         window.__emitObservation("AuthObserved", {
           platform: "reddit",
-          accountId: userId,
+          participantId,
           canRead: false,
           canWrite: false,
           issue: "captcha",
@@ -275,7 +261,7 @@ window.__registerCommand<RedditAuthParams, RedditAuthResult>(
         return {
           ok: true,
           value: {
-            accountId: userId,
+            participantId,
             canRead: false,
             canWrite: false,
             issue: "captcha",
@@ -286,7 +272,7 @@ window.__registerCommand<RedditAuthParams, RedditAuthResult>(
       // Normal authenticated state
       window.__emitObservation("AuthObserved", {
         platform: "reddit",
-        accountId: userId,
+        participantId,
         canRead: true,
         canWrite: true,
       });
@@ -294,20 +280,13 @@ window.__registerCommand<RedditAuthParams, RedditAuthResult>(
       return {
         ok: true,
         value: {
-          accountId: userId,
+          participantId,
           canRead: true,
           canWrite: true,
         },
       };
     } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      return {
-        ok: false,
-        error: {
-          code: "Unknown",
-          message: error.message,
-        },
-      };
+      return wrapCommandError(err);
     }
   },
 );
@@ -388,12 +367,13 @@ window.__registerCommand<RedditMessagesParams, RedditMessagesResult>(
           const isOwn = senderUsername === currentUser;
           const roomId = channel.channel_url;
           const participants = (channel.members ?? []).map(
-            (m: { nickname: string }) => m.nickname,
+            (m: { nickname: string }) => `reddit:${m.nickname}`,
           );
 
           // Generate canonical ID
           const platformId = lastMessage.message_id ?? crypto.randomUUID();
           const canonicalId = `reddit-${platformId}`;
+          const prefixedSenderId = `reddit:${senderId}`;
 
           // Check if this is the first message in the thread (anchor)
           const isAnchor = channel.message_count === 1;
@@ -405,7 +385,7 @@ window.__registerCommand<RedditMessagesParams, RedditMessagesResult>(
               canonicalId,
               platformId,
               threadId: roomId,
-              senderId,
+              senderId: prefixedSenderId,
               content: messageContent,
               timestamp: new Date(eventTime).toISOString(),
               own: isOwn,
@@ -421,7 +401,7 @@ window.__registerCommand<RedditMessagesParams, RedditMessagesResult>(
               canonicalId,
               platformId,
               threadId: roomId,
-              senderId,
+              senderId: prefixedSenderId,
               content: messageContent,
               timestamp: new Date(eventTime).toISOString(),
               own: isOwn,
@@ -435,14 +415,7 @@ window.__registerCommand<RedditMessagesParams, RedditMessagesResult>(
         value: { messageCount },
       };
     } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      return {
-        ok: false,
-        error: {
-          code: "Unknown",
-          message: error.message,
-        },
-      };
+      return wrapCommandError(err);
     }
   },
 );
@@ -466,7 +439,7 @@ const setupAuthMonitor = (): void => {
       if (!currentAuthState) {
         window.__emitObservation("AuthObserved", {
           platform: "reddit",
-          accountId: "",
+          participantId: "reddit:",
           canRead: false,
           canWrite: false,
           issue: "signed-out",
@@ -484,7 +457,7 @@ const setupAuthMonitor = (): void => {
 
         window.__emitObservation("AccountBanned", {
           platform: "reddit",
-          accountId: username,
+          participantId: `reddit:${username}`,
           banType: banStatus.reason?.toLowerCase().includes("shadowban")
             ? "shadowbanned"
             : "suspended",

@@ -1,39 +1,28 @@
 // src/platforms/x/behavior.ts
-// X (Twitter) platform behavior - derivation and execution
+// X (Twitter) platform behavior - pure derivation only
 
-import { Effect } from "effect";
-import type {
-  AccountId,
-  BrowserConfigId,
-  ThreadId,
+import {
+  type BrowserConfigId,
+  ParticipantId,
+  type ParticipantId as ParticipantIdType,
+  type ThreadId,
 } from "@bernays/server/core";
-import type { StorableEvent } from "@bernays/server/store";
-import { BrowserPool } from "@bernays/server/backend";
-import {
-  calculateUnreadCount,
-  type MessageView,
-  type Participant,
-} from "@bernays/server/views";
-import {
-  type ExecuteError,
-  ExecuteErrorCode,
-  executeError,
-  type PlatformBehavior,
-} from "@bernays/server/platforms";
 import {
   buildThreadGraphs,
+  calculateUnreadCount,
+  extractParticipants,
   type GraphMessage,
-  graphNodesToMessages,
   type ThreadGraph,
+  toMessageViews,
 } from "@bernays/server/views";
-import { logger } from "$/logger.ts";
+import type { PlatformBehavior } from "@bernays/server/platforms";
 
 // Platform-specific types
 import type { XAnchor, XEvent } from "./schemas.ts";
-import type { XIntent } from "./schemas.ts";
 import type { XInbox, XIndexMeta, XThread } from "./views.ts";
 import type { XAccount } from "./account.ts";
-import type { XAuthStatus, XBrowser } from "./browser.ts";
+import { type XAuthStatus, type XBrowser } from "./browser.ts";
+import type { XContact } from "./contact.ts";
 import { X_SCOPE } from "./schemas.ts";
 
 // Type Alias
@@ -43,38 +32,19 @@ type XScope = typeof X_SCOPE;
 // Helper Functions
 
 /**
- * Convert graph nodes to MessageView format
- */
-const toMessageViews = (
-  graph: ThreadGraph<GraphMessage, XAnchor>,
-): readonly MessageView[] =>
-  graphNodesToMessages(graph.nodes).map((m) => ({
-    id: m.canonicalId,
-    senderId: m.senderId,
-    content: m.content,
-    timestamp: m.timestamp,
-  }));
-
-/**
- * Extract participants from X anchor
- */
-const extractParticipants = (anchor: XAnchor): readonly Participant[] =>
-  anchor.participants.map((id) => ({ id }));
-
-/**
  * Convert ThreadGraph to XThread
  */
 const toXThread = (
-  graph: ThreadGraph<GraphMessage, XAnchor>,
-  accountId: string,
+  graph: ThreadGraph<XScope, GraphMessage, XAnchor>,
+  participantId: ParticipantIdType<"x">,
 ): XThread => {
-  const messages = toMessageViews(graph);
-  const unreadCount = calculateUnreadCount(messages, accountId);
+  const messages = toMessageViews<"x">(graph);
+  const unreadCount = calculateUnreadCount(messages, participantId);
 
   return {
     threadId: graph.id,
     messages,
-    participants: extractParticipants(graph.anchor),
+    participants: extractParticipants<"x">(graph.anchor),
     anchor: graph.anchor,
     unreadCount,
     lastActivity: graph.lastActivity,
@@ -86,38 +56,38 @@ const toXThread = (
 
 export const xBehavior: PlatformBehavior<
   XScope,
+  "x",
   XEvent,
-  XIntent,
   XAnchor,
   XThread,
   XInbox,
   XAccount,
-  XBrowser
+  XBrowser,
+  XContact
 > = {
   scope: X_SCOPE,
+  identity: "x",
 
-  // ---------------------------------------------------------------------------
+  // ─────────────────────────────────────────────────────────────────────────
   // Derivation
-  // ---------------------------------------------------------------------------
+  // ─────────────────────────────────────────────────────────────────────────
 
   deriveInbox: (
     events: readonly XEvent[],
-    accountId: AccountId,
+    participantId: ParticipantIdType<"x">,
   ): XInbox => {
-    const allThreads = buildThreadGraphs<GraphMessage, XAnchor>(
-      events as readonly StorableEvent[],
-    );
-
-    const xThreads = [...allThreads.values()].filter(
-      (t) => t.scope === X_SCOPE,
+    // Events are pre-filtered by scope via the Projection layer
+    const threads = buildThreadGraphs<XScope, GraphMessage, XAnchor>(
+      X_SCOPE,
+      events,
     );
 
     const byThreadId: Record<string, XIndexMeta> = {};
     let totalUnread = 0;
 
-    for (const thread of xThreads) {
-      const messages = toMessageViews(thread);
-      const unreadCount = calculateUnreadCount(messages, accountId);
+    for (const thread of threads.values()) {
+      const messages = toMessageViews<"x">(thread);
+      const unreadCount = calculateUnreadCount(messages, participantId);
       totalUnread += unreadCount;
 
       byThreadId[thread.id] = {
@@ -138,21 +108,23 @@ export const xBehavior: PlatformBehavior<
     events: readonly XEvent[],
     threadId: ThreadId,
   ): XThread | undefined => {
-    const allThreads = buildThreadGraphs<GraphMessage, XAnchor>(
-      events as readonly StorableEvent[],
+    // Events are pre-filtered by scope via the Projection layer
+    const threads = buildThreadGraphs<XScope, GraphMessage, XAnchor>(
+      X_SCOPE,
+      events,
     );
-    const thread = allThreads.get(threadId);
+    const thread = threads.get(threadId);
 
-    if (!thread || thread.scope !== X_SCOPE) {
+    if (!thread) {
       return undefined;
     }
 
     const authEvent = events.find((e) => e.type === "AuthObserved");
-    const accountId = authEvent
-      ? (authEvent as { accountId: string }).accountId
-      : "";
+    const participantId = authEvent
+      ? (authEvent as { participantId: ParticipantIdType<"x"> }).participantId
+      : ParticipantId("x", "");
 
-    return toXThread(thread, accountId);
+    return toXThread(thread, participantId);
   },
 
   deriveBrowsers: (
@@ -176,14 +148,13 @@ export const xBehavior: PlatformBehavior<
     for (const event of events) {
       if (event.type === "AuthObserved") {
         const authEvent = event as {
-          configId?: string;
-          browserId?: string;
+          configId: string;
           authenticated: boolean;
           canRead?: boolean;
           canWrite?: boolean;
           issue?: string;
         };
-        const configId = authEvent.configId ?? authEvent.browserId;
+        const { configId } = authEvent;
         if (configId) {
           const isSuspended = authEvent.issue === "suspended";
           browserStatus.set(configId, {
@@ -230,7 +201,7 @@ export const xBehavior: PlatformBehavior<
     // Map account's browser bindings to XBrowser
     return account.browserBindings.map((binding) => {
       const status = browserStatus.get(binding.configId) ?? {
-        authStatus: "unknown" as XAuthStatus,
+        authStatus: "unknown" as const,
         suspended: false,
         canRead: false,
         canWrite: false,
@@ -249,118 +220,75 @@ export const xBehavior: PlatformBehavior<
     });
   },
 
-  // ---------------------------------------------------------------------------
-  // Execution
-  // ---------------------------------------------------------------------------
+  deriveContact: (
+    events: readonly XEvent[],
+    participantId: ParticipantIdType<"x">,
+  ): XContact | undefined => {
+    let handle: string | undefined;
+    let following = false;
+    let lastInteraction: string | undefined;
 
-  execute: (
-    intent: XIntent,
-    browsers: readonly XBrowser[],
-    preferConfigId?: BrowserConfigId,
-  ): Effect.Effect<
-    { usedConfigId: BrowserConfigId },
-    ExecuteError,
-    BrowserPool
-  > =>
-    Effect.gen(function* () {
-      const pool = yield* BrowserPool;
-
-      // Select browser: prefer specified, then running+authenticated+not-suspended, then any running
-      let selected: XBrowser | undefined;
-
-      if (preferConfigId) {
-        selected = browsers.find(
-          (b) =>
-            b.configId === preferConfigId &&
-            b.isRunning &&
-            b.authStatus === "authenticated" &&
-            !b.suspended,
-        );
-      }
-
-      if (!selected) {
-        selected = browsers.find(
-          (b) =>
-            b.isRunning &&
-            b.authStatus === "authenticated" &&
-            !b.suspended &&
-            b.canWrite,
-        );
-      }
-
-      if (!selected) {
-        selected = browsers.find(
-          (b) => b.isRunning && b.authStatus === "authenticated" && !b.suspended,
-        );
-      }
-
-      if (!selected) {
-        selected = browsers.find((b) => b.isRunning && !b.suspended);
-      }
-
-      if (!selected) {
-        return yield* Effect.fail(
-          executeError(ExecuteErrorCode("NoBrowserAvailable"), "No running browser available"),
-        );
-      }
-
-      // Check if browser is rate limited
-      if (selected.rateLimitedUntil) {
-        const retryAfter = new Date(selected.rateLimitedUntil);
-        if (retryAfter > new Date()) {
-          return yield* Effect.fail(
-            executeError(
-              ExecuteErrorCode("RateLimited"),
-              `Browser rate limited until ${selected.rateLimitedUntil}`,
-            ),
-          );
+    for (const event of events) {
+      // Extract info from tweets
+      if (event.type === "TweetObserved") {
+        const tweetEvent = event as {
+          authorId: string;
+          authorHandle: string;
+          createdAt: string;
+        };
+        if (tweetEvent.authorId === participantId) {
+          handle = tweetEvent.authorHandle;
+          if (
+            !lastInteraction ||
+            tweetEvent.createdAt > lastInteraction
+          ) {
+            lastInteraction = tweetEvent.createdAt;
+          }
         }
       }
 
-      const configId = selected.configId;
-
-      logger.info(`[X] Executing intent: ${intent.type}`, { configId });
-
-      // Map intent type to bridge command
-      const command = (() => {
-        switch (intent.type) {
-          case "SendMessage":
-            return { type: "x:sendMessage", payload: intent };
-          case "SyncConversations":
-            return { type: "x:syncConversations", payload: intent };
-          case "PostTweet":
-            return { type: "x:postTweet", payload: intent };
-          case "ReplyToTweet":
-            return { type: "x:replyToTweet", payload: intent };
-          case "Retweet":
-            return { type: "x:retweet", payload: intent };
-          case "Like":
-            return { type: "x:like", payload: intent };
-          case "Unlike":
-            return { type: "x:unlike", payload: intent };
-          case "Follow":
-            return { type: "x:follow", payload: intent };
-          case "Unfollow":
-            return { type: "x:unfollow", payload: intent };
-          case "DeleteTweet":
-            return { type: "x:deleteTweet", payload: intent };
-          case "BookmarkTweet":
-            return { type: "x:bookmarkTweet", payload: intent };
-          case "SearchTweets":
-            return { type: "x:searchTweets", payload: intent };
+      // Track follow status
+      if (event.type === "FollowObserved") {
+        const followEvent = event as {
+          targetUserId: string;
+          targetHandle: string;
+          followedAt: string;
+        };
+        if (followEvent.targetUserId === participantId) {
+          following = true;
+          handle = followEvent.targetHandle;
+          if (
+            !lastInteraction ||
+            followEvent.followedAt > lastInteraction
+          ) {
+            lastInteraction = followEvent.followedAt;
+          }
         }
-      })();
+      }
 
-      yield* pool.send(configId, command).pipe(
-        Effect.mapError((err) =>
-          executeError(
-            ExecuteErrorCode("CommandFailed"),
-            `Bridge command failed: ${err.message}`,
-            err,
-          )
-        ),
-      );
+      // Extract from DM anchor participants
+      if (event.type === "AnchorMessageObserved") {
+        const anchorEvent = event as {
+          anchor: { participants: readonly string[] };
+        };
+        if (anchorEvent.anchor.participants.includes(participantId as string)) {
+          if (!lastInteraction || event.timestamp > lastInteraction) {
+            lastInteraction = event.timestamp;
+          }
+        }
+      }
+    }
 
-      return { usedConfigId: configId };
-    }),
+    // Only return contact if we found any info
+    if (!handle && !lastInteraction) {
+      return undefined;
+    }
+
+    return {
+      id: participantId,
+      handle,
+      following,
+      lastInteraction,
+    };
+  },
 };

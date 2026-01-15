@@ -2,6 +2,7 @@
 // Journal service layer using Effect.ts
 // The journal is a projection of the global event store,
 // filtered by scope: "journal" and accountId.
+// All writes go through Injector for validated writes per ARCHITECTURE.md.
 
 import { Effect, Layer } from "effect";
 import {
@@ -15,9 +16,9 @@ import {
   type StorableEvent,
 } from "$/store/mod.ts";
 import {
-  type AccountId,
-  type CorrelationId,
-  type EventId,
+  CorrelationId,
+  EventId,
+  type ParticipantId,
   ThreadId,
 } from "$/core/branded.ts";
 import {
@@ -25,33 +26,42 @@ import {
   type JournalEntry,
   JournalEntrySchema,
 } from "$/events/journal.ts";
+import { type Injector, makeInjector } from "$/projections/mod.ts";
 
 export interface JournalRuntimeConfig {
-  readonly accountId: AccountId;
+  readonly participantId: ParticipantId;
   readonly eventStore: EventStore<StorableEvent>;
   readonly generateCorrelationId?: () => CorrelationId;
 }
 
 /**
  * Create a Journal service that uses the global event store.
- * Journal entries are stored as scope: "journal", type: "Entry" events with the accountId.
+ * Journal entries are stored as scope: "journal", type: "Entry" events with the participantId.
+ * All writes go through Injector for validated writes per ARCHITECTURE.md.
  */
 const makeJournalService = (config: JournalRuntimeConfig): JournalService => {
-  const { accountId, eventStore, generateCorrelationId } = config;
+  const { participantId, eventStore, generateCorrelationId } = config;
 
   const genCorrelationId = generateCorrelationId ??
-    (() => crypto.randomUUID() as CorrelationId);
+    (() => CorrelationId(crypto.randomUUID()));
+
+  // Create journal-specific Injector for validated writes
+  const injector: Injector<JournalEntry> = makeInjector(
+    JOURNAL_SCOPE,
+    JournalEntrySchema,
+    eventStore,
+  );
 
   return {
     record: (input: JournalEntryInput) =>
-      Effect.promise(async () => {
+      Effect.gen(function* () {
         const entry: JournalEntry = {
           scope: JOURNAL_SCOPE,
           type: "Entry",
-          eventId: crypto.randomUUID() as EventId,
+          eventId: EventId(crypto.randomUUID()),
           correlationId: genCorrelationId(),
           timestamp: new Date().toISOString(),
-          accountId,
+          participantId,
           kind: input.kind,
           ...(input.threadId ? { threadId: ThreadId(input.threadId) } : {}),
           ...Object.fromEntries(
@@ -61,12 +71,15 @@ const makeJournalService = (config: JournalRuntimeConfig): JournalService => {
           ),
         };
 
-        const result = await eventStore.append([entry]);
-        if (!result.ok) {
-          throw new Error(
-            `Failed to record journal entry: ${result.error.message}`,
-          );
-        }
+        // Write through Injector (validates + appends)
+        // Convert InjectorError to thrown exception to match interface
+        yield* injector.append(entry).pipe(
+          Effect.catchAll((err) =>
+            Effect.die(
+              new Error(`Failed to record journal entry: ${err.message}`),
+            )
+          ),
+        );
       }),
 
     entries: (since?: string) =>
@@ -90,7 +103,7 @@ const makeJournalService = (config: JournalRuntimeConfig): JournalService => {
           const parsed = JournalEntrySchema.safeParse(event);
           if (!parsed.success) continue;
 
-          if (parsed.data.accountId !== accountId) continue;
+          if (parsed.data.participantId !== participantId) continue;
 
           journalEntries.push(parsed.data);
         }
@@ -114,9 +127,9 @@ export const makeJournalLayer = (
  * Uses the shared createInMemoryEventStore from store/memory.ts.
  */
 export const makeInMemoryJournalLayer = (
-  accountId: AccountId,
+  participantId: ParticipantId,
 ): Layer.Layer<Journal> =>
   makeJournalLayer({
-    accountId,
+    participantId,
     eventStore: createInMemoryEventStore(),
   });

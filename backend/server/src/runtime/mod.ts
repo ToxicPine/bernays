@@ -5,20 +5,19 @@
 // Note: For graph utilities, import from $/views/mod.ts
 
 // Sockpuppet Services
+// Note: Platform tags are now platform-specific (e.g., LinkedInPlatform from plugins)
 export {
   Journal,
   type JournalEntryInput,
   type JournalService,
-  Platform,
-  type PlatformServiceInterface,
+  type PlatformService,
 } from "./sockpuppet/services.ts";
 
 // Platform Layer
-export {
-  makePlatformLayer,
-  makePlatformService,
-  type PlatformRuntimeConfig,
-} from "./sockpuppet/platform-runtime.ts";
+export { makePlatformLayer } from "./sockpuppet/platform-runtime.ts";
+
+// Re-export makePlatformService from canonical location
+export { makePlatformService } from "$/platforms/mod.ts";
 
 // Journal Layer
 export {

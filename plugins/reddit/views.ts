@@ -8,9 +8,9 @@ import type { RedditAnchor } from "./schemas.ts";
 // Reddit Thread View
 
 export interface RedditThread extends BaseThreadView<RedditAnchor> {
+  readonly isGroupChat: boolean;
   readonly unreadCount: number;
   readonly lastActivity: string;
-  readonly isGroupChat: boolean;
 }
 
 // Reddit Inbox Index Metadata
@@ -24,6 +24,6 @@ export interface RedditIndexMeta {
 // Reddit Inbox View
 
 export interface RedditInbox extends BaseInboxView<RedditIndexMeta> {
-  readonly syncedAt: string;
   readonly unreadTotal: number;
+  readonly syncedAt: string;
 }

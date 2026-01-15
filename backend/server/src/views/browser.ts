@@ -3,10 +3,10 @@
 
 import { z } from "@zod/zod";
 import {
-  type AccountId,
   BrowserConfigId,
   type BrowserConfigId as BrowserConfigIdType,
-} from "$/core/branded.ts";
+  type ParticipantId,
+} from "$/core/mod.ts";
 
 // Browser Binding
 
@@ -44,9 +44,11 @@ export const parseBrowserBindings = (
 /**
  * Minimum account structure required by the platform service.
  * Each platform extends this with platform-specific fields.
+ *
+ * @template TScope - The identity scope (e.g., "linkedin")
  */
-export interface BaseAccount {
-  readonly id: AccountId;
+export interface BaseAccount<TScope extends string = string> {
+  readonly id: ParticipantId<TScope>;
   readonly browserBindings: readonly BrowserBinding[];
 }
 

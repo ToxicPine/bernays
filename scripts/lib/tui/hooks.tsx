@@ -2,7 +2,7 @@
 // Hooks — Reusable navigation and list management hooks for TUI scripts
 // =============================================================================
 
-import { useState, useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 // =============================================================================
 // List Navigation
@@ -37,7 +37,7 @@ export interface ListNavigationState<T> {
  */
 export const useListNavigation = <T,>(
   items: readonly T[],
-  options?: { initialIndex?: number; wrap?: boolean }
+  options?: { initialIndex?: number; wrap?: boolean },
 ): ListNavigationState<T> => {
   const { initialIndex = 0, wrap = false } = options ?? {};
   const [selectedIndex, setSelectedIndex] = useState(initialIndex);
@@ -50,7 +50,7 @@ export const useListNavigation = <T,>(
       }
       return Math.max(0, Math.min(items.length - 1, idx));
     },
-    [items.length, wrap]
+    [items.length, wrap],
   );
 
   const up = useCallback(() => {
@@ -65,7 +65,7 @@ export const useListNavigation = <T,>(
     (index: number) => {
       setSelectedIndex(clampIndex(index));
     },
-    [clampIndex]
+    [clampIndex],
   );
 
   const reset = useCallback(() => {
@@ -124,7 +124,7 @@ export interface PaginationState<T> {
  */
 export const usePagination = <T,>(
   items: readonly T[],
-  pageSize: number
+  pageSize: number,
 ): PaginationState<T> => {
   const [page, setPageState] = useState(0);
 
@@ -132,7 +132,7 @@ export const usePagination = <T,>(
 
   const clampPage = useCallback(
     (p: number): number => Math.max(0, Math.min(totalPages - 1, p)),
-    [totalPages]
+    [totalPages],
   );
 
   const pageItems = useMemo(() => {
@@ -154,7 +154,7 @@ export const usePagination = <T,>(
     (p: number) => {
       setPageState(clampPage(p));
     },
-    [clampPage]
+    [clampPage],
   );
 
   const reset = useCallback(() => {
@@ -220,7 +220,7 @@ export interface PaginatedListState<T> {
  */
 export const usePaginatedList = <T,>(
   items: readonly T[],
-  pageSize: number
+  pageSize: number,
 ): PaginatedListState<T> => {
   const [absoluteIndex, setAbsoluteIndex] = useState(0);
 
@@ -237,7 +237,7 @@ export const usePaginatedList = <T,>(
 
   const clampAbsolute = useCallback(
     (idx: number): number => Math.max(0, Math.min(items.length - 1, idx)),
-    [items.length]
+    [items.length],
   );
 
   const up = useCallback(() => {
@@ -276,4 +276,3 @@ export const usePaginatedList = <T,>(
     reset,
   };
 };
-

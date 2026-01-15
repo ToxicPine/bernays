@@ -6,12 +6,13 @@ import { config } from "./config.ts";
 import { tty } from "./logger.ts";
 import { initializeStores } from "./stores.ts";
 import { createBrowserLayer, runWithSockpuppet } from "./runtime.ts";
-import { Journal, Platform } from "@bernays/server/runtime";
+import { Journal } from "@bernays/server/runtime";
+import { LinkedInPlatform } from "@bernays/plugins/linkedin";
 import { sleep } from "effect/Clock";
 import { seconds } from "effect/Duration";
 
 export const sockpuppet = Effect.gen(function* () {
-  const platform = yield* Platform;
+  const platform = yield* LinkedInPlatform;
   const journal = yield* Journal;
 
   const inbox = yield* platform.inbox;

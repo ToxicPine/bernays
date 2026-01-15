@@ -10,7 +10,13 @@
 // - Thread identity = canonicalId of the root anchor message
 
 import { z } from "@zod/zod";
-import { type CanonicalId, type Scope, ThreadId } from "$/core/branded.ts";
+import {
+  CanonicalId,
+  type CanonicalId as CanonicalIdType,
+  type ParticipantId as ParticipantIdType,
+  ParticipantIdFromString,
+  ThreadId,
+} from "$/core/mod.ts";
 import { type StorableEvent, StorableEventSchema } from "$/store/mod.ts";
 
 // Graph Message Schemas
@@ -21,8 +27,8 @@ import { type StorableEvent, StorableEventSchema } from "$/store/mod.ts";
  */
 export const GraphAnchorSchema = StorableEventSchema.extend({
   kind: z.literal("anchor"),
-  canonicalId: z.string().transform((v) => v as CanonicalId),
-  senderId: z.string(),
+  canonicalId: z.string().transform(CanonicalId),
+  senderId: z.string().transform(ParticipantIdFromString),
   content: z.string().optional(),
   anchor: z.unknown(),
 }).loose();
@@ -35,9 +41,9 @@ export type GraphAnchor = z.infer<typeof GraphAnchorSchema>;
  */
 export const GraphReplySchema = StorableEventSchema.extend({
   kind: z.literal("reply"),
-  canonicalId: z.string().transform((v) => v as CanonicalId),
-  senderId: z.string(),
-  predecessorId: z.string().transform((v) => v as CanonicalId),
+  canonicalId: z.string().transform(CanonicalId),
+  senderId: z.string().transform(ParticipantIdFromString),
+  predecessorId: z.string().transform(CanonicalId),
   content: z.string().optional(),
 }).loose();
 
@@ -49,7 +55,7 @@ export type GraphReply = z.infer<typeof GraphReplySchema>;
  */
 export const GraphMutationSchema = StorableEventSchema.extend({
   kind: z.literal("mutation"),
-  canonicalId: z.string().transform((v) => v as CanonicalId),
+  canonicalId: z.string().transform(CanonicalId),
   mutation: z.enum(["deleted", "edited"]),
   editedContent: z.string().optional(),
 }).loose();
@@ -98,16 +104,18 @@ export interface GraphNode<TMessage extends GraphMessage = GraphMessage> {
 /**
  * A thread derived from the message graph.
  *
+ * @template TScope - The platform scope (e.g., "linkedin", "x")
  * @template TMessage - The message event type (defaults to GraphMessage)
  * @template TAnchor - The anchor type (defaults to unknown)
  */
 export interface ThreadGraph<
+  TScope extends string = string,
   TMessage extends GraphMessage = GraphMessage,
   TAnchor = unknown,
 > {
   /** Thread ID (derived from root message's canonicalId) */
   readonly id: ThreadId;
-  readonly scope: Scope;
+  readonly scope: TScope;
   readonly anchor: TAnchor;
   readonly nodes: readonly GraphNode<TMessage>[];
   readonly lastActivity: string;
@@ -117,7 +125,6 @@ export interface ThreadGraph<
 
 interface NodeState {
   readonly message: GraphMessage;
-  readonly scope: Scope;
   deleted: boolean;
   editedContent?: string;
 }
@@ -130,21 +137,31 @@ interface GraphState {
 // Graph Builder
 
 /**
- * Build thread graphs from a sequence of events.
+ * Build thread graphs from a sequence of scope-filtered events.
  *
- * This is a utility function that adapters can use to build their
+ * This is a utility function that behaviors use to build their
  * deriveInbox and deriveThread implementations. It processes
  * anchor, reply, and mutation events to build a thread graph.
  *
- * @param events - Events to process (should be pre-filtered by scope)
- * @returns Map of ThreadId to ThreadGraph
+ * IMPORTANT: Events must be pre-filtered by scope via the Projection layer.
+ * The scope parameter types the returned ThreadGraph instances, ensuring
+ * compile-time safety when working with scope-specific threads.
+ *
+ * @template TScope - The platform scope (e.g., "linkedin", "x")
+ * @template TMessage - The message event type (defaults to GraphMessage)
+ * @template TAnchor - The anchor type (defaults to unknown)
+ * @param scope - The platform scope for typing the output
+ * @param events - Events to process (pre-filtered by scope from Projection)
+ * @returns Map of ThreadId to scope-typed ThreadGraph
  */
 export function buildThreadGraphs<
+  TScope extends string,
   TMessage extends GraphMessage = GraphMessage,
   TAnchor = unknown,
 >(
+  scope: TScope,
   events: readonly StorableEvent[],
-): Map<ThreadId, ThreadGraph<TMessage, TAnchor>> {
+): Map<ThreadId, ThreadGraph<TScope, TMessage, TAnchor>> {
   const state: GraphState = {
     nodes: new Map(),
     children: new Map(),
@@ -160,7 +177,6 @@ export function buildThreadGraphs<
       if (!state.nodes.has(parsed.canonicalId)) {
         state.nodes.set(parsed.canonicalId, {
           message: parsed,
-          scope: parsed.scope,
           deleted: false,
         });
       }
@@ -168,7 +184,6 @@ export function buildThreadGraphs<
       if (!state.nodes.has(parsed.canonicalId)) {
         state.nodes.set(parsed.canonicalId, {
           message: parsed,
-          scope: parsed.scope,
           deleted: false,
         });
 
@@ -193,7 +208,7 @@ export function buildThreadGraphs<
     (n): n is NodeState & { message: GraphAnchor } => isGraphAnchor(n.message),
   );
 
-  const result = new Map<ThreadId, ThreadGraph<TMessage, TAnchor>>();
+  const result = new Map<ThreadId, ThreadGraph<TScope, TMessage, TAnchor>>();
 
   for (const root of roots) {
     const rootMsg = root.message;
@@ -220,7 +235,7 @@ export function buildThreadGraphs<
     const threadId = ThreadId(rootMsg.canonicalId);
     result.set(threadId, {
       id: threadId,
-      scope: root.scope,
+      scope,
       anchor: rootMsg.anchor as TAnchor,
       nodes: graphNodes,
       lastActivity,
@@ -293,11 +308,11 @@ export function graphNodesToMessages<TMessage extends GraphMessage>(
  * A simplified view of a graph node message.
  */
 export interface GraphNodeView {
-  readonly canonicalId: CanonicalId;
-  readonly senderId: string;
+  readonly canonicalId: CanonicalIdType;
+  readonly senderId: ParticipantIdType;
   readonly content?: string;
   readonly timestamp: string;
-  readonly predecessorId?: CanonicalId;
+  readonly predecessorId?: CanonicalIdType;
 }
 
 // Internal Helpers

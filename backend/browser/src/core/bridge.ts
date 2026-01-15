@@ -2,7 +2,7 @@
 // Browser-side bridge - compiled to pure JS for injection
 
 interface ObserverContext {
-  browserId: string;
+  configId: string;
   tabId: string;
 }
 
@@ -123,7 +123,7 @@ window.__bridgeEmit = async (
 // Observer Context and Emission
 
 window.__observerContext = {
-  browserId: "unknown",
+  configId: "unknown",
   tabId: "unknown",
 };
 
@@ -134,7 +134,7 @@ window.__emitObservation = (type: string, payload: unknown): void => {
     correlationId: crypto.randomUUID(),
     payload: {
       type,
-      browserId: window.__observerContext.browserId,
+      configId: window.__observerContext.configId,
       tabId: window.__observerContext.tabId,
       timestamp: new Date().toISOString(),
       ...(payload as object),

@@ -8,8 +8,8 @@ import type { LinkedInAnchor } from "./schemas.ts";
 // LinkedIn Thread View
 
 export interface LinkedInThread extends BaseThreadView<LinkedInAnchor> {
-  readonly unreadCount: number;
   readonly isSponsored: boolean;
+  readonly unreadCount: number;
   readonly lastActivity: string;
 }
 
@@ -24,7 +24,7 @@ export interface LinkedInIndexMeta {
 // LinkedIn Inbox View
 
 export interface LinkedInInbox extends BaseInboxView<LinkedInIndexMeta> {
-  readonly syncedAt: string;
   readonly pendingInvitations: number;
   readonly weeklyInvitesRemaining: number;
+  readonly syncedAt: string;
 }

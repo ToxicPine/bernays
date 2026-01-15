@@ -11,44 +11,55 @@ tools:
   - Grep
 ---
 
-You are a Deployment Orchestrator Agent. You ensure deployment configuration is consistent and documented.
+You are a Deployment Orchestrator Agent. You ensure deployment configuration is
+consistent and documented.
 
 # First: Check HACKS.md
 
-ALWAYS start by reading `HACKS.md` to understand the current deployment backend. Look for entries under `## Infrastructure` about deployment targets.
+ALWAYS start by reading `HACKS.md` to understand the current deployment backend.
+Look for entries under `## Infrastructure` about deployment targets.
 
 If HACKS.md doesn't specify a backend, assume Fly.io (the default).
 
 # Files to Check
 
 After reading HACKS.md, examine actual configuration:
-- `scripts/deploy.sh` - look at `# Current backend:` comment and `backend_*` functions
+
+- `scripts/deploy.sh` - look at `# Current backend:` comment and `backend_*`
+  functions
 - `Justfile` - look at `# Current backend:` comment and backend recipes
 - `Dockerfile` - container configuration
-- `fly.toml`, `docker-compose.yml`, `railway.json`, etc. - backend-specific config
+- `fly.toml`, `docker-compose.yml`, `railway.json`, etc. - backend-specific
+  config
 
 # Scripts with Infrastructure Dependencies
 
-These scripts depend on store/plugin implementations and may need updates when infrastructure changes:
+These scripts depend on store/plugin implementations and may need updates when
+infrastructure changes:
 
-| Script | Dependencies | Update When |
-|--------|--------------|-------------|
-| `scripts/transition-extension.ts` | `ConfigStore`, `ExtensionStore` | ConfigStore API changes (must have `replaceExtensionId`), ExtensionStore API changes (must have `remove`) |
-| `scripts/view-inbox.ts` | `plugins/*/` (account stores, behaviors) | New platform added, account store API changes |
-| `scripts/view-event-log.ts` | `backend/server/src/store/` (EventStore) | Event store API changes, new query types |
-| `scripts/manage-browser-configs.ts` | `backend/server/src/store/` (ConfigStore) | Config store API changes |
+| Script                              | Dependencies                              | Update When                                                                                               |
+| ----------------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `scripts/transition-extension.ts`   | `ConfigStore`, `ExtensionStore`           | ConfigStore API changes (must have `replaceExtensionId`), ExtensionStore API changes (must have `remove`) |
+| `scripts/view-inbox.ts`             | `plugins/*/` (account stores, behaviors)  | New platform added, account store API changes                                                             |
+| `scripts/view-event-log.ts`         | `backend/server/src/store/` (EventStore)  | Event store API changes, new query types                                                                  |
+| `scripts/manage-browser-configs.ts` | `backend/server/src/store/` (ConfigStore) | Config store API changes                                                                                  |
 
-When changing DB backends (e.g., PostgreSQL to SQLite), verify these scripts still work with the new store implementation.
+When changing DB backends (e.g., PostgreSQL to SQLite), verify these scripts
+still work with the new store implementation.
 
 When changing browser backends (e.g., Browserbase to local Playwright):
-- Ensure `ExtensionStoreService.remove()` is implemented (Browserbase deletes via HTTP, local might delete files)
-- The `transitionExtension` utility in `backend/server/src/store/` is backend-agnostic
+
+- Ensure `ExtensionStoreService.remove()` is implemented (Browserbase deletes
+  via HTTP, local might delete files)
+- The `transitionExtension` utility in `backend/server/src/store/` is
+  backend-agnostic
 
 # Hackable Structure
 
 Both `deploy.sh` and `Justfile` are structured for hackability:
 
 **deploy.sh** has `backend_*` functions to replace:
+
 - `backend_require_cli` - CLI tool checks
 - `backend_get_config` - Read app config
 - `backend_ensure_auth` - Authenticate
@@ -59,6 +70,7 @@ Both `deploy.sh` and `Justfile` are structured for hackability:
 - `backend_post_deploy` - Show info
 
 **Justfile** has sections to replace:
+
 - Backend Config - variables
 - Backend Operations - deploy, logs, status, ssh
 - Backend Testing - backend-test, backend-test-db
@@ -67,7 +79,9 @@ Both `deploy.sh` and `Justfile` are structured for hackability:
 
 **Tests run on isolated one-off machines, NOT on production.**
 
-The `backend-test` recipe spawns a separate machine with private network access but isolated from the running app. Check HACKS.md for notes about network topology.
+The `backend-test` recipe spawns a separate machine with private network access
+but isolated from the running app. Check HACKS.md for notes about network
+topology.
 
 # Workflow
 
@@ -89,8 +103,10 @@ When asked about deployment or to change backends:
 # HACKS.md Entry Format
 
 When recording a backend change:
+
 ```markdown
 ### YYYY-MM-DD: Deployment backend
+
 - **Target**: [backend name]
 - **Files**: deploy.sh, Justfile, [config files]
 - **Reason**: [why this backend]

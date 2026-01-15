@@ -3,7 +3,7 @@
 // =============================================================================
 
 import { useCallback, useMemo } from "react";
-import { useInput, type Key } from "ink";
+import { type Key, useInput } from "ink";
 
 // =============================================================================
 // Types
@@ -208,7 +208,7 @@ export const createBindings = (options: BindingOptions): BindingSet => {
  */
 export const useKeyHandler = (
   bindingSet: BindingSet,
-  deps: readonly unknown[] = []
+  deps: readonly unknown[] = [],
 ): void => {
   const handler = useCallback(
     (input: string, key: Key) => {
@@ -229,7 +229,7 @@ export const useKeyHandler = (
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [bindingSet, ...deps]
+    [bindingSet, ...deps],
   );
 
   useInput(handler);
@@ -247,7 +247,7 @@ export const listBindings = (
   onDown: () => void,
   onSelect: () => void,
   onQuit: () => void,
-  options?: { onBack?: () => void; onRefresh?: () => void }
+  options?: { onBack?: () => void; onRefresh?: () => void },
 ): BindingSet =>
   createBindings({
     navigation: true,
@@ -268,7 +268,7 @@ export const paginatedListBindings = (
   onPageDown: () => void,
   onSelect: () => void,
   onQuit: () => void,
-  options?: { onBack?: () => void; onRefresh?: () => void }
+  options?: { onBack?: () => void; onRefresh?: () => void },
 ): BindingSet =>
   createBindings({
     navigation: true,
@@ -288,7 +288,7 @@ export const paginatedListBindings = (
 export const detailBindings = (
   onBack: () => void,
   onQuit: () => void,
-  custom?: KeyBinding[]
+  custom?: KeyBinding[],
 ): BindingSet =>
   createBindings({
     onBack,

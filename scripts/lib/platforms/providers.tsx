@@ -4,10 +4,10 @@
 
 import React, { type ReactNode } from "react";
 import { Box, Text } from "ink";
-import type { ThreadId, AccountId } from "@bernays/server/core";
+import { type ParticipantId, type ThreadId } from "@bernays/server/core";
 import type { StorableEvent } from "@bernays/server/store";
 import type { MessageView } from "@bernays/server/views";
-import { relativeTime } from "./ink.tsx";
+import { relativeTime } from "../tui/ink.tsx";
 
 // =============================================================================
 // Base Types for TUI
@@ -31,7 +31,9 @@ export interface BaseThreadSummary {
 /**
  * Base inbox shape with thread summaries.
  */
-export interface BaseInbox<TMeta extends BaseThreadSummary = BaseThreadSummary> {
+export interface BaseInbox<
+  TMeta extends BaseThreadSummary = BaseThreadSummary,
+> {
   readonly byThreadId: Readonly<Record<string, TMeta>>;
 }
 
@@ -76,10 +78,16 @@ export interface PlatformProvider<
   formatAccountName: (account: TAccount) => string;
 
   /** Derive inbox from events */
-  deriveInbox: (events: readonly StorableEvent[], accountId: AccountId) => TInbox;
+  deriveInbox: (
+    events: readonly StorableEvent[],
+    participantId: ParticipantId,
+  ) => TInbox;
 
   /** Derive thread from events */
-  deriveThread: (events: readonly StorableEvent[], threadId: ThreadId) => TThread | undefined;
+  deriveThread: (
+    events: readonly StorableEvent[],
+    threadId: ThreadId,
+  ) => TThread | undefined;
 
   /** Render inbox header with stats */
   renderInboxHeader: (inbox: TInbox) => ReactNode;
@@ -116,7 +124,7 @@ export type ProviderRegistry = Record<string, AnyPlatformProvider>;
  * Create a provider registry from an array of providers.
  */
 export const createProviderRegistry = <T extends ProviderRegistry>(
-  providers: AnyPlatformProvider[]
+  providers: AnyPlatformProvider[],
 ): T => {
   const registry: Record<string, AnyPlatformProvider> = {};
   for (const provider of providers) {
@@ -139,7 +147,16 @@ export const InboxHeaderStats: React.FC<{
   extraValue?: string | number;
   extraLabel2?: string;
   extraValue2?: string | number;
-}> = ({ threadCount, unreadCount, extraLabel, extraValue, extraLabel2, extraValue2 }) => (
+}> = (
+  {
+    threadCount,
+    unreadCount,
+    extraLabel,
+    extraValue,
+    extraLabel2,
+    extraValue2,
+  },
+) => (
   <Box>
     <Text>
       <Text bold>Threads:</Text> {threadCount}
@@ -183,14 +200,17 @@ export const ThreadHeaderStats: React.FC<{
 // LinkedIn Provider
 // =============================================================================
 
-import { LINKEDIN_SCOPE, type LinkedInEvent } from "../../plugins/linkedin/schemas.ts";
-import { linkedInBehavior } from "../../plugins/linkedin/behavior.ts";
+import {
+  LINKEDIN_SCOPE,
+  type LinkedInEvent,
+} from "../../../plugins/linkedin/schemas.ts";
+import { linkedInBehavior } from "../../../plugins/linkedin/behavior.ts";
 import type {
   LinkedInInbox,
   LinkedInIndexMeta,
   LinkedInThread,
-} from "../../plugins/linkedin/views.ts";
-import type { LinkedInAccount } from "../../plugins/linkedin/account.ts";
+} from "../../../plugins/linkedin/views.ts";
+import type { LinkedInAccount } from "../../../plugins/linkedin/account.ts";
 
 export const linkedInProvider: PlatformProvider<
   LinkedInAccount,
@@ -203,10 +223,13 @@ export const linkedInProvider: PlatformProvider<
   color: "cyan",
   scope: LINKEDIN_SCOPE,
 
-  formatAccountName: (account) => account.displayName,
+  formatAccountName: (account) => account.id,
 
   deriveInbox: (events, accountId) =>
-    linkedInBehavior.deriveInbox(events as readonly LinkedInEvent[], accountId),
+    linkedInBehavior.deriveInbox(
+      events as readonly LinkedInEvent[],
+      accountId as ParticipantId<"linkedin">,
+    ),
 
   deriveThread: (events, threadId) =>
     linkedInBehavior.deriveThread(events as readonly LinkedInEvent[], threadId),
@@ -222,7 +245,7 @@ export const linkedInProvider: PlatformProvider<
   ),
 
   renderThreadMeta: (_, meta) =>
-    meta.isSponsored ? <Text dimColor> [Sponsored]</Text> : null,
+    meta.isSponsored ? <Text dimColor>[Sponsored]</Text> : null,
 
   renderThreadHeader: (thread) => (
     <ThreadHeaderStats
@@ -236,21 +259,29 @@ export const linkedInProvider: PlatformProvider<
 // X Provider
 // =============================================================================
 
-import { X_SCOPE, type XEvent } from "../../plugins/x/schemas.ts";
-import { xBehavior } from "../../plugins/x/behavior.ts";
-import type { XInbox, XIndexMeta, XThread } from "../../plugins/x/views.ts";
-import type { XAccount } from "../../plugins/x/account.ts";
+import { X_SCOPE, type XEvent } from "../../../plugins/x/schemas.ts";
+import { xBehavior } from "../../../plugins/x/behavior.ts";
+import type { XInbox, XIndexMeta, XThread } from "../../../plugins/x/views.ts";
+import type { XAccount } from "../../../plugins/x/account.ts";
 
-export const xProvider: PlatformProvider<XAccount, XInbox, XIndexMeta, XThread> = {
+export const xProvider: PlatformProvider<
+  XAccount,
+  XInbox,
+  XIndexMeta,
+  XThread
+> = {
   key: "x",
   name: "X (Twitter)",
   color: "magenta",
   scope: X_SCOPE,
 
-  formatAccountName: (account) => `@${account.handle}`,
+  formatAccountName: (account) => account.id,
 
   deriveInbox: (events, accountId) =>
-    xBehavior.deriveInbox(events as readonly XEvent[], accountId),
+    xBehavior.deriveInbox(
+      events as readonly XEvent[],
+      accountId as ParticipantId<"x">,
+    ),
 
   deriveThread: (events, threadId) =>
     xBehavior.deriveThread(events as readonly XEvent[], threadId),
@@ -264,7 +295,7 @@ export const xProvider: PlatformProvider<XAccount, XInbox, XIndexMeta, XThread> 
     />
   ),
 
-  renderThreadMeta: (_, meta) => <Text dimColor> {meta.participantCount}p</Text>,
+  renderThreadMeta: (_, meta) => <Text dimColor>{meta.participantCount}p</Text>,
 
   renderThreadHeader: (thread) => (
     <ThreadHeaderStats
@@ -293,7 +324,9 @@ export type PlatformKey = (typeof platformProviders)[number]["key"];
  * Returns undefined if the key doesn't match any provider.
  */
 export const getProvider = (key: string): AnyPlatformProvider | undefined =>
-  platformProviders.find((p) => p.key === key) as AnyPlatformProvider | undefined;
+  platformProviders.find((p) => p.key === key) as
+    | AnyPlatformProvider
+    | undefined;
 
 /**
  * Platform selector options for UI.

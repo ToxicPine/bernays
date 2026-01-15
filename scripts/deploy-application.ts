@@ -1,6 +1,6 @@
 #!/usr/bin/env -S deno run -A
 // =============================================================================
-// deploy.ts
+// deploy-application.ts — Deploy Application to Fly.io
 // =============================================================================
 //
 // Usage:
@@ -58,16 +58,20 @@ import { parse as parseToml } from "@std/toml";
 import { z } from "@zod/zod";
 import {
   bold,
+  commandExists,
   die,
   dim,
+  fileExistsSync,
+  loadDotenv,
+  runCommand,
+  runWithSpinner,
   Spinner,
   statusErr,
   statusOk,
   statusWarn,
-} from "./lib/log.ts";
-import { loadDotenv, writeDotenv } from "./lib/env.ts";
-import { commandExists, fileExistsSync, runCommand, runWithSpinner } from "./lib/shell.ts";
-import { confirm, readSecret } from "./lib/tui.ts";
+  writeDotenv,
+} from "./lib/cli/mod.ts";
+import { confirm, readSecret } from "./lib/tui/mod.ts";
 
 // =============================================================================
 // Fly CLI Response Schemas
@@ -208,7 +212,9 @@ const FlyTomlSchema = z.object({
   primary_region: z.string().optional(),
 }).loose();
 
-const readFlyToml = (filePath: string): z.infer<typeof FlyTomlSchema> | undefined => {
+const readFlyToml = (
+  filePath: string,
+): z.infer<typeof FlyTomlSchema> | undefined => {
   if (!fileExistsSync(filePath)) return undefined;
   const content = Deno.readTextFileSync(filePath);
   const parsed = FlyTomlSchema.safeParse(parseToml(content));
@@ -236,7 +242,7 @@ const gitFingerprint = async (): Promise<string> => {
 
   if (dirty) {
     const hash = encodeHex(
-      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(dirty))
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(dirty)),
     );
     return `${head}+dirty:${hash}`;
   }
@@ -244,9 +250,13 @@ const gitFingerprint = async (): Promise<string> => {
   return head;
 };
 
-const fingerprintFile = (app: string): string => `.deploy/fly-${app}.fingerprint`;
+const fingerprintFile = (app: string): string =>
+  `.deploy/fly-${app}.fingerprint`;
 
-const checkShouldDeploy = async (app: string, flags: DeployFlags): Promise<void> => {
+const checkShouldDeploy = async (
+  app: string,
+  flags: DeployFlags,
+): Promise<void> => {
   const fpFile = fingerprintFile(app);
   const fp = await gitFingerprint();
 
@@ -292,14 +302,20 @@ const recordDeploy = async (app: string): Promise<void> => {
 // =============================================================================
 
 const requireRepoRoot = (): void => {
-  if (!fileExistsSync("deno.json")) die("deno.json Not Found \u2014 Run from Repo Root");
+  if (!fileExistsSync("deno.json")) {
+    die("deno.json Not Found \u2014 Run from Repo Root");
+  }
 };
 
 const requireGit = async (): Promise<void> => {
   if (!(await commandExists("git"))) {
     die("git Not Found");
   }
-  const result = await runCommand(["git", "rev-parse", "--is-inside-work-tree"]);
+  const result = await runCommand([
+    "git",
+    "rev-parse",
+    "--is-inside-work-tree",
+  ]);
   if (result.code !== 0) {
     die("Not in a Git Repository");
   }
@@ -313,7 +329,9 @@ const createFlyExecutionProvider = (): ExecutionProvider<FlyInstanceConfig> => {
   let _config: FlyInstanceConfig | null = null;
 
   const getConfig = (): FlyInstanceConfig => {
-    if (!_config) throw die("FlyExecutionProvider: prepare() must be called first");
+    if (!_config) {
+      throw die("FlyExecutionProvider: prepare() must be called first");
+    }
     return _config;
   };
 
@@ -325,8 +343,12 @@ const createFlyExecutionProvider = (): ExecutionProvider<FlyInstanceConfig> => {
 
     async prepare(config: FlyInstanceConfig): Promise<void> {
       _config = config;
-      if (!fileExistsSync("fly.toml")) die("fly.toml Not Found \u2014 Run from Repo Root");
-      if (!fileExistsSync("Dockerfile")) die("Dockerfile Not Found \u2014 Run from Repo Root");
+      if (!fileExistsSync("fly.toml")) {
+        die("fly.toml Not Found \u2014 Run from Repo Root");
+      }
+      if (!fileExistsSync("Dockerfile")) {
+        die("Dockerfile Not Found \u2014 Run from Repo Root");
+      }
       if (!(await commandExists("fly"))) {
         die("flyctl Not Found \u2014 Install from https://fly.io/docs/flyctl/");
       }
@@ -366,7 +388,13 @@ const createFlyExecutionProvider = (): ExecutionProvider<FlyInstanceConfig> => {
 
     async instanceExists(): Promise<boolean> {
       const cfg = getConfig();
-      const result = await runCommand(["fly", "status", "-a", cfg.appName, "--json"]);
+      const result = await runCommand([
+        "fly",
+        "status",
+        "-a",
+        cfg.appName,
+        "--json",
+      ]);
       if (result.code !== 0) return false;
       const parsed = FlyStatusSchema.safeParse(JSON.parse(result.stdout));
       return parsed.success && !!parsed.data.ID;
@@ -401,7 +429,7 @@ const createFlyExecutionProvider = (): ExecutionProvider<FlyInstanceConfig> => {
 
       const result = await runQuiet(
         `Configuring ${pairs.length} Settings`,
-        ["fly", "secrets", "set", ...pairs, "-a", cfg.appName]
+        ["fly", "secrets", "set", ...pairs, "-a", cfg.appName],
       );
       if (!result.success) {
         die("Failed to Configure Settings");
@@ -410,7 +438,12 @@ const createFlyExecutionProvider = (): ExecutionProvider<FlyInstanceConfig> => {
 
     async deploy(): Promise<void> {
       const cfg = getConfig();
-      const result = await runQuiet("fly deploy", ["fly", "deploy", "-a", cfg.appName]);
+      const result = await runQuiet("fly deploy", [
+        "fly",
+        "deploy",
+        "-a",
+        cfg.appName,
+      ]);
       if (!result.success) {
         die("Deploy Failed \u2014 Check the Output Above for Details");
       }
@@ -428,40 +461,66 @@ interface FlyDbStatus {
   pgbouncerUri?: string;
 }
 
-const createFlyPostgresProvider = (): DatabaseProvider<FlyInstanceConfig, FlyDatabaseConfig> => {
+const createFlyPostgresProvider = (): DatabaseProvider<
+  FlyInstanceConfig,
+  FlyDatabaseConfig
+> => {
   let _instanceConfig: FlyInstanceConfig | null = null;
   let _dbConfig: FlyDatabaseConfig | null = null;
   let _orgSlug: string | null = null;
 
   const getInstanceConfig = (): FlyInstanceConfig => {
-    if (!_instanceConfig) throw die("FlyPostgresProvider: prepare() must be called first");
+    if (!_instanceConfig) {
+      throw die("FlyPostgresProvider: prepare() must be called first");
+    }
     return _instanceConfig;
   };
 
   const getDbConfig = (): FlyDatabaseConfig => {
-    if (!_dbConfig) throw die("FlyPostgresProvider: prepare() must be called first");
+    if (!_dbConfig) {
+      throw die("FlyPostgresProvider: prepare() must be called first");
+    }
     return _dbConfig;
   };
 
   const getOrg = (): string => {
-    if (!_orgSlug) throw die("FlyPostgresProvider: prepare() must be called first");
+    if (!_orgSlug) {
+      throw die("FlyPostgresProvider: prepare() must be called first");
+    }
     return _orgSlug;
   };
 
   const getClusterId = async (): Promise<string | undefined> => {
-    const result = await runCommand(["fly", "mpg", "list", "-o", getOrg(), "--json"]);
+    const result = await runCommand([
+      "fly",
+      "mpg",
+      "list",
+      "-o",
+      getOrg(),
+      "--json",
+    ]);
     if (result.code !== 0) return undefined;
 
     const parsed = FlyMpgListSchema.safeParse(JSON.parse(result.stdout));
     if (!parsed.success) return undefined;
 
     const name = getDbConfig().name;
-    const cluster = parsed.data.find((c) => c.name?.toLowerCase() === name.toLowerCase());
+    const cluster = parsed.data.find((c) =>
+      c.name?.toLowerCase() === name.toLowerCase()
+    );
     return cluster?.id;
   };
 
-  const getStatus = async (clusterId: string): Promise<FlyDbStatus | undefined> => {
-    const result = await runCommand(["fly", "mpg", "status", clusterId, "--json"]);
+  const getStatus = async (
+    clusterId: string,
+  ): Promise<FlyDbStatus | undefined> => {
+    const result = await runCommand([
+      "fly",
+      "mpg",
+      "status",
+      clusterId,
+      "--json",
+    ]);
     if (result.code !== 0) return undefined;
 
     const parsed = FlyMpgStatusSchema.safeParse(JSON.parse(result.stdout));
@@ -477,7 +536,10 @@ const createFlyPostgresProvider = (): DatabaseProvider<FlyInstanceConfig, FlyDat
   return {
     name: "Fly Managed Postgres",
 
-    async prepare(instance: FlyInstanceConfig, database: FlyDatabaseConfig): Promise<void> {
+    async prepare(
+      instance: FlyInstanceConfig,
+      database: FlyDatabaseConfig,
+    ): Promise<void> {
       _instanceConfig = instance;
       _dbConfig = database;
 
@@ -575,14 +637,20 @@ const createFlyPostgresProvider = (): DatabaseProvider<FlyInstanceConfig, FlyDat
 
       const initialStatus = await getStatus(clusterId);
       if (!initialStatus) {
-        return die("Could not Fetch Database Status \u2014 Check Your Network Connection");
+        return die(
+          "Could not Fetch Database Status \u2014 Check Your Network Connection",
+        );
       }
 
       let status = initialStatus;
 
       if (status.credentialStatus !== "ready") {
         console.log(bold("Database is Setting Up..."));
-        console.log(dim("  This Typically Takes 1-3 Minutes. Safe to Ctrl-C and Re-Run Later."));
+        console.log(
+          dim(
+            "  This Typically Takes 1-3 Minutes. Safe to Ctrl-C and Re-Run Later.",
+          ),
+        );
         console.log();
 
         const interval = 5;
@@ -596,7 +664,9 @@ const createFlyPostgresProvider = (): DatabaseProvider<FlyInstanceConfig, FlyDat
           }
 
           const statusText = currentStatus?.credentialStatus ?? "unknown";
-          spinner.start(`Waiting for Database (${elapsed}s Elapsed, Status: ${statusText})`);
+          spinner.start(
+            `Waiting for Database (${elapsed}s Elapsed, Status: ${statusText})`,
+          );
           await new Promise((resolve) => setTimeout(resolve, interval * 1000));
           spinner.stop();
           elapsed += interval;
@@ -604,8 +674,16 @@ const createFlyPostgresProvider = (): DatabaseProvider<FlyInstanceConfig, FlyDat
 
         if (status.credentialStatus !== "ready") {
           warn(`Timed Out Waiting for Database (${dbCfg.timeoutSeconds}s)`);
-          console.log(dim("  Re-Run This Script Once the Database is Ready, or Fetch URL Manually:"));
-          console.log(dim(`  https://fly.io/dashboard/${org}/managed_postgres/${clusterId}`));
+          console.log(
+            dim(
+              "  Re-Run This Script Once the Database is Ready, or Fetch URL Manually:",
+            ),
+          );
+          console.log(
+            dim(
+              `  https://fly.io/dashboard/${org}/managed_postgres/${clusterId}`,
+            ),
+          );
           return die("Database Not Ready");
         }
       }
@@ -687,10 +765,22 @@ const configureSecrets = async (ctx: FlyDeployContext): Promise<void> => {
   collector.add("RUN_SOCKPUPPET", secrets.runSockpuppet);
   collector.add("ACCOUNT_ID", secrets.accountId);
   await collector.promptAndAdd("DATABASE_URL", secrets.databaseUrl);
-  await collector.promptAndAdd("BROWSERBASE_API_KEY", secrets.browserbaseApiKey);
-  await collector.promptAndAdd("BROWSERBASE_CONTEXT_ID", secrets.browserbaseContextId);
-  await collector.promptAndAdd("BROWSERBASE_PROJECT_ID", secrets.browserbaseProjectId);
-  await collector.promptAndAdd("BROWSERBASE_EXTENSION_ID", secrets.browserbaseExtensionId);
+  await collector.promptAndAdd(
+    "BROWSERBASE_API_KEY",
+    secrets.browserbaseApiKey,
+  );
+  await collector.promptAndAdd(
+    "BROWSERBASE_CONTEXT_ID",
+    secrets.browserbaseContextId,
+  );
+  await collector.promptAndAdd(
+    "BROWSERBASE_PROJECT_ID",
+    secrets.browserbaseProjectId,
+  );
+  await collector.promptAndAdd(
+    "BROWSERBASE_EXTENSION_ID",
+    secrets.browserbaseExtensionId,
+  );
 
   if (collector.count() > 0) {
     await execution.setSecrets(collector.getAll());
@@ -839,7 +929,8 @@ const main = async (): Promise<void> => {
 
   const instance: FlyInstanceConfig = {
     appName: args.app ?? Deno.env.get("APP_NAME") ?? flyToml?.app ?? "",
-    region: args.region ?? Deno.env.get("REGION") ?? flyToml?.primary_region ?? "iad",
+    region: args.region ?? Deno.env.get("REGION") ?? flyToml?.primary_region ??
+      "iad",
     org: args.org ?? Deno.env.get("ORG"),
   };
 
@@ -849,7 +940,8 @@ const main = async (): Promise<void> => {
 
   const flags: DeployFlags = {
     forceDeploy: args.force || Deno.env.get("FORCE_DEPLOY") === "1",
-    allowDirtyDeploy: args.allowDirty || Deno.env.get("ALLOW_DIRTY_DEPLOY") === "1",
+    allowDirtyDeploy: args.allowDirty ||
+      Deno.env.get("ALLOW_DIRTY_DEPLOY") === "1",
     skipDatabase: args.skipDatabase || Deno.env.get("SKIP_DATABASE") === "1",
     skipSecrets: args.skipSecrets || Deno.env.get("SKIP_SECRETS") === "1",
     useManagedDatabase: Deno.env.get("USE_FLY_POSTGRES") === "1",
@@ -874,12 +966,18 @@ const main = async (): Promise<void> => {
   };
 
   const execution = createFlyExecutionProvider();
-  const database = flags.useManagedDatabase ? createFlyPostgresProvider() : undefined;
+  const database = flags.useManagedDatabase
+    ? createFlyPostgresProvider()
+    : undefined;
 
   console.log();
   console.log(bold("\u2550".repeat(59)));
   console.log(bold(`  DEPLOY: ${instance.appName}`));
-  console.log(bold(`  Provider: ${execution.name}${database ? ` + ${database.name}` : ""}`));
+  console.log(
+    bold(
+      `  Provider: ${execution.name}${database ? ` + ${database.name}` : ""}`,
+    ),
+  );
   console.log(bold("\u2550".repeat(59)));
   console.log();
 

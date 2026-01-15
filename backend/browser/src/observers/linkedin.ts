@@ -1,20 +1,7 @@
 // packages/browser/src/observers/linkedin.ts
 // LinkedIn-specific observer for auth status and message detection.
 
-type CommandResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; error: { code: string; message: string; details?: unknown } };
-
-declare global {
-  interface Window {
-    __registerCommand: <TReq, TRes>(
-      command: string,
-      handler: (payload: TReq) => Promise<CommandResult<TRes>>,
-    ) => void;
-    __emitObservation: (type: string, payload: unknown) => void;
-    __observerContext: { browserId: string; tabId: string };
-  }
-}
+import { wrapCommandError } from "../core/types.ts";
 
 // Helpers
 
@@ -65,7 +52,7 @@ interface LinkedInAuthParams {
 }
 
 interface LinkedInAuthResult {
-  accountId: string;
+  participantId: string;
   canRead: boolean;
   canWrite: boolean;
   issue?: string;
@@ -81,7 +68,7 @@ window.__registerCommand<LinkedInAuthParams, LinkedInAuthResult>(
         // Emit signed-out observation
         window.__emitObservation("AuthObserved", {
           platform: "linkedin",
-          accountId: "",
+          participantId: "linkedin:",
           canRead: false,
           canWrite: false,
           issue: "signed-out",
@@ -90,7 +77,7 @@ window.__registerCommand<LinkedInAuthParams, LinkedInAuthResult>(
         return {
           ok: true,
           value: {
-            accountId: "",
+            participantId: "linkedin:",
             canRead: false,
             canWrite: false,
             issue: "signed-out",
@@ -99,6 +86,7 @@ window.__registerCommand<LinkedInAuthParams, LinkedInAuthResult>(
       }
 
       const userId = extractCurrentUserId() ?? "unknown";
+      const participantId = `linkedin:${userId}`;
 
       // Check for rate limiting indicators
       const isRateLimited =
@@ -108,7 +96,7 @@ window.__registerCommand<LinkedInAuthParams, LinkedInAuthResult>(
       if (isRateLimited) {
         window.__emitObservation("AuthObserved", {
           platform: "linkedin",
-          accountId: userId,
+          participantId,
           canRead: true,
           canWrite: false,
           issue: "rate-limited",
@@ -117,7 +105,7 @@ window.__registerCommand<LinkedInAuthParams, LinkedInAuthResult>(
         return {
           ok: true,
           value: {
-            accountId: userId,
+            participantId,
             canRead: true,
             canWrite: false,
             issue: "rate-limited",
@@ -132,7 +120,7 @@ window.__registerCommand<LinkedInAuthParams, LinkedInAuthResult>(
       if (hasCaptcha) {
         window.__emitObservation("AuthObserved", {
           platform: "linkedin",
-          accountId: userId,
+          participantId,
           canRead: false,
           canWrite: false,
           issue: "captcha",
@@ -141,7 +129,7 @@ window.__registerCommand<LinkedInAuthParams, LinkedInAuthResult>(
         return {
           ok: true,
           value: {
-            accountId: userId,
+            participantId,
             canRead: false,
             canWrite: false,
             issue: "captcha",
@@ -152,7 +140,7 @@ window.__registerCommand<LinkedInAuthParams, LinkedInAuthResult>(
       // Normal authenticated state
       window.__emitObservation("AuthObserved", {
         platform: "linkedin",
-        accountId: userId,
+        participantId,
         canRead: true,
         canWrite: true,
       });
@@ -160,20 +148,13 @@ window.__registerCommand<LinkedInAuthParams, LinkedInAuthResult>(
       return {
         ok: true,
         value: {
-          accountId: userId,
+          participantId,
           canRead: true,
           canWrite: true,
         },
       };
     } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      return {
-        ok: false,
-        error: {
-          code: "Unknown",
-          message: error.message,
-        },
-      };
+      return wrapCommandError(err);
     }
   },
 );
@@ -242,7 +223,7 @@ window.__registerCommand<LinkedInMessagesParams, LinkedInMessagesResult>(
           const platformId = lastEvent.dashEntityUrn ?? lastEvent.entityUrn ??
             crypto.randomUUID();
           const threadId = conv.entityUrn ?? conv.dashEntityUrn ?? "unknown";
-          const senderId =
+          const senderPlatformId =
             lastEvent.from?.["com.linkedin.voyager.messaging.MessagingMember"]
               ?.miniProfile?.publicIdentifier ?? "unknown";
 
@@ -251,7 +232,7 @@ window.__registerCommand<LinkedInMessagesParams, LinkedInMessagesResult>(
             canonicalId: `li-${platformId}`,
             platformId,
             threadId,
-            senderId,
+            senderId: `linkedin:${senderPlatformId}`,
             content: messageContent,
             timestamp: new Date(eventTime).toISOString(),
             own: false, // Would need to compare with current user
@@ -264,14 +245,7 @@ window.__registerCommand<LinkedInMessagesParams, LinkedInMessagesResult>(
         value: { messageCount },
       };
     } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      return {
-        ok: false,
-        error: {
-          code: "Unknown",
-          message: error.message,
-        },
-      };
+      return wrapCommandError(err);
     }
   },
 );
@@ -292,7 +266,7 @@ const setupAuthMonitor = (): void => {
       if (!currentAuthState) {
         window.__emitObservation("AuthObserved", {
           platform: "linkedin",
-          accountId: "",
+          participantId: "linkedin:",
           canRead: false,
           canWrite: false,
           issue: "signed-out",
