@@ -77,6 +77,10 @@ export {
   LinkedInRateLimitObservedSchema,
   type LinkedInSearchResultsRetrieved,
   LinkedInSearchResultsRetrievedSchema,
+  type LinkedInTwoFactorChallenge,
+  LinkedInTwoFactorChallengeSchema,
+  type LinkedInTwoFactorResult,
+  LinkedInTwoFactorResultSchema,
   type LinkedInUserFollowed,
   LinkedInUserFollowedSchema,
 } from "./schemas.ts";
@@ -109,6 +113,9 @@ export { linkedInBehavior } from "./behavior.ts";
 
 // Service (Platform Tag & Actions)
 export {
+  // Result schemas and types
+  type BeginSignInResult,
+  BeginSignInResultSchema,
   ConnectionErrorCode,
   type ConnectionRequestResult,
   type InvitationWithdrawnResult,
@@ -116,12 +123,16 @@ export {
   LinkedInPlatform,
   type LinkedInService,
   makeLinkedInActions,
-  // Result types
   type MessageSentResult,
   ProfileErrorCode,
   type ProfileViewedResult,
-  // Error codes
   SendMessageErrorCode,
+  SignInErrorCode,
+  type SignInError,
   SyncErrorCode,
   type SyncResult,
+  TwoFactorErrorCode,
+  type TwoFactorError,
+  type TwoFactorResult,
+  TwoFactorResultSchema,
 } from "./service.ts";

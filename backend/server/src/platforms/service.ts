@@ -5,6 +5,7 @@ import { Effect, Option } from "effect";
 import type {
   BrowserConfigId,
   ParticipantId,
+  Scope,
   ThreadId,
 } from "$/core/branded.ts";
 import type { EventStoreError, StorableEvent } from "$/store/mod.ts";
@@ -32,7 +33,7 @@ import type { ActionsRecord, PlatformDefinition } from "$/platforms/mod.ts";
  * - actions: curried methods for platform operations
  */
 export interface PlatformService<
-  TScope extends string,
+  TScope extends Scope,
   TIdentity extends string,
   TActions extends ActionsRecord,
   TInbox extends BaseInboxView<unknown>,
@@ -74,7 +75,7 @@ export interface PlatformService<
  * @param actions - Platform-specific actions (created by platform's makeXxxActions)
  */
 export const makePlatformService = <
-  TScope extends string,
+  TScope extends Scope,
   TIdentity extends string,
   TEvent extends StorableEvent & { readonly scope: TScope },
   TAnchor,

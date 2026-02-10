@@ -1,8 +1,8 @@
 // src/runtime/sockpuppet/platform-runtime.ts
 // Platform service layer for sockpuppets
 
-import { type Context, Effect, Layer } from "effect";
-import { Scope } from "$/core/branded.ts";
+import { type Context, Layer } from "effect";
+import type { Scope } from "$/core/branded.ts";
 import type { EventStore, StorableEvent } from "$/store/mod.ts";
 import type { BaseInboxView } from "$/views/inbox.ts";
 import type { BaseThreadView } from "$/views/thread.ts";
@@ -13,6 +13,7 @@ import {
   type ActionsRecord,
   makePlatformService,
   type PlatformDefinition,
+  type PlatformService,
 } from "$/platforms/mod.ts";
 import { makeProjection } from "$/projections/projection.ts";
 
@@ -42,7 +43,7 @@ import { makeProjection } from "$/projections/projection.ts";
  * ```
  */
 export function makePlatformLayer<
-  TScope extends string,
+  TScope extends Scope,
   TIdentity extends string,
   TEvent extends StorableEvent & { readonly scope: TScope },
   TAnchor,
@@ -52,7 +53,10 @@ export function makePlatformLayer<
   TBrowser extends BaseBoundBrowser,
   TContact extends BaseContact<TIdentity>,
   TActions extends ActionsRecord,
-  TTag extends Context.Tag<any, any>,
+  TTag extends Context.Tag<
+    any,
+    PlatformService<TScope, TIdentity, TActions, TInbox, TThread, TBrowser, TContact>
+  >,
 >(
   tag: TTag,
   config: {
@@ -76,7 +80,7 @@ export function makePlatformLayer<
   const { platform, account, eventStore, browserPool, actions } = config;
 
   const projection = makeProjection(
-    Scope(platform.scope),
+    platform.scope,
     platform.eventSchema,
     eventStore,
   );
@@ -92,13 +96,7 @@ export function makePlatformLayer<
     actions,
   );
 
-  // Create layer - cast the effect result to match the tag's expected service type
-  const effectWithCast = Effect.map(
-    serviceEffect,
-    (svc) => svc as Context.Tag.Service<TTag>,
-  );
-
-  return Layer.effect(tag, effectWithCast).pipe(
+  return Layer.effect(tag, serviceEffect).pipe(
     Layer.provide(browserPoolLayer),
   );
 }

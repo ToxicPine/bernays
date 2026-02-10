@@ -2,6 +2,7 @@
 // LinkedIn platform service - typed context tag and actions
 
 import { Context, Effect } from "effect";
+import { z } from "@zod/zod";
 import type { ThreadId } from "@bernays/server/core";
 import type { BrowserPoolService } from "@bernays/server/backend";
 import {
@@ -14,6 +15,7 @@ import {
 import type { LinkedInAccount } from "./account.ts";
 import type { LinkedInBrowser } from "./browser.ts";
 import type { LinkedInContact } from "./contact.ts";
+import type { LinkedInScope } from "./schemas.ts";
 import type { LinkedInInbox, LinkedInThread } from "./views.ts";
 
 // =============================================================================
@@ -25,7 +27,7 @@ import type { LinkedInInbox, LinkedInThread } from "./views.ts";
  * This is what sockpuppets receive when they yield LinkedInPlatform.
  */
 export type LinkedInService = PlatformService<
-  "linkedin",
+  LinkedInScope,
   "linkedin",
   LinkedInActions,
   LinkedInInbox,
@@ -81,6 +83,28 @@ export interface ProfileViewedResult {
   readonly viewed: true;
 }
 
+// Sign-in is a multi-step process. beginSignIn starts it, then either:
+// - AuthObserved event fires with authenticated=true (success)
+// - TwoFactorChallengeObserved event fires (need 2FA)
+// After 2FA, submitTwoFactorCode continues the process.
+// The action results are acknowledgments; actual auth state is derived from events.
+
+export const BeginSignInResultSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("pending") }),
+  z.object({ status: z.literal("two_factor_required"), challengeType: z.string() }),
+  z.object({ status: z.literal("authenticated") }),
+  z.object({ status: z.literal("failed"), error: z.string() }),
+]);
+
+export type BeginSignInResult = z.infer<typeof BeginSignInResultSchema>;
+
+export const TwoFactorResultSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("authenticated") }),
+  z.object({ status: z.literal("failed"), error: z.string() }),
+]);
+
+export type TwoFactorResult = z.infer<typeof TwoFactorResultSchema>;
+
 // =============================================================================
 // Action Error Types
 // =============================================================================
@@ -89,11 +113,15 @@ export const SendMessageErrorCode = ExecuteErrorCode("linkedin:send_message");
 export const SyncErrorCode = ExecuteErrorCode("linkedin:sync");
 export const ConnectionErrorCode = ExecuteErrorCode("linkedin:connection");
 export const ProfileErrorCode = ExecuteErrorCode("linkedin:profile");
+export const SignInErrorCode = ExecuteErrorCode("linkedin:sign_in");
+export const TwoFactorErrorCode = ExecuteErrorCode("linkedin:two_factor");
 
 export type SendMessageError = ExecuteError;
 export type SyncError = ExecuteError;
 export type ConnectionError = ExecuteError;
 export type ProfileError = ExecuteError;
+export type SignInError = ExecuteError;
+export type TwoFactorError = ExecuteError;
 
 // =============================================================================
 // LinkedIn Actions Interface
@@ -147,6 +175,26 @@ export interface LinkedInActions {
     [profileUrl: string],
     ProfileViewedResult,
     ProfileError
+  >;
+
+  /**
+   * Begin sign-in to LinkedIn with credentials.
+   * Non-atomic: may require 2FA. Check result status and events.
+   */
+  readonly beginSignIn: PlatformMethod<
+    [email: string, password: string],
+    BeginSignInResult,
+    SignInError
+  >;
+
+  /**
+   * Submit 2FA verification code.
+   * Call after signIn returns status: "two_factor_required".
+   */
+  readonly submitTwoFactorCode: PlatformMethod<
+    [code: string, rememberDevice?: boolean],
+    TwoFactorResult,
+    TwoFactorError
   >;
 }
 
@@ -259,6 +307,56 @@ export const makeLinkedInActions = (
         Effect.catchAll((cause) =>
           Effect.fail(
             executeError(ProfileErrorCode, "Failed to view profile", cause),
+          )
+        ),
+      ),
+
+    beginSignIn: (options) => (email, password) =>
+      Effect.gen(function* () {
+        const configId = options?.preferConfigId ?? selectBrowser();
+        const response = yield* pool.send(configId, {
+          type: "beginSignIn",
+          payload: { email, password },
+        });
+        const parsed = BeginSignInResultSchema.safeParse(response);
+        if (!parsed.success) {
+          return yield* Effect.fail(
+            executeError(
+              SignInErrorCode,
+              `Invalid sign-in response: ${parsed.error.message}`,
+            ),
+          );
+        }
+        return parsed.data;
+      }).pipe(
+        Effect.catchAll((cause) =>
+          Effect.fail(
+            executeError(SignInErrorCode, "Failed to begin sign in", cause),
+          )
+        ),
+      ),
+
+    submitTwoFactorCode: (options) => (code, rememberDevice = true) =>
+      Effect.gen(function* () {
+        const configId = options?.preferConfigId ?? selectBrowser();
+        const response = yield* pool.send(configId, {
+          type: "submitTwoFactorCode",
+          payload: { code, rememberDevice },
+        });
+        const parsed = TwoFactorResultSchema.safeParse(response);
+        if (!parsed.success) {
+          return yield* Effect.fail(
+            executeError(
+              TwoFactorErrorCode,
+              `Invalid 2FA response: ${parsed.error.message}`,
+            ),
+          );
+        }
+        return parsed.data;
+      }).pipe(
+        Effect.catchAll((cause) =>
+          Effect.fail(
+            executeError(TwoFactorErrorCode, "Failed to submit 2FA code", cause),
           )
         ),
       ),

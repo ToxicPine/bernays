@@ -14,6 +14,23 @@ export const E2EConfigSchema = z.object({
   browserTimeout: z.number().default(60_000),
 });
 
+export const LinkedInTestConfigSchema = z.object({
+  linkedinTestEmail: z.email(),
+  linkedinTestPassword: z.string().min(1),
+  linkedinTestThreadId: z.string().min(1),
+});
+
+export type LinkedInTestConfig = z.infer<typeof LinkedInTestConfigSchema>;
+
+export const LocalTestConfigSchema = z.object({
+  extensionPath: z.string().min(1),
+  headless: z.boolean().default(false),
+  userDataDir: z.string().optional(),
+  slowMo: z.number().optional(),
+});
+
+export type LocalTestConfig = z.infer<typeof LocalTestConfigSchema>;
+
 export type E2EConfig = z.infer<typeof E2EConfigSchema>;
 
 const loadEnvFile = async (path: string): Promise<void> => {
@@ -51,6 +68,13 @@ const ENV_VAR_NAMES: Record<string, string> = {
   flyAppName: "FLY_APP_NAME",
   testTimeout: "E2E_TEST_TIMEOUT",
   browserTimeout: "E2E_BROWSER_TIMEOUT",
+  linkedinTestEmail: "LINKEDIN_TEST_EMAIL",
+  linkedinTestPassword: "LINKEDIN_TEST_PASSWORD",
+  linkedinTestThreadId: "LINKEDIN_TEST_THREAD_ID",
+  extensionPath: "EXTENSION_PATH",
+  headless: "HEADLESS",
+  userDataDir: "USER_DATA_DIR",
+  slowMo: "SLOW_MO",
 };
 
 const loadEnvAndParse = async () => {
@@ -110,6 +134,67 @@ export const loadConfig = async (): Promise<E2EConfig> => {
     .join("\n");
 
   throw new Error(`E2E config validation failed:\n${errors}`);
+};
+
+/**
+ * Load LinkedIn test config, throwing if required values are missing.
+ */
+export const loadLinkedInTestConfig = async (): Promise<LinkedInTestConfig> => {
+  const projectRoot = new URL("../..", import.meta.url).pathname;
+  await loadEnvFile(`${projectRoot}/.env`);
+  await loadEnvFile(`${projectRoot}/.env.test`);
+
+  const result = LinkedInTestConfigSchema.safeParse({
+    linkedinTestEmail: Deno.env.get("LINKEDIN_TEST_EMAIL") ?? "",
+    linkedinTestPassword: Deno.env.get("LINKEDIN_TEST_PASSWORD") ?? "",
+    linkedinTestThreadId: Deno.env.get("LINKEDIN_TEST_THREAD_ID") ?? "",
+  });
+
+  if (result.success) {
+    return result.data;
+  }
+
+  const errors = result.error.issues
+    .map((i) => {
+      const field = i.path[0] as string;
+      const envVar = ENV_VAR_NAMES[field] ?? field;
+      return `  - ${envVar}: ${i.message}`;
+    })
+    .join("\n");
+
+  throw new Error(`LinkedIn Test Config Validation Error:\n${errors}`);
+};
+
+/**
+ * Load local test config, throwing if required values are missing.
+ */
+export const loadLocalTestConfig = async (): Promise<LocalTestConfig> => {
+  const projectRoot = new URL("../..", import.meta.url).pathname;
+  await loadEnvFile(`${projectRoot}/.env`);
+  await loadEnvFile(`${projectRoot}/.env.test`);
+
+  const result = LocalTestConfigSchema.safeParse({
+    extensionPath: Deno.env.get("EXTENSION_PATH") ?? "",
+    headless: Deno.env.get("HEADLESS") === "true",
+    userDataDir: Deno.env.get("USER_DATA_DIR") || undefined,
+    slowMo: Deno.env.get("SLOW_MO")
+      ? parseInt(Deno.env.get("SLOW_MO")!, 10)
+      : undefined,
+  });
+
+  if (result.success) {
+    return result.data;
+  }
+
+  const errors = result.error.issues
+    .map((i) => {
+      const field = i.path[0] as string;
+      const envVar = ENV_VAR_NAMES[field] ?? field;
+      return `  - ${envVar}: ${i.message}`;
+    })
+    .join("\n");
+
+  throw new Error(`Local Test Config Validation Error:\n${errors}`);
 };
 
 export const validateDatabase = async (url: string): Promise<void> => {

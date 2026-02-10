@@ -48,9 +48,50 @@ export const LinkedInAuthObservedSchema = authObservedBase("linkedin").extend({
   authenticated: z.boolean(),
   canRead: z.boolean(),
   canWrite: z.boolean(),
+  /** Present when auth requires additional verification */
+  twoFactorRequired: z.boolean().optional(),
 });
 
 export type LinkedInAuthObserved = z.infer<typeof LinkedInAuthObservedSchema>;
+
+/**
+ * Emitted when a 2FA challenge is detected during sign-in.
+ * The extension should emit this when redirected to the 2FA page.
+ */
+export const LinkedInTwoFactorChallengeSchema = CorrelationMetadataSchema
+  .extend({
+    scope: linkedInScopeSchema,
+    type: z.literal("TwoFactorChallengeObserved"),
+    configId: z.string(),
+    tabId: z.string(),
+    /** Type of 2FA challenge (sms, authenticator, email, phone_call) */
+    challengeType: z.enum(["sms", "authenticator", "email", "phone_call"]),
+    /** Hint about where the code was sent (e.g., "***-***-1234") */
+    deliveryHint: z.string().optional(),
+    /** Challenge ID for submission (from form data) */
+    challengeId: z.string().optional(),
+  });
+
+export type LinkedInTwoFactorChallenge = z.infer<
+  typeof LinkedInTwoFactorChallengeSchema
+>;
+
+/**
+ * Emitted when 2FA verification succeeds or fails.
+ */
+export const LinkedInTwoFactorResultSchema = CorrelationMetadataSchema.extend({
+  scope: linkedInScopeSchema,
+  type: z.literal("TwoFactorResultObserved"),
+  configId: z.string(),
+  tabId: z.string(),
+  success: z.boolean(),
+  /** Error message if verification failed */
+  error: z.string().optional(),
+});
+
+export type LinkedInTwoFactorResult = z.infer<
+  typeof LinkedInTwoFactorResultSchema
+>;
 
 export const LinkedInAnchorMessageObservedSchema = AnchorMessageObservedBase
   .extend({
@@ -230,6 +271,8 @@ export type LinkedInConnectionRejected = z.infer<
 // Event Union
 export const LinkedInEventSchema = z.discriminatedUnion("type", [
   LinkedInAuthObservedSchema,
+  LinkedInTwoFactorChallengeSchema,
+  LinkedInTwoFactorResultSchema,
   LinkedInAnchorMessageObservedSchema,
   LinkedInMessageObservedSchema,
   LinkedInMessageMutatedSchema,

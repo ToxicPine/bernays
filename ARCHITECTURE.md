@@ -1116,11 +1116,11 @@ Each platform defines an actions factory that creates curried `PlatformMethod`
 implementations:
 
 ```typescript
-// plugins/linkedin/actions.ts
+// plugins/linkedin/service.ts
 
-export interface LinkedInActions extends ActionsRecord {
+export interface LinkedInActions {
   readonly sendMessage: PlatformMethod<
-    [ThreadId, string],
+    [threadId: ThreadId, content: string],
     MessageSentResult,
     SendMessageError
   >;
@@ -1149,28 +1149,41 @@ export const makeLinkedInActions = (
 
 ### Platform Layer Factory
 
-The `makePlatformLayer` function is generic over the context tag, maintaining
-full type safety:
+The `makePlatformLayer` function is generic over the context tag with a tight
+constraint linking the tag's service type to the exact `PlatformService` parameters:
 
 ```typescript
 // runtime/sockpuppet/platform-runtime.ts
 
-export const makePlatformLayer = <
-  TTag extends Context.Tag<any, PlatformService<any, any, any, any, any, any, any>>,
-  TService extends Context.Tag.Service<TTag>,
+export function makePlatformLayer<
+  TScope extends Scope,  // Branded scope aligns with StorableEvent.scope
+  TIdentity extends string,
+  // ... other type parameters
+  TTag extends Context.Tag<
+    any,
+    PlatformService<TScope, TIdentity, TActions, TInbox, TThread, TBrowser, TContact>
+  >,
 >(
   tag: TTag,
-  config: PlatformRuntimeConfig<...>,
-  actions: TService["actions"],
-): Layer.Layer<TTag> => {
-  const projection = makeProjection(config.platform.scope, config.platform.eventSchema, config.eventStore);
-  const browserPoolLayer = Layer.succeed(BrowserPool, config.browserPool);
-
-  const serviceEffect = makePlatformService(config.platform, config.account, projection, actions);
-
+  config: {
+    readonly platform: PlatformDefinition<...>;
+    readonly account: TAccount;
+    readonly eventStore: EventStore<StorableEvent>;
+    readonly browserPool: BrowserPoolService;
+    readonly actions: TActions;  // Required, platform-specific
+  },
+): Layer.Layer<Context.Tag.Identifier<TTag>> {
+  const projection = makeProjection(platform.scope, ...);  // scope already branded
+  const serviceEffect = makePlatformService(platform, account, projection, actions);
   return Layer.effect(tag, serviceEffect).pipe(Layer.provide(browserPoolLayer));
-};
+}
 ```
+
+Key type design:
+- `TScope extends Scope` ensures alignment with `StorableEvent.scope` (also `Scope`)
+- The `TTag` constraint links to exact `PlatformService` type parameters
+- This allows TypeScript to verify types without internal casts
+- `Context.Tag.Identifier<TTag>` extracts the identifier from `typeof LinkedInPlatform`
 
 ### Usage in Sockpuppets
 
@@ -1198,7 +1211,8 @@ const platformLayer = makePlatformLayer(LinkedInPlatform, {
   account,
   eventStore,
   browserPool,
-}, actions);
+  actions,  // Actions inside config, required
+});
 
 const journalLayer = makeJournalLayer({
   participantId: account.id,

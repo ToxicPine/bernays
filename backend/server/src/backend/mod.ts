@@ -100,5 +100,14 @@ export const BrowserBackendLive = (
 // Backend Implementations
 
 export { makeBrowserbaseBackend } from "./browserbase/mod.ts";
-// Local backend is a placeholder for now
-// export { makeLocalBackend } from "./local/mod.ts";
+export {
+  makeLocalBackend,
+  makeLocalBackendWithTestUtils,
+  makeMinimalLocalBackend,
+} from "./local/mod.ts";
+export type {
+  LocalBackendOptions,
+  LocalBackendWithTestUtils,
+  LocalPoolOptions,
+  LocalPoolService,
+} from "./local/mod.ts";

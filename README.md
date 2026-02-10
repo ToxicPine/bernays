@@ -1,4 +1,6 @@
-# Café Bernays, or: Claude Code for Bots
+# Bernays, or: Claude Code for Bots
+
+**WARNING: THIS IS PRE-ALPHA SOFTWARE, IT'S YET TO BE FULLY TESTED.**
 
 Vibecoding bot swarms to shill your products just got a lot easier! With
 `bernays`, anyone can achieve Russia-grade mass persuasion with just fifteen
@@ -67,8 +69,8 @@ Your agent gets two things:
 
 ```typescript
 // this could have been Reddit, or X:
-const linkedIn = yield * LinkedIn; // inbox, threads, post, reply, update profile
-const journal = yield * Journal; // memory that survives forever
+const linkedIn = yield* LinkedIn; // inbox, threads, post, reply, update profile
+const journal = yield* Journal; // memory that survives forever
 ```
 
 Then, it does its voodoo:

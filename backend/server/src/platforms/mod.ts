@@ -100,7 +100,7 @@ export type ActionsRecord = object;
  * The behavior only does pure derivation. Actions live in the service layer.
  */
 export interface PlatformBehavior<
-  TScope extends string,
+  TScope extends Scope,
   TIdentity extends string,
   TEvent extends StorableEvent & { readonly scope: TScope },
   TAnchor,
@@ -178,7 +178,7 @@ export interface PlatformBehavior<
  * - TIdentity: Participant identity namespace (e.g., "linkedin")
  */
 export interface PlatformDefinition<
-  TScope extends string,
+  TScope extends Scope,
   TIdentity extends string,
   TEvent extends StorableEvent & { readonly scope: TScope },
   TAnchor,
@@ -216,9 +216,9 @@ export interface PlatformDefinition<
  * Used when you need to work with platforms without knowing their specific types.
  */
 export type AnyPlatform = PlatformDefinition<
+  Scope,
   string,
-  string,
-  StorableEvent & { readonly scope: string },
+  StorableEvent & { readonly scope: Scope },
   unknown,
   BaseThreadView<unknown>,
   BaseInboxView<unknown>,
