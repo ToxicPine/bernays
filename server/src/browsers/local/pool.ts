@@ -22,8 +22,6 @@ import {
 export interface LocalPoolOptions {
   readonly headless?: boolean;
   readonly userDataDir?: string;
-  /** slow down actions by this many milliseconds (for debugging) */
-  readonly slowMo?: number;
 }
 
 // =============================================================================
@@ -51,7 +49,7 @@ export const createLocalPool = (
   configStore: ConfigStoreService,
   options: LocalPoolOptions = {},
 ): BrowserPoolService => {
-  const { headless = true, slowMo, userDataDir } = options;
+  const { headless = true, userDataDir } = options;
 
   const instances = new Map<string, BrowserInstance>();
 
@@ -94,7 +92,6 @@ export const createLocalPool = (
 
           const server = await chromium.launchServer({
             headless,
-            slowMo,
             args,
           });
 

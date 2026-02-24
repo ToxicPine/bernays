@@ -43,7 +43,6 @@
 
               # Install ambit-bernays Claude skill
               if [ ! -d .agents/skills/ambit-bernays ]; then
-                echo "Installing ambit-bernays skill..."
                 mkdir -p .agents/skills
                 ${pkgs.git}/bin/git clone --quiet https://github.com/ToxicPine/ambit-bernays.git .agents/skills/ambit-bernays
               fi

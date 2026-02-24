@@ -3,10 +3,7 @@
 
 import { Context, Effect, Layer, Option } from "effect";
 import postgres from "postgres";
-import {
-  BrowserConfigId,
-  ParticipantIdFromString,
-} from "@bernays/server/core";
+import { ParticipantIdFromString } from "@bernays/server/core";
 import type { ParticipantId } from "@bernays/server/core";
 import { type BaseAccount, parseBrowserBindings } from "@bernays/server/views";
 
