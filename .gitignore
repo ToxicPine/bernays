@@ -23,6 +23,9 @@ Thumbs.db
 # event store
 *.events.json
 
+# cloned skills cache
+.agents/
+
 # environment
 .env
 .env.local

@@ -40,6 +40,13 @@
               export ESBUILD=${pkgs.esbuild}/bin/esbuild
               export ZIP_TOOL=${pkgs.deterministic-zip}/bin/deterministic-zip
               alias bernays=just
+
+              # Install ambit-bernays Claude skill
+              if [ ! -d .agents/skills/ambit-bernays ]; then
+                echo "Installing ambit-bernays skill..."
+                mkdir -p .agents/skills
+                ${pkgs.git}/bin/git clone --quiet https://github.com/ToxicPine/ambit-bernays.git .agents/skills/ambit-bernays
+              fi
             '';
           });
         };
