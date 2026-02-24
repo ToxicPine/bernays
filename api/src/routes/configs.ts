@@ -130,11 +130,11 @@ export const configsRoutes = (ctx: ServerContext) => {
     const result = await Effect.runPromiseExit(ctx.configStore.get(configId));
 
     if (result._tag === "Failure") {
-      return c.json({ error: "Failed to get config" }, 404);
+      return c.json({ error: "Failed To Get Config" }, 404);
     }
 
     if (Option.isNone(result.value)) {
-      return c.json({ error: "Config not found" }, 404);
+      return c.json({ error: "Config Not Found" }, 404);
     }
 
     return c.json(
@@ -157,7 +157,7 @@ export const configsRoutes = (ctx: ServerContext) => {
     const result = await Effect.runPromiseExit(ctx.configStore.upsert(config));
 
     if (result._tag === "Failure") {
-      return c.json({ error: "Failed to upsert config" }, 422);
+      return c.json({ error: "Failed To Upsert Config" }, 422);
     }
 
     return c.json(ConfigResponseSchema.parse({ config }), 200);
@@ -172,11 +172,11 @@ export const configsRoutes = (ctx: ServerContext) => {
     );
 
     if (result._tag === "Failure") {
-      return c.json({ error: "Failed to remove config" }, 404);
+      return c.json({ error: "Failed To Remove Config" }, 404);
     }
 
     if (!result.value) {
-      return c.json({ error: "Config not found" }, 404);
+      return c.json({ error: "Config Not Found" }, 404);
     }
 
     return c.json({ ok: true as const }, 200);

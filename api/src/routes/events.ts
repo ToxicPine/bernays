@@ -122,7 +122,7 @@ export const eventsRoutes = (ctx: ServerContext) => {
         }
         return c.json({ error: err.message, code: err.code }, 422);
       }
-      return c.json({ error: "Internal error" }, 422);
+      return c.json({ error: "Internal Error" }, 422);
     }
 
     return c.json(
@@ -143,7 +143,7 @@ export const eventsRoutes = (ctx: ServerContext) => {
       if (result._tag === "Failure") {
         const cause = result.cause;
         const message =
-          cause._tag === "Fail" ? cause.error.message : "Internal error";
+          cause._tag === "Fail" ? cause.error.message : "Internal Error";
         results.push({ ok: false, error: message });
       } else {
         results.push({ ok: true, eventId: result.value.eventId });

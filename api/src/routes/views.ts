@@ -223,7 +223,7 @@ export const viewsRoutes = (ctx: ServerContext) => {
     const { platform } = c.req.valid("param");
     const resolved = resolvePlatform(platform);
     if (!resolved?.accountStore) {
-      return c.json({ error: "Unknown platform" }, 404);
+      return c.json({ error: "Unknown Platform" }, 404);
     }
     const accounts = await Effect.runPromise(resolved.accountStore.list());
     return c.json(
@@ -237,14 +237,14 @@ export const viewsRoutes = (ctx: ServerContext) => {
     const { platform, id } = c.req.valid("param");
     const resolved = resolvePlatform(platform);
     if (!resolved?.accountStore) {
-      return c.json({ error: "Unknown platform" }, 404);
+      return c.json({ error: "Unknown Platform" }, 404);
     }
     const participantId = makeParticipantId(platform, id);
     const result = await Effect.runPromise(
       resolved.accountStore.get(participantId),
     );
     if (Option.isNone(result)) {
-      return c.json({ error: "Account not found" }, 404);
+      return c.json({ error: "Account Not Found" }, 404);
     }
     return c.json(
       AccountResponseSchema.parse({ account: result.value }),
@@ -258,7 +258,7 @@ export const viewsRoutes = (ctx: ServerContext) => {
     const { since } = c.req.valid("query");
     const resolved = resolvePlatform(platform);
     if (!resolved?.projection) {
-      return c.json({ error: "Unknown platform or no projection" }, 404);
+      return c.json({ error: "Unknown Platform Or No Projection" }, 404);
     }
     const participantId = makeParticipantId(platform, id);
     const events = await Effect.runPromise(resolved.projection.query(since));
@@ -275,13 +275,13 @@ export const viewsRoutes = (ctx: ServerContext) => {
     const { since } = c.req.valid("query");
     const resolved = resolvePlatform(platform);
     if (!resolved?.projection) {
-      return c.json({ error: "Unknown platform or no projection" }, 404);
+      return c.json({ error: "Unknown Platform Or No Projection" }, 404);
     }
     const threadId = ThreadId(rawThreadId);
     const events = await Effect.runPromise(resolved.projection.query(since));
     const thread = resolved.def.behavior.deriveThread(events, threadId);
     if (!thread) {
-      return c.json({ error: "Thread not found" }, 404);
+      return c.json({ error: "Thread Not Found" }, 404);
     }
     return c.json(
       ThreadResponseSchema.parse({ thread }),
@@ -294,14 +294,14 @@ export const viewsRoutes = (ctx: ServerContext) => {
     const { platform, id } = c.req.valid("param");
     const resolved = resolvePlatform(platform);
     if (!resolved?.projection || !resolved.accountStore) {
-      return c.json({ error: "Unknown platform or missing stores" }, 404);
+      return c.json({ error: "Unknown Platform Or Missing Stores" }, 404);
     }
     const participantId = makeParticipantId(platform, id);
     const accountOpt = await Effect.runPromise(
       resolved.accountStore.get(participantId),
     );
     if (Option.isNone(accountOpt)) {
-      return c.json({ error: "Account not found" }, 404);
+      return c.json({ error: "Account Not Found" }, 404);
     }
     const account = accountOpt.value;
     const events = await Effect.runPromise(resolved.projection.query());
@@ -323,11 +323,11 @@ export const viewsRoutes = (ctx: ServerContext) => {
     const { platform, participantId: rawParticipantId } = c.req.valid("param");
     const resolved = resolvePlatform(platform);
     if (!resolved?.projection) {
-      return c.json({ error: "Unknown platform or no projection" }, 404);
+      return c.json({ error: "Unknown Platform Or No Projection" }, 404);
     }
     if (!resolved.def.behavior.deriveContact) {
       return c.json(
-        { error: "Platform does not support contact derivation" },
+        { error: "Platform Does Not Support Contact Derivation" },
         404,
       );
     }
@@ -335,7 +335,7 @@ export const viewsRoutes = (ctx: ServerContext) => {
     const events = await Effect.runPromise(resolved.projection.query());
     const contact = resolved.def.behavior.deriveContact(events, contactId);
     if (!contact) {
-      return c.json({ error: "Contact not found" }, 404);
+      return c.json({ error: "Contact Not Found" }, 404);
     }
     return c.json(
       ContactResponseSchema.parse({ contact }),
