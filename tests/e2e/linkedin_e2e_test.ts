@@ -20,7 +20,7 @@ import {
   BrowserPool,
   makeLocalBackendWithTestUtils,
   type LocalBackendWithTestUtils,
-} from "@bernays/server/backend";
+} from "@bernays/server/browsers";
 import {
   Journal,
   makeJournalLayer,

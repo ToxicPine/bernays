@@ -24,8 +24,8 @@ implementation patterns.** For coding conventions and style guides, see
   - [Platform Types](#platform-types)
 - [Part 3: Layer Implementation](#part-3-layer-implementation)
   - [Layer 0: Storage](#layer-0-storage)
-  - [Layer 1: Browser Backend](#layer-1-browser-backend)
-  - [Layer 2: Event Flow](#layer-2-event-flow)
+  - [Layer 1: Browser Pool](#layer-1-browser-pool)
+  - [Layer 2: API and Event Bus](#layer-2-api-and-event-bus)
   - [Layer 3: Projection and Injection](#layer-3-projection-and-injection)
   - [Layer 4: Platform Service](#layer-4-platform-service)
   - [Layer 5: Sockpuppet](#layer-5-sockpuppet)
@@ -101,11 +101,12 @@ Everything complex is hidden behind these two interfaces.
 Events flow through one path:
 
 ```
-Extension → BrowserPool → EventIngestion → Injection → EventStore → Projection → Platform → Sockpuppet
+API → Injection → EventStore → Projection → Platform → Sockpuppet
 ```
 
 Auth events, message events, rate limit events—all platform-scoped, all the same
-pipe. No separate loops for different event types.
+pipe. No separate loops for different event types. The HTTP API is the single
+ingestion point for all events.
 
 ### 3. Derive Everything
 
@@ -160,8 +161,8 @@ metadata. All dynamic state is derived from events.
 
 ### 9. Failures Are Events
 
-No special error handling paths. Extensions observe what happens and emit
-events:
+No special error handling paths. Platform automation observes what happens and
+emits events:
 
 ```typescript
 { scope: "linkedin", type: "RateLimitObserved", retryAfter: "..." }
@@ -186,9 +187,7 @@ Same message observed twice → same ID → deduplicated. This makes restarts sa
 
 ```mermaid
 graph LR
-    EXT[Extension] --> BP[BrowserPool]
-    BP --> EI[EventIngestion]
-    EI --> INJ[Injection]
+    API[API] --> INJ[Injection]
     INJ --> ES[(EventStore)]
     ES --> PR[Projection]
     PR --> PL[Platform]
@@ -196,8 +195,9 @@ graph LR
 ```
 
 One path. Auth events, message events, rate limit events—all flow through the
-same pipe. EventIngestion enriches and delegates to Injection. Projection
-provides typed access; the platform service derives everything from that.
+same pipe. The API validates events against the platform's schema and delegates
+to Injection. Projection provides typed access; the platform service derives
+everything from that.
 
 ---
 
@@ -249,7 +249,6 @@ const ParticipantId = (value: string): ParticipantId => value as ParticipantId;
 | `CorrelationId`    | Tracing. Links related events across the system.                               |
 | `CanonicalId`      | Message identity. Distinct from platform's native message ID.                  |
 | `BrowserConfigId`  | Browser session identifier. Don't mix with instance IDs.                       |
-| `ExtensionId`      | Browser extension identifier.                                                  |
 | `ExecuteErrorCode` | Effect error codes. Branded for extensibility.                                 |
 
 ### ParticipantId: Scoped User Identity
@@ -798,14 +797,12 @@ graph TB
         CS[(ConfigStore)]
     end
 
-    subgraph "Layer 1: Browser Backend"
-        BB[BrowserBackend]
+    subgraph "Layer 1: Browser Pool"
         BP[BrowserPool]
-        EX[ExtensionStore]
     end
 
-    subgraph "Layer 2: Event Flow"
-        EI[EventIngestion]
+    subgraph "Layer 2: API"
+        API[Hono API]
     end
 
     subgraph "Layer 3: Projections"
@@ -824,11 +821,8 @@ graph TB
 
     ES --> DB
     CS --> DB
-    BB --> CS
-    BB --> BP
-    BB --> EX
-    EI --> BP
-    EI --> INJ
+    BP --> CS
+    API --> INJ
     INJ --> ES
     PR --> ES
     PL --> PR
@@ -836,7 +830,7 @@ graph TB
     JN --> INJ
     SP --> PL
     SP --> JN
-````
+```
 
 ---
 
@@ -892,7 +886,6 @@ Browser configurations:
 interface BrowserConfig {
   readonly id: BrowserConfigId;
   readonly context: string;
-  readonly extensionIds: readonly ExtensionId[];
   readonly proxy?: ProxyConfig;
 }
 
@@ -907,10 +900,9 @@ interface ConfigStoreService {
   readonly upsert: (
     config: BrowserConfig,
   ) => Effect.Effect<void, ConfigStoreError>;
-  readonly upgradeExtension: (
-    oldId: ExtensionId,
-    newId: ExtensionId,
-  ) => Effect.Effect<number, ConfigStoreError>;
+  readonly remove: (
+    id: BrowserConfigId,
+  ) => Effect.Effect<boolean, ConfigStoreError>;
 }
 
 class ConfigStore
@@ -919,111 +911,65 @@ class ConfigStore
 
 ---
 
-## Layer 1: Browser Backend
+## Layer 1: Browser Pool
 
-Browser lifecycle and extension management bundled together to ensure
-implementation compatibility.
+Browser lifecycle management. Launches browsers and returns CDP WebSocket URLs.
+Platforms connect to CDP themselves using whatever framework they prefer
+(Playwright, Puppeteer, raw CDP, etc.).
 
 ### BrowserPool
 
 ```typescript
-interface TaggedBridgeEvent {
+interface CdpSession {
   readonly configId: BrowserConfigId;
-  readonly event: BridgeEvent;
+  readonly cdpUrl: string;
 }
 
 interface BrowserPoolService {
   readonly launch: (
     configId: BrowserConfigId,
-  ) => Effect.Effect<void, BrowserError>;
+  ) => Effect.Effect<CdpSession, BrowserError>;
   readonly stop: (
     configId: BrowserConfigId,
   ) => Effect.Effect<void, BrowserError>;
   readonly isRunning: (configId: BrowserConfigId) => Effect.Effect<boolean>;
-  readonly send: (
+  readonly getSession: (
     configId: BrowserConfigId,
-    command: BrowserCommand,
-  ) => Effect.Effect<unknown, BrowserError>;
-  readonly events: Stream.Stream<TaggedBridgeEvent, BrowserError>;
+  ) => Effect.Effect<CdpSession, BrowserError>;
 }
 
 class BrowserPool
   extends Context.Tag("BrowserPool")<BrowserPool, BrowserPoolService>() {}
 ```
 
-### BrowserBackend
-
-Bundles pool and extension store:
-
-```typescript
-interface BrowserBackend {
-  readonly pool: BrowserPoolService;
-  readonly extensions: ExtensionStoreService;
-}
-
-// Implementations provide both together
-const makeBrowserbaseBackend: Effect.Effect<BrowserBackend, never, ConfigStore>;
-const makeLocalBackend: Effect.Effect<BrowserBackend, never, ConfigStore>;
-```
+Implementations (Browserbase, local Playwright) provide `BrowserPoolService`
+directly.
 
 ---
 
-## Layer 2: Event Flow
+## Layer 2: API and Event Bus
 
-**EventIngestion** consumes the browser event stream, enriches with server-side
-fields, and delegates to Injection:
+The **Hono HTTP API** is the single ingestion point for all events. It validates
+incoming event payloads against the platform's registered schema, then delegates
+to the scope's Injector.
 
 ```typescript
-interface EventIngestionService {}
+// POST /events — submit a single event
+// 1. Extract scope from payload
+// 2. Look up platform schema from registry
+// 3. Validate against schema
+// 4. Inject into event store via scope's Injector
 
-class EventIngestion extends Context.Tag("EventIngestion")<
-  EventIngestion,
-  EventIngestionService
->() {}
-
-const makeEventIngestion = (
-  schemas: ReadonlyMap<Scope, z.ZodType<StorableEvent>>,
-) =>
-  Layer.scoped(
-    EventIngestion,
-    Effect.gen(function* () {
-      const pool = yield* BrowserPool;
-      const store = yield* EventStore;
-
-      // Build Injection per scope
-      const injections = new Map(
-        [...schemas.entries()].map(([scope, schema]) => [
-          scope,
-          makeInjection(scope, schema, store),
-        ]),
-      );
-
-      yield* Effect.forkScoped(
-        pool.events.pipe(
-          Stream.runForEach(({ configId, event }) =>
-            Effect.gen(function* () {
-              const scope = Scope(event.scope);
-              const injection = injections.get(scope);
-              if (!injection) return;
-
-              const enriched = {
-                ...event,
-                eventId: EventId(crypto.randomUUID()),
-                timestamp: new Date().toISOString(),
-                correlationId: genCorrelationId(),
-                configId,
-              };
-
-              yield* injection.append(enriched);
-            })
-          ),
-        ),
-      );
-
-      return {};
-    }),
-  );
+// GET /events — paginated read with scope/since/correlation filters
+// GET /views/:platform/accounts — list accounts
+// GET /views/:platform/accounts/:id/inbox — derive inbox view
+// GET /configs — browser config CRUD
+// GET /openapi.json — auto-generated OpenAPI spec
 ```
+
+The API also serves derived views (inbox, threads, browsers, contacts) by
+querying the Projection layer and running the platform behavior's pure
+derivation functions.
 
 ---
 
@@ -1134,14 +1080,17 @@ export const makeLinkedInActions = (
   sendMessage: (options) => (threadId, content) =>
     Effect.gen(function* () {
       const configId = options?.preferConfigId ?? selectBrowser(account);
-      yield* pool.send(configId, { type: "sendMessage", threadId, content });
+      const session = yield* pool.getSession(configId);
+      // Connect to session.cdpUrl with Playwright/Puppeteer/raw CDP
+      // ... perform sendMessage automation
       return { success: true };
     }),
 
   syncInbox: (options) => (since) =>
     Effect.gen(function* () {
       const configId = options?.preferConfigId ?? selectBrowser(account);
-      yield* pool.send(configId, { type: "syncInbox", since });
+      const session = yield* pool.getSession(configId);
+      // Connect to session.cdpUrl and scrape inbox
       return { synced: true };
     }),
 });
@@ -1351,42 +1300,44 @@ plugins/                         # Platform plugins
 └── reddit/
     └── ...                      # Same structure
 
-backend/server/src/
+server/src/
 ├── core/                        # Branded types, utilities
 ├── events/                      # StorableEvent, CorrelatedEvent, templates
 ├── views/                       # Base view types (inbox, thread, contact, browser)
-├── store/                       # EventStore, ConfigStore, Database
-├── backend/                     # BrowserBackend, BrowserPool, ExtensionStore
-├── routing/                     # EventIngestion
+├── store/                       # EventStore, ConfigStore
+├── browsers/                    # BrowserPool, CDP session management
 ├── projections/                 # Projection, Injection
 ├── platforms/                   # PlatformDefinition, PlatformService, PlatformBehavior
-├── journal/                     # Journal service
-└── main.ts                      # Entry point, layer composition
+└── runtime/                     # Journal, platform layer factories
 
-scripts/                         # CLI and TUI scripts
-├── lib/
-│   ├── cli/                     # Logger, env, shell utilities
-│   ├── tui/                     # Ink components, hooks
-│   └── platforms/               # Platform store registry
-└── ...                          # Individual scripts
+api/src/
+├── context.ts                   # Server context (stores, registry, projections)
+├── schemas.ts                   # Shared Zod schemas for OpenAPI
+├── bus.ts                       # Event validation + injection
+├── server.ts                    # Hono app, middleware, OpenAPI spec
+├── main.ts                      # Entry point (Deno.serve)
+└── routes/
+    ├── events.ts                # POST /events, GET /events
+    ├── views.ts                 # Derived views (inbox, threads, browsers, contacts)
+    └── configs.ts               # Browser config CRUD
 ```
 
 ---
 
 ## Dependency Matrix
 
-| Layer | Service          | Depends On              | Responsibility                       |
-| ----- | ---------------- | ----------------------- | ------------------------------------ |
-| 0     | `Database`       | —                       | Raw SQL access                       |
-| 0     | `EventStore`     | Database                | Append-only event log                |
-| 0     | `ConfigStore`    | Database                | Browser configs                      |
-| 1     | `BrowserBackend` | ConfigStore             | Bundles BrowserPool + ExtensionStore |
-| 2     | `EventIngestion` | BrowserPool, Injection  | Consumes stream, enriches, stores    |
-| 3     | `Projection`     | EventStore              | Type-safe filtered reads             |
-| 3     | `Injection`      | EventStore              | Type-safe validated writes           |
-| 4     | `Platform`       | Projection, BrowserPool | Derivation + actions for sockpuppets |
-| 4     | `Journal`        | Injection               | Sockpuppet decision log              |
-| 5     | `Sockpuppet`     | Platform, Journal       | Human-like agent                     |
+| Layer | Service        | Depends On              | Responsibility                         |
+| ----- | -------------- | ----------------------- | -------------------------------------- |
+| 0     | `Database`     | —                       | Raw SQL access                         |
+| 0     | `EventStore`   | Database                | Append-only event log                  |
+| 0     | `ConfigStore`  | Database                | Browser configs                        |
+| 1     | `BrowserPool`  | ConfigStore             | Launch browsers, return CDP URLs       |
+| 2     | `API`          | Injection, Projection   | HTTP event bus + control plane         |
+| 3     | `Projection`   | EventStore              | Type-safe filtered reads               |
+| 3     | `Injection`    | EventStore              | Type-safe validated writes             |
+| 4     | `Platform`     | Projection, BrowserPool | Derivation + actions for sockpuppets   |
+| 4     | `Journal`      | Injection               | Sockpuppet decision log                |
+| 5     | `Sockpuppet`   | Platform, Journal       | Human-like agent                       |
 
 ---
 

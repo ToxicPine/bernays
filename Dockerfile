@@ -6,15 +6,15 @@ WORKDIR /app
 COPY deno.json deno.lock ./
 
 # Copy all workspace members
-COPY backend ./backend
+COPY server ./server
 COPY plugins ./plugins
 COPY agents ./agents
+COPY api ./api
 COPY tests ./tests
-COPY scripts ./scripts
 
 # Cache dependencies
 RUN deno cache agents/src/main.ts
-RUN deno cache scripts/**/*.ts
+RUN deno cache api/src/main.ts
 
-# Default command (can be overridden)
-CMD ["deno", "run", "--allow-all", "agents/src/main.ts"]
+# Default command (can be overridden by process groups)
+CMD ["deno", "run", "--allow-all", "api/src/main.ts"]

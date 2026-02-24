@@ -12,7 +12,7 @@ import {
   type LinkedInAccount,
   type LinkedInAccountStoreService,
 } from "@bernays/plugins/linkedin";
-import type { BrowserConfig } from "@bernays/server/backend";
+import type { BrowserConfig } from "@bernays/server/browsers";
 import {
   BrowserConfigId,
   type BrowserConfigId as BrowserConfigIdType,
@@ -37,7 +37,6 @@ export const ensureBrowserConfig = async (
   const record: BrowserConfig = {
     id,
     context: config.browserbaseContextId,
-    extensionIds: [],
   };
   await Effect.runPromise(store.upsert(record));
   tty.info("Browser Config Created.");

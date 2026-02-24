@@ -1,13 +1,13 @@
 // packages/commandline/src/runtime.ts
 // Runtime setup and layer composition
 
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer } from "effect";
 import {
-  BrowserBackendLive,
   BrowserPool,
+  BrowserPoolLive,
   type BrowserPoolService,
   makeBrowserbaseBackend,
-} from "@bernays/server/backend";
+} from "@bernays/server/browsers";
 import {
   type Journal,
   makeJournalLayer,
@@ -25,15 +25,14 @@ import type {
   StorableEvent,
 } from "@bernays/server/store";
 import { config } from "./config.ts";
-import { tty } from "./logger.ts";
 
 // ============================================================================
 // Browser Layer
 // ============================================================================
 
 export const createBrowserLayer = (configStore: ConfigStoreService) => {
-  const backend = makeBrowserbaseBackend(config.browserbaseApiKey, configStore);
-  return BrowserBackendLive(backend);
+  const pool = makeBrowserbaseBackend(config.browserbaseApiKey, configStore);
+  return BrowserPoolLive(pool);
 };
 
 // ============================================================================
@@ -75,13 +74,7 @@ export const runWithSockpuppet = <A, E>(
   eventStore: EventStore<StorableEvent>,
 ) =>
   Effect.gen(function* () {
-    const browsers = yield* BrowserPool;
-
-    yield* Effect.fork(
-      Stream.runForEach(browsers.events, (event) =>
-        Effect.sync(() => tty.event(`[${event.configId}] Event`))),
-    );
-
-    const layer = createSockpuppetLayer(account, eventStore, browsers);
+    const pool = yield* BrowserPool;
+    const layer = createSockpuppetLayer(account, eventStore, pool);
     yield* Effect.provide(sockpuppet, layer);
   });

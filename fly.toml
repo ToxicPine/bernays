@@ -5,7 +5,22 @@ primary_region = "iad"
   dockerfile = "Dockerfile"
 
 [processes]
+  api = "deno run --allow-all api/src/main.ts"
   worker = "deno run --allow-all agents/src/main.ts"
 
 [env]
+  DATABASE_URL = "postgres://agent-database-xyz.flycast"
   RUN_SOCKPUPPET = "1"
+
+[[services]]
+  internal_port = 8080
+  processes = ["api"]
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]

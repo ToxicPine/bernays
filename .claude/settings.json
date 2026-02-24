@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "deny": [
-      "Write(./examples/**)",
-      "Edit(./examples/**)",
-      "Read(./README.md)"
-    ]
-  }
-}

@@ -25,7 +25,7 @@ import {
 import {
   type BrowserPoolService,
   makeBrowserbaseBackend,
-} from "@bernays/server/backend";
+} from "@bernays/server/browsers";
 import {
   Journal,
   makeJournalLayer,
