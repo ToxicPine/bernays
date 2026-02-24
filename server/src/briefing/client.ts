@@ -5,7 +5,6 @@
 // send messages, and end conversations. Includes retries and timeouts.
 
 import { Context, Effect, Schedule } from "effect";
-import type { BriefingId } from "$/core/branded.ts";
 
 // =============================================================================
 // Error Types

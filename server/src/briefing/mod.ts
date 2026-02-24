@@ -21,3 +21,15 @@ export {
   getActiveBriefings,
   getBriefing,
 } from "./view.ts";
+
+export {
+  type AgentRegistry,
+  Briefing,
+  type BriefingError,
+  briefingError,
+  type BriefingErrorCode,
+  type BriefingRuntimeConfig,
+  type BriefingService,
+  flycastRegistry,
+  makeBriefingService,
+} from "./service.ts";

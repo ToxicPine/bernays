@@ -9,7 +9,9 @@ import {
   makeBrowserbaseBackend,
 } from "@bernays/server/browsers";
 import {
+  Briefing,
   type Journal,
+  makeBriefingLayer,
   makeJournalLayer,
   makePlatformLayer,
 } from "@bernays/server/runtime";
@@ -61,7 +63,12 @@ const createSockpuppetLayer = (
     eventStore,
   });
 
-  return Layer.merge(platformLayer, journalLayer);
+  const briefingLayer = makeBriefingLayer({
+    agentId: config.agentId ?? "default",
+    eventStore,
+  });
+
+  return Layer.merge(Layer.merge(platformLayer, journalLayer), briefingLayer);
 };
 
 // ============================================================================
@@ -69,7 +76,7 @@ const createSockpuppetLayer = (
 // ============================================================================
 
 export const runWithSockpuppet = <A, E>(
-  sockpuppet: Effect.Effect<A, E, LinkedInPlatform | Journal>,
+  sockpuppet: Effect.Effect<A, E, LinkedInPlatform | Journal | Briefing>,
   account: LinkedInAccount,
   eventStore: EventStore<StorableEvent>,
 ) =>

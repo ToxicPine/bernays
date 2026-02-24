@@ -3,17 +3,27 @@
 
 import { Effect, Layer } from "effect";
 import type { Journal } from "./services.ts";
+import type { Briefing } from "$/briefing/service.ts";
 
 // Layer Composition
 
 /**
- * Compose Platform and Journal layers into a single layer.
+ * Compose Platform, Journal, and Briefing layers into a single layer.
  * Generic over the platform tag type.
  */
 export const makeSockpuppetLayer = <TPlatform>(
   platformLayer: Layer.Layer<TPlatform>,
   journalLayer: Layer.Layer<Journal>,
-): Layer.Layer<TPlatform | Journal> => Layer.merge(platformLayer, journalLayer);
+  briefingLayer?: Layer.Layer<Briefing>,
+): Layer.Layer<TPlatform | Journal | Briefing> => {
+  const base = Layer.merge(platformLayer, journalLayer);
+  if (briefingLayer) {
+    return Layer.merge(base, briefingLayer) as Layer.Layer<
+      TPlatform | Journal | Briefing
+    >;
+  }
+  return base as unknown as Layer.Layer<TPlatform | Journal | Briefing>;
+};
 
 // Sockpuppet Execution
 
@@ -22,8 +32,8 @@ export const makeSockpuppetLayer = <TPlatform>(
  * Generic over the platform tag type.
  */
 export const runSockpuppet = async <A, E, TPlatform>(
-  sockpuppet: Effect.Effect<A, E, TPlatform | Journal>,
-  layer: Layer.Layer<TPlatform | Journal>,
+  sockpuppet: Effect.Effect<A, E, TPlatform | Journal | Briefing>,
+  layer: Layer.Layer<TPlatform | Journal | Briefing>,
 ): Promise<A> => {
   const program = Effect.provide(sockpuppet, layer);
   return Effect.runPromise(program);

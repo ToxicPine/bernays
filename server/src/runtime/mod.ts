@@ -26,6 +26,15 @@ export {
   makeJournalLayer,
 } from "./sockpuppet/journal-runtime.ts";
 
+// Briefing Layer
+export {
+  type BriefingRuntimeConfig,
+  makeBriefingLayer,
+} from "./sockpuppet/briefing-runtime.ts";
+
+// Briefing Service (re-export tag for sockpuppets)
+export { Briefing, type BriefingService } from "$/briefing/service.ts";
+
 // Runtime Service
 export {
   makeRuntimeLayer,

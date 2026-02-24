@@ -6,5 +6,6 @@ export const config = {
   browserbaseContextId: Deno.env.get("BROWSERBASE_CONTEXT_ID")!,
   databaseUrl: Deno.env.get("DATABASE_URL")!,
   accountId: Deno.env.get("ACCOUNT_ID") ?? "demo-account",
+  agentId: Deno.env.get("AGENT_ID") ?? Deno.env.get("FLY_APP_NAME") ?? "default",
   runSockpuppet: Deno.env.get("RUN_SOCKPUPPET") === "1",
 } as const;

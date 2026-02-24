@@ -28,6 +28,7 @@ implementation patterns.**
   - [Layer 3: Projection and Injection](#layer-3-projection-and-injection)
   - [Layer 4: Platform Service](#layer-4-platform-service)
   - [Layer 5: Sockpuppet](#layer-5-sockpuppet)
+  - [Agent-to-Agent Briefings](#agent-to-agent-briefings)
 - [Part 4: Reference](#part-4-reference)
   - [Module Structure](#module-structure)
   - [Dependency Matrix](#dependency-matrix)
@@ -87,13 +88,14 @@ Everything else exists to make this possible.
 
 ### 1. Sockpuppets See a Simple World
 
-Sockpuppets interact with two services:
+Sockpuppets interact with three services:
 
 - **Platform** — inbox, threads, browsers, contacts, actions
 - **Journal** — record decisions, restore state on restart
+- **Briefing** — request, accept/decline, and conduct briefings with other agents
 
 They never see: EventStore, BrowserPool, Projections, Injection, schemas.
-Everything complex is hidden behind these two interfaces.
+Everything complex is hidden behind these three interfaces.
 
 ### 2. One Flow
 
@@ -821,6 +823,7 @@ graph TB
     subgraph "Layer 4: Platform"
         PL[Platform Service]
         JN[Journal]
+        BR[Briefing]
     end
 
     subgraph "Layer 5: Sockpuppet"
@@ -837,8 +840,11 @@ graph TB
     PL --> PR
     PL --> BP
     JN --> INJ
+    BR --> INJ
+    BR -->|"HTTP over flycast"| API
     SP --> PL
     SP --> JN
+    SP --> BR
 ```
 
 ---
@@ -1216,12 +1222,13 @@ from different platforms never collide.
 
 ## Layer 5: Sockpuppet
 
-The human-like agent. Sees only Platform and Journal.
+The human-like agent. Sees only Platform, Journal, and Briefing.
 
 ```typescript
 const linkedInBot = Effect.gen(function* () {
   const platform = yield* LinkedInPlatform;
   const journal = yield* Journal;
+  const briefing = yield* Briefing;
 
   // ─────────────────────────────────────────────────────────────────────────
   // Restore state from journal
@@ -1232,6 +1239,18 @@ const linkedInBot = Effect.gen(function* () {
       e.threadId as string
     ),
   );
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Handle incoming briefings
+  // ─────────────────────────────────────────────────────────────────────────
+  const pending = yield* briefing.pending;
+  for (const req of pending) {
+    yield* briefing.accept(req.briefingId);
+    yield* briefing.send(req.briefingId, `Online with ${repliedThreads.size} threads handled.`);
+    yield* briefing.end(req.briefingId, {
+      summary: { threadsHandled: repliedThreads.size },
+    });
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // Check available browsers
@@ -1367,47 +1386,109 @@ BriefingEnded       { briefingId, endedBy, reason?, summary? }
 - The derived `BriefingView` exposes `requestedAt`, `scheduledAt`, `acceptedAt`, and
   `endedAt` — all derived from the corresponding event timestamps.
 
-### Briefing Client
+### Briefing Service
 
-The `BriefingClient` is an Effect service with exponential-backoff retries and
-timeouts. Sockpuppets use it to initiate and conduct briefings:
+The `Briefing` service is what sockpuppets `yield*` to participate in
+briefings — both initiating and receiving. It wraps the outbound HTTP client
+(with exponential-backoff retries and timeouts), local event
+projection/injection, and agent identity resolution into a single interface.
+
+The sockpuppet never deals with remote URLs, agent identity strings, or HTTP.
+It refers to other agents by name. The service resolves names to flycast URLs
+and threads identity through all operations automatically.
+
+```typescript
+interface BriefingService {
+  // ── Views (derived from local events) ──────────────────────────────────
+  /** All briefings where this agent hasn't responded yet. */
+  readonly pending: Effect.Effect<readonly BriefingView[]>;
+  /** All briefings currently in progress. */
+  readonly active: Effect.Effect<readonly BriefingView[]>;
+  /** All briefings regardless of status. */
+  readonly all: Effect.Effect<readonly BriefingView[]>;
+  /** Look up a single briefing. */
+  readonly get: (id: string) => Effect.Effect<Option<BriefingView>>;
+
+  // ── Actions ────────────────────────────────────────────────────────────
+  /** Request a new briefing with another agent. */
+  readonly request: (
+    agent: string,
+    topic: string,
+    options?: { scheduledAt?: string; context?: Record<string, unknown> },
+  ) => Effect.Effect<BriefingView, BriefingError>;
+
+  /** Accept a pending briefing request. */
+  readonly accept: (briefingId: string) => Effect.Effect<BriefingView, BriefingError>;
+
+  /** Decline a pending briefing request. */
+  readonly decline: (briefingId: string, reason?: string) => Effect.Effect<BriefingView, BriefingError>;
+
+  /** Send a message in an active briefing. */
+  readonly send: (briefingId: string, content: string) => Effect.Effect<void, BriefingError>;
+
+  /** End a briefing, optionally with a reason and structured summary. */
+  readonly end: (
+    briefingId: string,
+    options?: { reason?: string; summary?: Record<string, unknown> },
+  ) => Effect.Effect<BriefingView, BriefingError>;
+}
+
+class Briefing extends Context.Tag("Briefing")<Briefing, BriefingService>() {}
+```
+
+The layer is composed with the agent's identity and a registry mapping agent
+names to flycast URLs. The sockpuppet never sees either.
+
+**Initiating a briefing:**
 
 ```typescript
 const briefBot = Effect.gen(function* () {
-  const client = yield* BriefingClient;
+  const briefing = yield* Briefing;
   const journal = yield* Journal;
 
-  // Request a briefing with another agent, scheduled for 3pm today
-  const briefingId = crypto.randomUUID();
-  const scheduledAt = new Date();
-  scheduledAt.setHours(15, 0, 0, 0);
+  const b = yield* briefing.request("agent-b", "Daily Status Sync");
 
-  const response = yield* client.requestBriefing(
-    "http://agent-b.flycast",
-    {
-      briefingId,
-      fromAgent: "agent-a.flycast",
-      topic: "Daily Status Sync",
-      scheduledAt: scheduledAt.toISOString(),
-    },
-  );
+  yield* briefing.send(b.briefingId, "Processed 42 messages today. 3 require follow-up.");
 
-  if (!response.accepted) {
-    yield* journal.record({ kind: "briefing_declined", briefingId });
-    return;
-  }
-
-  // Send a message
-  yield* client.sendMessage("http://agent-b.flycast", briefingId, {
-    sender: "agent-a.flycast",
-    content: "Processed 42 messages today. 3 require follow-up.",
-  });
-
-  // End the briefing with a summary
-  yield* client.endBriefing("http://agent-b.flycast", briefingId, {
-    endedBy: "agent-a.flycast",
+  yield* briefing.end(b.briefingId, {
     summary: { messagesProcessed: 42, followUps: 3 },
   });
+
+  yield* journal.record({ kind: "briefing_completed", briefingId: b.briefingId });
+});
+```
+
+**Responding to incoming briefings:**
+
+```typescript
+const responderBot = Effect.gen(function* () {
+  const briefing = yield* Briefing;
+  const journal = yield* Journal;
+
+  // Check what's waiting for us
+  const pending = yield* briefing.pending;
+
+  for (const req of pending) {
+    if (req.topic.includes("Status Sync")) {
+      yield* briefing.accept(req.briefingId);
+    } else {
+      yield* briefing.decline(req.briefingId, "Not relevant right now");
+      continue;
+    }
+
+    // Read messages and respond
+    const current = yield* briefing.get(req.briefingId);
+    if (Option.isNone(current)) continue;
+
+    const lastMsg = current.value.messages.at(-1);
+    if (lastMsg) {
+      yield* briefing.send(req.briefingId, `Acknowledged: ${lastMsg.content}`);
+    }
+
+    yield* briefing.end(req.briefingId, {
+      summary: { status: "synced" },
+    });
+  }
 });
 ```
 
@@ -1435,8 +1516,12 @@ interface BriefingView {
   readonly status: "requested" | "accepted" | "declined" | "active" | "ended";
   readonly messages: readonly BriefingMessage[];
   readonly context?: Record<string, unknown>;
+  readonly endedBy?: string;
+  readonly endReason?: string;
   readonly summary?: Record<string, unknown>;
   readonly requestedAt: string;
+  readonly scheduledAt?: string;
+  readonly acceptedAt?: string;
   readonly endedAt?: string;
 }
 ```
@@ -1500,7 +1585,8 @@ api/src/
 | 3     | `Injection`    | EventStore              | Type-safe validated writes             |
 | 4     | `Platform`     | Projection, BrowserPool | Derivation + actions for sockpuppets   |
 | 4     | `Journal`      | Injection               | Sockpuppet decision log                |
-| 5     | `Sockpuppet`   | Platform, Journal       | Human-like agent                       |
+| 4     | `Briefing`     | Injection, HTTP (flycast) | Agent-to-agent structured conversations |
+| 5     | `Sockpuppet`   | Platform, Journal, Briefing | Human-like agent                     |
 
 ---
 

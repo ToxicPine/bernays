@@ -305,17 +305,8 @@ export const briefingsRoutes = (ctx: ServerContext) => {
       return c.json({ error: "Failed To Record Briefing Request" }, 422);
     }
 
-    // Record BriefingAccepted event (auto-accept by default)
-    const acceptedEvent = {
-      ...makeEventBase(),
-      type: "BriefingAccepted" as const,
-      briefingId: body.briefingId,
-      fromAgent: body.fromAgent,
-      toAgent,
-    };
-
-    await Effect.runPromiseExit(injector.append(acceptedEvent));
-
+    // Leave the briefing in "requested" state for the sockpuppet to
+    // accept or decline via the Briefing service.
     return c.json(
       BriefingRequestResponseSchema.parse({
         accepted: true,

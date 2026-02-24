@@ -1,7 +1,6 @@
 // src/briefing/view.ts
 // Derive briefing state from events — pure functions
 
-import type { BriefingId } from "$/core/branded.ts";
 import type { BriefingEvent } from "$/events/briefing.ts";
 
 // =============================================================================
