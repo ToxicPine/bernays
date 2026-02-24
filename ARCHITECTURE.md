@@ -1505,25 +1505,33 @@ const responderBot = Effect.gen(function* () {
 ### Views
 
 Briefing state is derived from events by pure functions, following the same
-pattern as platform views:
+pattern as platform views. `BriefingView` is a discriminated union on `status`
+— each state carries exactly the fields that exist in that state:
 
 ```typescript
-interface BriefingView {
+interface BriefingBase {
   readonly briefingId: string;
   readonly fromAgent: string;
   readonly toAgent: string;
   readonly topic: string;
-  readonly status: "requested" | "accepted" | "declined" | "active" | "ended";
-  readonly messages: readonly BriefingMessage[];
-  readonly context?: Record<string, unknown>;
-  readonly endedBy?: string;
-  readonly endReason?: string;
-  readonly summary?: Record<string, unknown>;
   readonly requestedAt: string;
   readonly scheduledAt?: string;
-  readonly acceptedAt?: string;
-  readonly endedAt?: string;
+  readonly context?: Record<string, unknown>;
+  readonly messages: readonly { sender: string; content: string; timestamp: string }[];
 }
+
+type BriefingView =
+  | (BriefingBase & { status: "requested" })
+  | (BriefingBase & { status: "declined"; endReason?: string })
+  | (BriefingBase & { status: "active"; acceptedAt: string })
+  | (BriefingBase & {
+      status: "ended";
+      acceptedAt: string;
+      endedBy: string;
+      endedAt: string;
+      endReason?: string;
+      summary?: Record<string, unknown>;
+    });
 ```
 
 ---

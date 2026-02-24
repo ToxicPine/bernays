@@ -14,7 +14,7 @@ export {
 } from "./client.ts";
 
 export {
-  type BriefingMessage,
+  type BriefingBase,
   type BriefingStatus,
   type BriefingView,
   deriveBriefings,
