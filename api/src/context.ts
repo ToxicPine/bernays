@@ -1,8 +1,7 @@
 // api/src/context.ts
 // Shared server context — stores, registries, projections
 
-import { Effect } from "effect";
-import type { z } from "@zod/zod";
+import { Effect, Option } from "effect";
 import {
   type EventStore,
   type StorableEvent,
@@ -13,12 +12,12 @@ import {
 import {
   type AnyPlatform,
   createPlatformRegistry,
+  type PlatformDefinition,
   type PlatformRegistry,
 } from "@bernays/server/platforms";
 import { type Injector, makeInjector } from "@bernays/server/projections";
 import { makeProjection, type Projection } from "@bernays/server/projections";
-import type { Scope } from "@bernays/server/core";
-import type { AccountStoreService } from "@bernays/server/core";
+import { type Scope, ParticipantIdFromString } from "@bernays/server/core";
 import type { BaseAccount } from "@bernays/server/views";
 
 // Plugins
@@ -31,27 +30,40 @@ import {
 // Server Context
 // =============================================================================
 
+/**
+ * Read-only view of an account store — only the operations the API needs.
+ * This avoids variance issues with the full AccountStoreService<TScope, TAccount>
+ * (which has contravariant parameters due to .get() accepting ParticipantId<TScope>).
+ */
+export interface AccountStoreView {
+  readonly get: (id: string) => Effect.Effect<Option.Option<BaseAccount>>;
+  readonly list: () => Effect.Effect<readonly BaseAccount[]>;
+}
+
 export interface ServerContext {
   readonly eventStore: EventStore<StorableEvent>;
   readonly configStore: ConfigStoreService;
   readonly registry: PlatformRegistry;
   readonly injectors: ReadonlyMap<Scope, Injector<StorableEvent>>;
   readonly projections: ReadonlyMap<Scope, Projection<StorableEvent>>;
-  readonly accountStores: ReadonlyMap<string, AccountStoreService<string, BaseAccount<string>>>;
+  readonly accountStores: ReadonlyMap<string, AccountStoreView>;
 }
 
 // =============================================================================
 // Platform Registration
 // =============================================================================
 
-// Platform type erasure: PlatformDefinition has invariant type parameters
-// (behavior methods are both covariant and contravariant), so TypeScript
-// can't widen LinkedInPlatform → AnyPlatform directly. These casts are safe
-// because the API layer only reads from behaviors (covariant position).
+// PlatformDefinition has invariant type parameters (behavior methods are both
+// covariant and contravariant), so TypeScript can't widen specific platforms
+// to AnyPlatform directly. This helper erases platform-specific types for
+// registry consumption. Safe because the API only reads from behaviors.
+// deno-lint-ignore no-explicit-any
+const asPlatform = (p: PlatformDefinition<any, any, any, any, any, any, any, any, any>): AnyPlatform => p;
+
 const PLATFORMS: readonly AnyPlatform[] = [
-  linkedInPlatform as unknown as AnyPlatform,
-  // xPlatform as unknown as AnyPlatform,
-  // redditPlatform as unknown as AnyPlatform,
+  asPlatform(linkedInPlatform),
+  // asPlatform(xPlatform),
+  // asPlatform(redditPlatform),
 ];
 
 // =============================================================================
@@ -84,20 +96,24 @@ export const createServerContext = async (
 
   for (const platform of PLATFORMS) {
     const scope = platform.scope;
-    const schema = platform.eventSchema as z.ZodType<StorableEvent>;
+    const schema = platform.eventSchema;
     injectors.set(scope, makeInjector(scope, schema, eventStore));
     projections.set(scope, makeProjection(scope, schema, eventStore));
   }
 
-  // Create account stores per platform identity
-  const accountStores = new Map<string, AccountStoreService<string, BaseAccount<string>>>();
+  // Create account stores per platform identity.
+  // Wrap platform-specific stores to satisfy AccountStoreView (which uses plain
+  // string IDs). The wrapper just forwards calls — branded ParticipantId<TScope>
+  // is a string at runtime, so this is safe.
+  const accountStores = new Map<string, AccountStoreView>();
 
   const linkedInAccountStore = await createPostgresLinkedInAccountStore({
     connectionString: databaseUrl,
   });
-  // Same variance issue: AccountStoreService.get() is contravariant in TScope.
-  // Safe here because we only call .list() and .get() (covariant reads).
-  accountStores.set("linkedin", linkedInAccountStore as unknown as AccountStoreService<string, BaseAccount<string>>);
+  accountStores.set("linkedin", {
+    get: (id) => linkedInAccountStore.get(ParticipantIdFromString<"linkedin">(id)),
+    list: () => linkedInAccountStore.list(),
+  });
 
   return {
     eventStore,

@@ -54,7 +54,7 @@ export const submitEvent = (
       );
     }
 
-    const rawScope = (payload as Record<string, unknown>).scope;
+    const rawScope = payload.scope;
     if (typeof rawScope !== "string" || rawScope.length === 0) {
       return yield* Effect.fail(
         busError("ValidationFailed", "Scope must be a non-empty string"),
