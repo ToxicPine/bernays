@@ -51,7 +51,7 @@ export const createLocalPool = (
   configStore: ConfigStoreService,
   options: LocalPoolOptions = {},
 ): BrowserPoolService => {
-  const { headless = true } = options;
+  const { headless = true, slowMo, userDataDir } = options;
 
   const instances = new Map<string, BrowserInstance>();
 
@@ -86,8 +86,15 @@ export const createLocalPool = (
             args.push(`--proxy-server=${config.proxy.server}`);
           }
 
+          // Use config.context as user data dir for persistent profiles
+          const effectiveUserDataDir = config.context || userDataDir;
+          if (effectiveUserDataDir) {
+            args.push(`--user-data-dir=${effectiveUserDataDir}`);
+          }
+
           const server = await chromium.launchServer({
             headless,
+            slowMo,
             args,
           });
 

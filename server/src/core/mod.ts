@@ -9,7 +9,6 @@ export {
   CausationId,
   CorrelationId,
   EventId,
-  ExtensionId,
   getParticipantPlatformId,
   getParticipantScope,
   IntentId,

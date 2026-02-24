@@ -100,12 +100,19 @@ Everything complex is hidden behind these two interfaces.
 Events flow through one path:
 
 ```
-API → Injection → EventStore → Projection → Platform → Sockpuppet
+Source → Injection → EventStore → Projection → Platform → Sockpuppet
 ```
 
 Auth events, message events, rate limit events—all platform-scoped, all the same
-pipe. No separate loops for different event types. The HTTP API is the single
-ingestion point for all events.
+pipe. No separate loops for different event types.
+
+Events enter the system from two sources:
+
+- **Platform actions** — sockpuppets call actions (e.g., `sendMessage`), which
+  automate browsers via CDP, observe results, and emit events through injection.
+  This is the primary source of events during normal operation.
+- **HTTP API** — external event submission for manual injection, tooling, or
+  integration with outside systems.
 
 ### 3. Derive Everything
 
@@ -186,17 +193,18 @@ Same message observed twice → same ID → deduplicated. This makes restarts sa
 
 ```mermaid
 graph LR
-    API[API] --> INJ[Injection]
+    ACT[Platform Actions] --> INJ[Injection]
+    API[HTTP API] --> INJ
     INJ --> ES[(EventStore)]
     ES --> PR[Projection]
     PR --> PL[Platform]
     PL --> SP[Sockpuppet]
 ```
 
-One path. Auth events, message events, rate limit events—all flow through the
-same pipe. The API validates events against the platform's schema and delegates
-to Injection. Projection provides typed access; the platform service derives
-everything from that.
+All events flow through injection into the append-only event store, regardless
+of source. Platform actions automate browsers via CDP and emit events; the HTTP
+API accepts external event submission. Projection provides typed access; the
+platform service derives everything from that.
 
 ---
 
@@ -758,7 +766,7 @@ interface PlatformDefinition<
 Each platform exports its own service factory. Actions are created in the
 service layer, not the definition:
 
-````typescript
+```typescript
 interface PlatformService<
   TScope extends string,
   TIdentity extends string,
@@ -781,6 +789,7 @@ interface PlatformService<
   // Platform-specific actions
   readonly actions: TActions;
 }
+```
 
 ---
 
@@ -822,6 +831,7 @@ graph TB
     CS --> DB
     BP --> CS
     API --> INJ
+    PL -->|"actions emit events"| INJ
     INJ --> ES
     PR --> ES
     PL --> PR
@@ -948,9 +958,11 @@ directly.
 
 ## Layer 2: API and Event Bus
 
-The **Hono HTTP API** is the single ingestion point for all events. It validates
-incoming event payloads against the platform's registered schema, then delegates
-to the scope's Injector.
+The **Hono HTTP API** provides external access to the event bus and control
+plane. It validates incoming event payloads against the platform's registered
+schema, then delegates to the scope's Injector. Most events originate from
+platform actions (CDP automation), but the API allows external submission for
+tooling, testing, and integration.
 
 ```typescript
 // POST /events — submit a single event

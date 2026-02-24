@@ -2,7 +2,7 @@
 // LinkedIn E2E test: sign-in and send message using local Playwright backend
 
 import { assertEquals } from "@std/assert";
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer } from "effect";
 import {
   type LinkedInTestConfig,
   loadLinkedInTestConfig,
@@ -16,8 +16,6 @@ import {
   type StorableEvent,
 } from "@bernays/server/store";
 import {
-  BrowserBackendLive,
-  BrowserPool,
   makeLocalBackendWithTestUtils,
   type LocalBackendWithTestUtils,
 } from "@bernays/server/browsers";
@@ -182,8 +180,6 @@ const fullE2EProgram = (
     // Handle 2FA if required
     if (signInResult.status === "two_factor_required") {
       yield* Effect.log(`2FA required (${signInResult.challengeType}), waiting for code...`);
-      // In a real test, we'd prompt for 2FA code or use a test authenticator
-      // For now, fail explicitly
       return yield* Effect.fail(new Error("2FA required but not handled in test"));
     }
 
@@ -223,27 +219,16 @@ const fullE2EProgram = (
   });
 
 // =============================================================================
-// Runner with Browser Pool
+// Runner
 // =============================================================================
 
-const runWithBrowserPool = <A, E>(
+const runWithLayer = <A, E>(
   program: Effect.Effect<A, E, LinkedInPlatform | Journal>,
   context: Context,
-) =>
-  Effect.gen(function* () {
-    const browserPool = yield* BrowserPool;
-
-    yield* Effect.fork(
-      Stream.runForEach(browserPool.events, (event) =>
-        Effect.log(
-          `[Event] ${event.configId}: ${event.event.type}`,
-        ),
-      ),
-    );
-
-    const layer = createSockpuppetLayer(context);
-    return yield* Effect.provide(program, layer);
-  });
+) => {
+  const layer = createSockpuppetLayer(context);
+  return Effect.provide(program, layer);
+};
 
 // =============================================================================
 // Test Setup and Teardown
@@ -259,8 +244,7 @@ Deno.test.beforeAll(async () => {
   await Effect.runPromise(
     configStore.upsert({
       id: BrowserConfigId(TEST_BROWSER_ID),
-      context: localConfig.extensionPath,
-      extensionIds: [],
+      context: localConfig.userDataDir ?? "default",
     }),
   );
 
@@ -276,8 +260,7 @@ Deno.test.beforeAll(async () => {
 
   const backend = makeLocalBackendWithTestUtils(configStore, {
     pool: {
-      extensionPath: localConfig.extensionPath,
-      headless: false,
+      headless: localConfig.headless,
       slowMo: localConfig.slowMo,
       userDataDir: localConfig.userDataDir,
     },
@@ -317,10 +300,10 @@ Deno.test({
     }
 
     const configId = BrowserConfigId(TEST_BROWSER_ID);
-    const browserLayer = BrowserBackendLive(ctx.backend);
 
     await t.step("launch browser", async () => {
-      await Effect.runPromise(ctx!.backend.pool.launch(configId));
+      const session = await Effect.runPromise(ctx!.backend.pool.launch(configId));
+      console.log(`Browser launched, CDP URL: ${session.cdpUrl}`);
       const running = await Effect.runPromise(
         ctx!.backend.pool.isRunning(configId),
       );
@@ -330,29 +313,23 @@ Deno.test({
     await t.step("sign in via Effect action", async () => {
       const { linkedinTestEmail, linkedinTestPassword } = ctx!.linkedInConfig;
 
-      const program = runWithBrowserPool(
-        beginSignInProgram(linkedinTestEmail, linkedinTestPassword),
-        ctx!,
-      );
-
       const result = await Effect.runPromise(
-        Effect.provide(program, browserLayer),
+        runWithLayer(
+          beginSignInProgram(linkedinTestEmail, linkedinTestPassword),
+          ctx!,
+        ),
       );
 
-      // Handle 2FA if needed - for now just check we got a valid result
       if (result.status === "two_factor_required") {
         console.log(`2FA required (${result.challengeType}), test would need manual code entry`);
-        // Could add submitTwoFactorProgram here with a test code
       } else {
         assertEquals(result.status, "authenticated");
       }
     });
 
     await t.step("check platform state", async () => {
-      const program = runWithBrowserPool(checkStateProgram, ctx!);
-
       const result = await Effect.runPromise(
-        Effect.provide(program, browserLayer),
+        runWithLayer(checkStateProgram, ctx!),
       );
 
       console.log("State:", result);
@@ -361,16 +338,14 @@ Deno.test({
     await t.step("send message via Effect action", async () => {
       const { linkedinTestThreadId } = ctx!.linkedInConfig;
 
-      const program = runWithBrowserPool(
-        sendMessageProgram(
-          ThreadId(linkedinTestThreadId),
-          `E2E Test - ${new Date().toISOString()}`,
-        ),
-        ctx!,
-      );
-
       const result = await Effect.runPromise(
-        Effect.provide(program, browserLayer),
+        runWithLayer(
+          sendMessageProgram(
+            ThreadId(linkedinTestThreadId),
+            `E2E Test - ${new Date().toISOString()}`,
+          ),
+          ctx!,
+        ),
       );
 
       assertEquals(result.success, true);
@@ -396,7 +371,6 @@ Deno.test({
     }
 
     const configId = BrowserConfigId(TEST_BROWSER_ID);
-    const browserLayer = BrowserBackendLive(ctx.backend);
 
     await t.step("run full program", async () => {
       await Effect.runPromise(ctx!.backend.pool.launch(configId));
@@ -407,18 +381,16 @@ Deno.test({
         linkedinTestThreadId,
       } = ctx!.linkedInConfig;
 
-      const program = runWithBrowserPool(
-        fullE2EProgram(
-          linkedinTestEmail,
-          linkedinTestPassword,
-          ThreadId(linkedinTestThreadId),
-          "Full E2E Test",
-        ),
-        ctx!,
-      );
-
       const result = await Effect.runPromise(
-        Effect.provide(program, browserLayer),
+        runWithLayer(
+          fullE2EProgram(
+            linkedinTestEmail,
+            linkedinTestPassword,
+            ThreadId(linkedinTestThreadId),
+            "Full E2E Test",
+          ),
+          ctx!,
+        ),
       );
 
       console.log("Result:", result);

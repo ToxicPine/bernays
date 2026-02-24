@@ -7,7 +7,6 @@ export const E2EConfigSchema = z.object({
   browserbaseApiKey: z.string().min(1),
   browserbaseProjectId: z.string().min(1),
   browserbaseContextId: z.string().min(1),
-  browserbaseExtensionId: z.string().optional(),
   databaseUrl: z.string().min(1),
   flyAppName: z.string().default("virtual-bernays"),
   testTimeout: z.number().default(120_000),
@@ -23,7 +22,6 @@ export const LinkedInTestConfigSchema = z.object({
 export type LinkedInTestConfig = z.infer<typeof LinkedInTestConfigSchema>;
 
 export const LocalTestConfigSchema = z.object({
-  extensionPath: z.string().min(1),
   headless: z.boolean().default(false),
   userDataDir: z.string().optional(),
   slowMo: z.number().optional(),
@@ -63,7 +61,6 @@ const ENV_VAR_NAMES: Record<string, string> = {
   browserbaseApiKey: "BROWSERBASE_API_KEY",
   browserbaseProjectId: "BROWSERBASE_PROJECT_ID",
   browserbaseContextId: "BROWSERBASE_CONTEXT_ID",
-  browserbaseExtensionId: "BROWSERBASE_EXTENSION_ID",
   databaseUrl: "DATABASE_URL",
   flyAppName: "FLY_APP_NAME",
   testTimeout: "E2E_TEST_TIMEOUT",
@@ -71,7 +68,6 @@ const ENV_VAR_NAMES: Record<string, string> = {
   linkedinTestEmail: "LINKEDIN_TEST_EMAIL",
   linkedinTestPassword: "LINKEDIN_TEST_PASSWORD",
   linkedinTestThreadId: "LINKEDIN_TEST_THREAD_ID",
-  extensionPath: "EXTENSION_PATH",
   headless: "HEADLESS",
   userDataDir: "USER_DATA_DIR",
   slowMo: "SLOW_MO",
@@ -86,7 +82,6 @@ const loadEnvAndParse = async () => {
     browserbaseApiKey: Deno.env.get("BROWSERBASE_API_KEY") ?? "",
     browserbaseProjectId: Deno.env.get("BROWSERBASE_PROJECT_ID") ?? "",
     browserbaseContextId: Deno.env.get("BROWSERBASE_CONTEXT_ID") ?? "",
-    browserbaseExtensionId: Deno.env.get("BROWSERBASE_EXTENSION_ID"),
     databaseUrl: Deno.env.get("DATABASE_URL") ?? "",
     flyAppName: Deno.env.get("FLY_APP_NAME") ?? "virtual-bernays",
     testTimeout: parseInt(Deno.env.get("E2E_TEST_TIMEOUT") ?? "120000", 10),
@@ -174,7 +169,6 @@ export const loadLocalTestConfig = async (): Promise<LocalTestConfig> => {
   await loadEnvFile(`${projectRoot}/.env.test`);
 
   const result = LocalTestConfigSchema.safeParse({
-    extensionPath: Deno.env.get("EXTENSION_PATH") ?? "",
     headless: Deno.env.get("HEADLESS") === "true",
     userDataDir: Deno.env.get("USER_DATA_DIR") || undefined,
     slowMo: Deno.env.get("SLOW_MO")

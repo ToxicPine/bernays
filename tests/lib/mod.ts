@@ -17,9 +17,6 @@ export {
 export { cleanupTestData, getEventCount } from "./database.ts";
 
 export {
-  type BridgeMessage,
   createSession,
-  setupBridge,
   type TestSession,
-  waitForExtension,
 } from "./browser.ts";
