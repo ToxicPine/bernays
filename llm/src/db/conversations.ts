@@ -1,7 +1,7 @@
 // llm/src/db/conversations.ts
 // Conversation CRUD against SQLite
 
-import { Database } from "@db/sqlite";
+import { type BindValue, Database } from "@db/sqlite";
 
 // =============================================================================
 // Types
@@ -109,7 +109,7 @@ export const listConversations = (
   query: ListConversationsQuery,
 ): PaginatedResult<Conversation> => {
   const conditions: string[] = [];
-  const params: unknown[] = [];
+  const params: BindValue[] = [];
 
   if (query.agentId) {
     conditions.push("agent_id = ?");
