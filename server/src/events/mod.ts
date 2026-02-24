@@ -44,6 +44,23 @@ export {
   JournalEventSchema,
 } from "./journal.ts";
 
+// Briefing Events (scope: "briefing")
+export {
+  type BriefingAccepted,
+  BriefingAcceptedSchema,
+  type BriefingDeclined,
+  BriefingDeclinedSchema,
+  type BriefingEnded,
+  BriefingEndedSchema,
+  type BriefingEvent,
+  BriefingEventSchema,
+  type BriefingMessageSent,
+  BriefingMessageSentSchema,
+  type BriefingRequested,
+  BriefingRequestedSchema,
+  BRIEFING_SCOPE,
+} from "./briefing.ts";
+
 // Event Templates
 export {
   AnchorMessageObservedBase,

@@ -4,6 +4,7 @@
 // Branded Types
 export {
   type Brand,
+  BriefingId,
   BrowserConfigId,
   CanonicalId,
   CausationId,
@@ -21,7 +22,7 @@ export {
 } from "./branded.ts";
 
 // Scope Infrastructure
-export { CORE_SCOPE, JOURNAL_SCOPE, ScopeSchema } from "./scope.ts";
+export { BRIEFING_SCOPE, CORE_SCOPE, JOURNAL_SCOPE, ScopeSchema } from "./scope.ts";
 
 // Hashing Utilities
 export {

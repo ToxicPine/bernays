@@ -1293,6 +1293,156 @@ const linkedInBot = Effect.gen(function* () {
 
 ---
 
+## Agent-to-Agent Briefings
+
+Bernays instances deployed on a private network (via ambit) can conduct
+structured conversations with each other. A **briefing** is a lifecycle-managed
+dialogue between two agents, tracked through events in the `"briefing"` scope.
+
+### Deployment Model
+
+Each bernays instance is deployed to Fly.io and reachable on the private network at
+`http://<app-name>.flycast`. When receiving a briefing request, agents derive
+their own identity from the incoming `Host` header — no extra configuration
+needed. Communication happens over HTTP — agent A calls agent B's API at
+`http://agent-b.flycast/briefings/...`.
+
+```mermaid
+graph LR
+    A[Agent A<br/>agent-a.flycast] <-->|HTTP over flycast| B[Agent B<br/>agent-b.flycast]
+    A --> EA[(Event Store A)]
+    B --> EB[(Event Store B)]
+```
+
+Both agents record briefing events in their own event store. This means each
+side has a complete local record of the conversation — no shared state, no
+coordination database.
+
+### Briefing Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Requested: Agent A sends request
+    Requested --> Active: Agent B accepts
+    Requested --> Declined: Agent B declines
+    Active --> Active: Either agent sends message
+    Active --> Ended: Either agent ends
+    Declined --> [*]
+    Ended --> [*]
+```
+
+1. **Requested** — Agent A generates a `BriefingId`, records
+   `BriefingRequested` locally, then calls `POST /briefings/request` on Agent
+   B's API.
+
+2. **Accepted/Declined** — Agent B records the incoming request as
+   `BriefingRequested`, then immediately records `BriefingAccepted` or
+   `BriefingDeclined`. The response tells Agent A the outcome.
+
+3. **Messages** — Either agent can send messages by calling
+   `POST /briefings/{id}/message` on the other's API. Each side records
+   `BriefingMessageSent` locally.
+
+4. **Ended** — Either agent can end the briefing by calling
+   `POST /briefings/{id}/end`. Both sides record `BriefingEnded`. An optional
+   summary captures the outcome.
+
+### Event Schema
+
+All briefing events use the `"briefing"` scope and extend `CorrelationMetadata`:
+
+```typescript
+// Lifecycle events (all inherit timestamp from StorableEvent)
+BriefingRequested   { briefingId, fromAgent, toAgent, topic, scheduledAt?, context? }
+BriefingAccepted    { briefingId, fromAgent, toAgent }
+BriefingDeclined    { briefingId, fromAgent, toAgent, reason? }
+BriefingMessageSent { briefingId, sender, content }
+BriefingEnded       { briefingId, endedBy, reason?, summary? }
+```
+
+- Every event carries a `timestamp` (ISO 8601) from `StorableEvent` — this is when
+  the event was recorded.
+- `BriefingRequested.scheduledAt` is when the briefing should occur. Omit for immediate.
+- Messages are timestamped via the event's `timestamp` field.
+- The derived `BriefingView` exposes `requestedAt`, `scheduledAt`, `acceptedAt`, and
+  `endedAt` — all derived from the corresponding event timestamps.
+
+### Briefing Client
+
+The `BriefingClient` is an Effect service with exponential-backoff retries and
+timeouts. Sockpuppets use it to initiate and conduct briefings:
+
+```typescript
+const briefBot = Effect.gen(function* () {
+  const client = yield* BriefingClient;
+  const journal = yield* Journal;
+
+  // Request a briefing with another agent, scheduled for 3pm today
+  const briefingId = crypto.randomUUID();
+  const scheduledAt = new Date();
+  scheduledAt.setHours(15, 0, 0, 0);
+
+  const response = yield* client.requestBriefing(
+    "http://agent-b.flycast",
+    {
+      briefingId,
+      fromAgent: "agent-a.flycast",
+      topic: "Daily Status Sync",
+      scheduledAt: scheduledAt.toISOString(),
+    },
+  );
+
+  if (!response.accepted) {
+    yield* journal.record({ kind: "briefing_declined", briefingId });
+    return;
+  }
+
+  // Send a message
+  yield* client.sendMessage("http://agent-b.flycast", briefingId, {
+    sender: "agent-a.flycast",
+    content: "Processed 42 messages today. 3 require follow-up.",
+  });
+
+  // End the briefing with a summary
+  yield* client.endBriefing("http://agent-b.flycast", briefingId, {
+    endedBy: "agent-a.flycast",
+    summary: { messagesProcessed: 42, followUps: 3 },
+  });
+});
+```
+
+### API Routes
+
+| Method | Path                          | Description                       |
+| ------ | ----------------------------- | --------------------------------- |
+| POST   | `/briefings/request`          | Receive a briefing request        |
+| POST   | `/briefings/{id}/message`     | Receive a message in a briefing   |
+| POST   | `/briefings/{id}/end`         | End a briefing                    |
+| GET    | `/briefings`                  | List briefings (optional ?status) |
+| GET    | `/briefings/{id}`             | Get a specific briefing           |
+
+### Views
+
+Briefing state is derived from events by pure functions, following the same
+pattern as platform views:
+
+```typescript
+interface BriefingView {
+  readonly briefingId: string;
+  readonly fromAgent: string;
+  readonly toAgent: string;
+  readonly topic: string;
+  readonly status: "requested" | "accepted" | "declined" | "active" | "ended";
+  readonly messages: readonly BriefingMessage[];
+  readonly context?: Record<string, unknown>;
+  readonly summary?: Record<string, unknown>;
+  readonly requestedAt: string;
+  readonly endedAt?: string;
+}
+```
+
+---
+
 # Part 4: Reference
 
 ## Module Structure
@@ -1313,10 +1463,11 @@ plugins/                         # Platform plugins
 
 server/src/
 ├── core/                        # Branded types, utilities
-├── events/                      # StorableEvent, CorrelatedEvent, templates
+├── events/                      # StorableEvent, CorrelatedEvent, templates, briefing
 ├── views/                       # Base view types (inbox, thread, contact, browser)
 ├── store/                       # EventStore, ConfigStore
 ├── browsers/                    # BrowserPool, CDP session management
+├── briefing/                    # Agent-to-agent briefing client and views
 ├── projections/                 # Projection, Injection
 ├── platforms/                   # PlatformDefinition, PlatformService, PlatformBehavior
 └── runtime/                     # Journal, platform layer factories
@@ -1330,7 +1481,8 @@ api/src/
 └── routes/
     ├── events.ts                # POST /events, GET /events
     ├── views.ts                 # Derived views (inbox, threads, browsers, contacts)
-    └── configs.ts               # Browser config CRUD
+    ├── configs.ts               # Browser config CRUD
+    └── briefings.ts             # Agent-to-agent briefing endpoints
 ```
 
 ---

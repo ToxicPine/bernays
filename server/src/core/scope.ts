@@ -9,4 +9,6 @@ export const CORE_SCOPE = Scope("core");
 
 export const JOURNAL_SCOPE = Scope("journal");
 
+export const BRIEFING_SCOPE = Scope("briefing");
+
 export const ScopeSchema = z.string().min(1).transform((val) => Scope(val));

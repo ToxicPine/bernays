@@ -24,6 +24,7 @@ export type IntentId = Brand<string, "IntentId">;
 export type Scope = Brand<string, "Scope">;
 
 export type BrowserConfigId = Brand<string, "BrowserConfigId">;
+export type BriefingId = Brand<string, "BriefingId">;
 
 export const ThreadId = (value: string): ThreadId => value as ThreadId;
 export const CanonicalId = (value: string): CanonicalId => value as CanonicalId;
@@ -59,6 +60,7 @@ export const IntentId = (value: string): IntentId => value as IntentId;
 export const Scope = (value: string): Scope => value as Scope;
 export const BrowserConfigId = (value: string): BrowserConfigId =>
   value as BrowserConfigId;
+export const BriefingId = (value: string): BriefingId => value as BriefingId;
 
 export const isUUID = (value: unknown): value is string => {
   return z.uuid().safeParse(value).success;

@@ -17,7 +17,8 @@ import {
 } from "@bernays/server/platforms";
 import { type Injector, makeInjector } from "@bernays/server/projections";
 import { makeProjection, type Projection } from "@bernays/server/projections";
-import { type Scope, ParticipantIdFromString } from "@bernays/server/core";
+import { type Scope, ParticipantIdFromString, BRIEFING_SCOPE } from "@bernays/server/core";
+import { BriefingEventSchema } from "@bernays/server/events";
 import type { BaseAccount } from "@bernays/server/views";
 
 // Plugins
@@ -100,6 +101,10 @@ export const createServerContext = async (
     injectors.set(scope, makeInjector(scope, schema, eventStore));
     projections.set(scope, makeProjection(scope, schema, eventStore));
   }
+
+  // Register briefing scope (cross-cutting, not a platform)
+  injectors.set(BRIEFING_SCOPE, makeInjector(BRIEFING_SCOPE, BriefingEventSchema, eventStore));
+  projections.set(BRIEFING_SCOPE, makeProjection(BRIEFING_SCOPE, BriefingEventSchema, eventStore));
 
   // Create account stores per platform identity.
   // Wrap platform-specific stores to satisfy AccountStoreView (which uses plain

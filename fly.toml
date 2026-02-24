@@ -12,6 +12,7 @@ primary_region = "iad"
   DATABASE_URL = "postgres://agent-database-xyz.flycast"
   RUN_SOCKPUPPET = "1"
 
+
 [[services]]
   internal_port = 8080
   processes = ["api"]

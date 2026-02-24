@@ -10,7 +10,8 @@
     "./platforms": "./src/platforms/mod.ts",
     "./views": "./src/views/mod.ts",
     "./projections": "./src/projections/mod.ts",
-    "./runtime": "./src/runtime/mod.ts"
+    "./runtime": "./src/runtime/mod.ts",
+    "./briefing": "./src/briefing/mod.ts"
   },
   "imports": {
     "$/": "./src/",
