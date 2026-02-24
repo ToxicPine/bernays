@@ -1,21 +1,20 @@
 {
-  "name": "@bernays/llm",
+  "name": "@bernays/brief",
   "version": "0.1.0",
-  "exports": "./src/server.ts",
+  "exports": "./server.ts",
   "imports": {
-    "$/": "./src/",
+    "@db/sqlite": "jsr:@db/sqlite@^0.12",
+    "effect": "npm:effect@^3.19.14",
     "hono": "npm:hono@^4.7.0",
     "hono/logger": "npm:hono@^4.7.0/logger",
     "hono/cors": "npm:hono@^4.7.0/cors",
     "@hono/zod-openapi": "npm:@hono/zod-openapi@^1.2.0",
     "@zod/zod": "jsr:@zod/zod@^4.3.5",
-    "@db/sqlite": "jsr:@db/sqlite@^0.12",
-    "effect": "npm:effect@^3.19.14",
     "@bernays/server": "workspace:*"
   },
   "tasks": {
-    "dev": "deno run --allow-all src/main.ts",
-    "start": "deno run --allow-all src/main.ts"
+    "dev": "deno run --allow-all main.ts",
+    "start": "deno run --allow-all main.ts"
   },
   "compilerOptions": {
     "strict": true,
@@ -23,9 +22,6 @@
     "strictNullChecks": true,
     "strictFunctionTypes": true,
     "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "paths": {
-      "$/*": ["./src/*"]
-    }
+    "noUnusedParameters": true
   }
 }

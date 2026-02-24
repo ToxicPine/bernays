@@ -1,4 +1,4 @@
-// llm/src/schemas.ts
+// brief/schemas.ts
 // Wire-format Zod schemas for API request/response validation and OpenAPI generation.
 
 import { z } from "@hono/zod-openapi";

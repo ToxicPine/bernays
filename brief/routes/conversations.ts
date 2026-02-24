@@ -1,14 +1,14 @@
-// llm/src/routes/conversations.ts
+// brief/routes/conversations.ts
 // Conversation CRUD routes — create, list, get, end conversations with agents
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
-import type { ServerContext } from "$/context.ts";
+import type { ServerContext } from "../context.ts";
 import {
   ConversationListResponseSchema,
   ConversationResponseSchema,
   CreateConversationBodySchema,
   ErrorSchema,
-} from "$/schemas.ts";
+} from "../schemas.ts";
 
 // =============================================================================
 // Route Definitions

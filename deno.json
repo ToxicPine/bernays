@@ -5,7 +5,7 @@
     "./plugins",
     "./agents",
     "./api",
-    "./llm",
+    "./brief",
     "./tests"
   ],
   "tasks": {

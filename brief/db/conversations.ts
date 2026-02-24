@@ -1,4 +1,4 @@
-// llm/src/db/conversations.ts
+// brief/db/conversations.ts
 // Conversation CRUD against SQLite
 
 import { type BindValue, Database } from "@db/sqlite";

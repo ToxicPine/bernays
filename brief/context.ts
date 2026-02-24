@@ -1,13 +1,13 @@
-// llm/src/context.ts
+// brief/context.ts
 // Server context — SQLite database, conversation service, agent resolution
 
 import { Database } from "@db/sqlite";
-import { initSchema } from "$/db/schema.ts";
+import { initSchema } from "./db/schema.ts";
 import {
   type AgentResolver,
   type ConversationService,
   makeConversationService,
-} from "$/services/conversations.ts";
+} from "./services/conversations.ts";
 
 // =============================================================================
 // Server Context

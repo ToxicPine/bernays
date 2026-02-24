@@ -1,4 +1,4 @@
-// llm/src/services/conversations.ts
+// brief/services/conversations.ts
 // Conversation service — orchestrates SQLite persistence + briefing client
 //
 // When a user creates a conversation, we record it locally and call the
@@ -22,14 +22,14 @@ import {
   listConversations,
   type PaginatedResult,
   updateConversationStatus,
-} from "$/db/conversations.ts";
+} from "../db/conversations.ts";
 import {
   createMessage,
   type CreateMessageInput,
   listMessages,
   type ListMessagesQuery,
   type Message,
-} from "$/db/messages.ts";
+} from "../db/messages.ts";
 
 // =============================================================================
 // Types

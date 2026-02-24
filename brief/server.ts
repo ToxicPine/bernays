@@ -1,12 +1,12 @@
-// llm/src/server.ts
+// brief/server.ts
 // Hono application — mounts routes, middleware, and OpenAPI spec
 
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { logger } from "hono/logger";
 import { cors } from "hono/cors";
-import type { ServerContext } from "$/context.ts";
-import { conversationsRoutes } from "$/routes/conversations.ts";
-import { messagesRoutes } from "$/routes/messages.ts";
+import type { ServerContext } from "./context.ts";
+import { conversationsRoutes } from "./routes/conversations.ts";
+import { messagesRoutes } from "./routes/messages.ts";
 
 // =============================================================================
 // App Factory
@@ -30,7 +30,7 @@ export const createApp = (ctx: ServerContext) => {
   app.doc("/openapi.json", {
     openapi: "3.1.0",
     info: {
-      title: "Bernays LLM API",
+      title: "Bernays Brief API",
       version: "0.1.0",
       description:
         "User-facing API for multi-threaded conversations with bernays agents via the briefing system.",

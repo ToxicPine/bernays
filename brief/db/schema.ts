@@ -1,4 +1,4 @@
-// llm/src/db/schema.ts
+// brief/db/schema.ts
 // SQLite schema initialization for conversation persistence.
 // Designed for Fly.io volume mounts — a single SQLite file on persistent disk.
 

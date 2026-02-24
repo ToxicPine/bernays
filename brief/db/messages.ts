@@ -1,4 +1,4 @@
-// llm/src/db/messages.ts
+// brief/db/messages.ts
 // Message CRUD + pagination against SQLite
 
 import { Database } from "@db/sqlite";

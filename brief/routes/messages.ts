@@ -1,10 +1,10 @@
-// llm/src/routes/messages.ts
+// brief/routes/messages.ts
 // Message routes — send messages in a conversation + paginated listing
 // Also includes the agent webhook endpoint for receiving agent responses.
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
-import type { ServerContext } from "$/context.ts";
-import { createMessage as dbCreateMessage } from "$/db/messages.ts";
+import type { ServerContext } from "../context.ts";
+import { createMessage as dbCreateMessage } from "../db/messages.ts";
 import {
   AgentMessageBodySchema,
   AgentMessageResponseSchema,
@@ -12,7 +12,7 @@ import {
   MessageListResponseSchema,
   SendMessageBodySchema,
   SendMessageResponseSchema,
-} from "$/schemas.ts";
+} from "../schemas.ts";
 
 // =============================================================================
 // Route Definitions
