@@ -86,11 +86,13 @@ const BriefingMessageSchema = z
 
 // Serialized as a flat object for OpenAPI; the TypeScript type is a
 // discriminated union on `status` (see server/src/briefing/view.ts).
+// Fields are normalized to the local agent's perspective:
+// - `remoteAgent` is always the other side
+// - `endedBy` and message `sender` are `"self"` for the local agent
 const BriefingViewSchema = z
   .object({
     briefingId: z.string(),
-    fromAgent: z.string(),
-    toAgent: z.string(),
+    remoteAgent: z.string(),
     topic: z.string(),
     status: z.enum(["requested", "declined", "active", "ended"]),
     messages: z.array(BriefingMessageSchema),
@@ -99,7 +101,7 @@ const BriefingViewSchema = z
     scheduledAt: z.string().optional(),
     // Present when status is "active" or "ended"
     acceptedAt: z.string().optional(),
-    // Present when status is "ended"
+    // Present when status is "ended"; "self" when local agent ended it
     endedBy: z.string().optional(),
     endedAt: z.string().optional(),
     // Present when status is "declined" or "ended"
@@ -291,8 +293,8 @@ export const briefingsRoutes = (ctx: ServerContext) => {
       return c.json({ error: "Briefing Scope Not Configured" }, 422);
     }
 
-    // Derive this agent's identity from the Host header
-    const toAgent = c.req.header("host") ?? "unknown";
+    // On the receiving side, toAgent is "self"
+    const toAgent = "self";
 
     // Record BriefingRequested event
     const requestedEvent = {

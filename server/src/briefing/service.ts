@@ -239,12 +239,12 @@ export const makeBriefingService = (
         const remoteUrl = yield* resolveAgent(agent);
         const briefingId = crypto.randomUUID();
 
-        // Record locally first
+        // Record locally — "self" is the initiator
         const requestedEvent: BriefingEvent = {
           ...makeEventBase(),
           type: "BriefingRequested" as const,
           briefingId: BriefingId(briefingId),
-          fromAgent: agentId,
+          fromAgent: "self",
           toAgent: agent,
           topic,
           scheduledAt: options?.scheduledAt,
@@ -275,7 +275,7 @@ export const makeBriefingService = (
             ...makeEventBase(),
             type: "BriefingAccepted" as const,
             briefingId: BriefingId(briefingId),
-            fromAgent: agentId,
+            fromAgent: "self",
             toAgent: agent,
           };
           yield* injectEvent(acceptedEvent);
@@ -284,7 +284,7 @@ export const makeBriefingService = (
             ...makeEventBase(),
             type: "BriefingDeclined" as const,
             briefingId: BriefingId(briefingId),
-            fromAgent: agentId,
+            fromAgent: "self",
             toAgent: agent,
             reason: response.reason,
           };
@@ -311,8 +311,8 @@ export const makeBriefingService = (
           ...makeEventBase(),
           type: "BriefingAccepted" as const,
           briefingId: BriefingId(briefingId),
-          fromAgent: existing.fromAgent,
-          toAgent: agentId,
+          fromAgent: existing.remoteAgent,
+          toAgent: "self",
         };
         yield* injectEvent(acceptedEvent);
 
@@ -336,8 +336,8 @@ export const makeBriefingService = (
           ...makeEventBase(),
           type: "BriefingDeclined" as const,
           briefingId: BriefingId(briefingId),
-          fromAgent: existing.fromAgent,
-          toAgent: agentId,
+          fromAgent: existing.remoteAgent,
+          toAgent: "self",
           reason,
         };
         yield* injectEvent(declinedEvent);
@@ -358,22 +358,18 @@ export const makeBriefingService = (
           );
         }
 
-        // Record locally
+        // Record locally — sender is "self"
         const messageEvent: BriefingEvent = {
           ...makeEventBase(),
           type: "BriefingMessageSent" as const,
           briefingId: BriefingId(briefingId),
-          sender: agentId,
+          sender: "self",
           content,
         };
         yield* injectEvent(messageEvent);
 
         // Send to remote
-        const remoteAgent =
-          existing.fromAgent === agentId
-            ? existing.toAgent
-            : existing.fromAgent;
-        const remoteUrl = yield* resolveAgent(remoteAgent);
+        const remoteUrl = yield* resolveAgent(existing.remoteAgent);
 
         yield* client
           .sendMessage(remoteUrl, briefingId, {
@@ -402,23 +398,19 @@ export const makeBriefingService = (
           );
         }
 
-        // Record locally
+        // Record locally — endedBy is "self"
         const endEvent: BriefingEvent = {
           ...makeEventBase(),
           type: "BriefingEnded" as const,
           briefingId: BriefingId(briefingId),
-          endedBy: agentId,
+          endedBy: "self",
           reason: options?.reason,
           summary: options?.summary,
         };
         yield* injectEvent(endEvent);
 
         // Notify remote
-        const remoteAgent =
-          existing.fromAgent === agentId
-            ? existing.toAgent
-            : existing.fromAgent;
-        const remoteUrl = yield* resolveAgent(remoteAgent);
+        const remoteUrl = yield* resolveAgent(existing.remoteAgent);
 
         yield* client
           .endBriefing(remoteUrl, briefingId, {

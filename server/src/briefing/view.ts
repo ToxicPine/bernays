@@ -1,5 +1,10 @@
 // src/briefing/view.ts
 // Derive briefing state from events — pure functions
+//
+// `endedBy` and message `sender` are written as `"self"` at event creation
+// time when the local agent performs the action. Remote actions arrive with
+// the remote agent's identity via the Host header. No normalization needed
+// at derivation time.
 
 import type { BriefingEvent } from "$/events/briefing.ts";
 
@@ -9,16 +14,15 @@ import type { BriefingEvent } from "$/events/briefing.ts";
 
 export interface BriefingBase {
   readonly briefingId: string;
-  readonly fromAgent: string;
-  readonly toAgent: string;
+  readonly remoteAgent: string;
   readonly topic: string;
   readonly requestedAt: string;
   readonly scheduledAt?: string;
   readonly context?: Record<string, unknown>;
   readonly messages: readonly {
-    sender: string;
-    content: string;
-    timestamp: string;
+    readonly sender: "self" | (string & {});
+    readonly content: string;
+    readonly timestamp: string;
   }[];
 }
 
@@ -29,7 +33,7 @@ export type BriefingView =
   | (BriefingBase & {
       readonly status: "ended";
       readonly acceptedAt: string;
-      readonly endedBy: string;
+      readonly endedBy: "self" | (string & {});
       readonly endedAt: string;
       readonly endReason?: string;
       readonly summary?: Record<string, unknown>;
@@ -38,7 +42,7 @@ export type BriefingView =
 export type BriefingStatus = BriefingView["status"];
 
 // =============================================================================
-// Internal mutable accumulator for derivation
+// Internal mutable accumulator
 // =============================================================================
 
 interface BriefingAccumulator {
@@ -59,10 +63,15 @@ interface BriefingAccumulator {
 }
 
 const toView = (acc: BriefingAccumulator): BriefingView => {
+  // The remote agent is whichever of fromAgent/toAgent is not "self".
+  // When this agent initiated, fromAgent was written as "self".
+  // When this agent received, toAgent was written as "self".
+  const remoteAgent =
+    acc.fromAgent === "self" ? acc.toAgent : acc.fromAgent;
+
   const base: BriefingBase = {
     briefingId: acc.briefingId,
-    fromAgent: acc.fromAgent,
-    toAgent: acc.toAgent,
+    remoteAgent,
     topic: acc.topic,
     requestedAt: acc.requestedAt,
     scheduledAt: acc.scheduledAt,

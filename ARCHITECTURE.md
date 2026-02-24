@@ -1321,10 +1321,10 @@ dialogue between two agents, tracked through events in the `"briefing"` scope.
 ### Deployment Model
 
 Each bernays instance is deployed to Fly.io and reachable on the private network at
-`http://<app-name>.flycast`. When receiving a briefing request, agents derive
-their own identity from the incoming `Host` header — no extra configuration
-needed. Communication happens over HTTP — agent A calls agent B's API at
-`http://agent-b.flycast/briefings/...`.
+`http://<app-name>.flycast`. Communication happens over HTTP — agent A calls
+agent B's API at `http://agent-b.flycast/briefings/...`. Locally, each agent
+records its own actions as `"self"` — the remote agent's name is the only
+identity that appears in the local event store.
 
 ```mermaid
 graph LR
@@ -1506,18 +1506,30 @@ const responderBot = Effect.gen(function* () {
 
 Briefing state is derived from events by pure functions, following the same
 pattern as platform views. `BriefingView` is a discriminated union on `status`
-— each state carries exactly the fields that exist in that state:
+— each state carries exactly the fields that exist in that state.
+
+Views are **written from the local agent's perspective**. When the local agent
+performs an action, `"self"` is recorded in the event. When a remote agent's
+action arrives via the API, the remote agent's name is recorded. No
+normalization at derivation time — the events are already correct:
+
+- `remoteAgent` is always the other side of the briefing
+- Message `sender` is `"self"` when sent by the local agent
+- `endedBy` is `"self"` when the local agent ended it
 
 ```typescript
 interface BriefingBase {
   readonly briefingId: string;
-  readonly fromAgent: string;
-  readonly toAgent: string;
+  readonly remoteAgent: string;
   readonly topic: string;
   readonly requestedAt: string;
   readonly scheduledAt?: string;
   readonly context?: Record<string, unknown>;
-  readonly messages: readonly { sender: string; content: string; timestamp: string }[];
+  readonly messages: readonly {
+    sender: "self" | string;
+    content: string;
+    timestamp: string;
+  }[];
 }
 
 type BriefingView =
@@ -1527,7 +1539,7 @@ type BriefingView =
   | (BriefingBase & {
       status: "ended";
       acceptedAt: string;
-      endedBy: string;
+      endedBy: "self" | string;
       endedAt: string;
       endReason?: string;
       summary?: Record<string, unknown>;
