@@ -3,6 +3,7 @@
 
 // Branded Types
 export {
+  AgentId,
   type Brand,
   BriefingId,
   BrowserConfigId,

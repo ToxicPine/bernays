@@ -1,21 +1,24 @@
 // brief/context.ts
-// Server context — SQLite database, conversation service, agent resolution
+// Server context — shared event store + briefing service
+//
+// brief is just another participant in the briefing protocol, identified
+// by an AgentId. It reads and writes the same Postgres event log as
+// every sockpuppet.
 
-import { Database } from "@db/sqlite";
-import { initSchema } from "./db/schema.ts";
+import { Effect } from "effect";
+import { AgentId, type AgentId as AgentIdType } from "@bernays/server/core";
+import { configurePostgresEventStore } from "@bernays/server/store";
 import {
-  type AgentResolver,
-  type ConversationService,
-  makeConversationService,
-} from "./services/conversations.ts";
+  type BriefingService,
+  makeBriefingService,
+} from "@bernays/server/briefing";
 
 // =============================================================================
 // Server Context
 // =============================================================================
 
 export interface ServerContext {
-  readonly db: Database;
-  readonly conversations: ConversationService;
+  readonly briefing: BriefingService;
 }
 
 // =============================================================================
@@ -23,40 +26,27 @@ export interface ServerContext {
 // =============================================================================
 
 export interface ServerConfig {
-  /** Path to the SQLite database file. On Fly.io, this should be on a volume mount. */
-  readonly dbPath: string;
-  /** User identity for outbound briefing requests. */
-  readonly userId: string;
-  /** Resolve agent names to URLs. Defaults to flycast. */
-  readonly resolveAgent?: AgentResolver;
-  /** Briefing client timeout in ms. */
-  readonly clientTimeoutMs?: number;
+  /** Postgres connection string (same database the agents use). */
+  readonly databaseUrl: string;
+  /** This participant's identity in the briefing protocol. */
+  readonly self: AgentIdType;
 }
-
-/** Default agent resolver — flycast private networking. */
-const flycastResolver: AgentResolver = (agentId) =>
-  `http://${agentId}.flycast`;
 
 // =============================================================================
 // Factory
 // =============================================================================
 
-export const createServerContext = (config: ServerConfig): ServerContext => {
-  const db = new Database(config.dbPath);
+export const createServerContext = async (
+  config: ServerConfig,
+): Promise<ServerContext> => {
+  const eventStore = await Effect.runPromise(
+    configurePostgresEventStore({ databaseUrl: config.databaseUrl }),
+  );
 
-  // Enable WAL mode for better concurrent read performance
-  db.exec("PRAGMA journal_mode = WAL");
-  db.exec("PRAGMA foreign_keys = ON");
-
-  // Initialize schema
-  initSchema(db);
-
-  const conversations = makeConversationService({
-    db,
-    resolveAgent: config.resolveAgent ?? flycastResolver,
-    userId: config.userId,
-    clientTimeoutMs: config.clientTimeoutMs,
+  const briefing = makeBriefingService({
+    self: config.self,
+    eventStore,
   });
 
-  return { db, conversations };
+  return { briefing };
 };

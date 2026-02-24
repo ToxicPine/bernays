@@ -102,8 +102,7 @@ export const createServerContext = async (
     projections.set(scope, makeProjection(scope, schema, eventStore));
   }
 
-  // Register briefing scope (cross-cutting, not a platform)
-  injectors.set(BRIEFING_SCOPE, makeInjector(BRIEFING_SCOPE, BriefingEventSchema, eventStore));
+  // Register briefing scope for read access (agents write directly via BriefingService)
   projections.set(BRIEFING_SCOPE, makeProjection(BRIEFING_SCOPE, BriefingEventSchema, eventStore));
 
   // Create account stores per platform identity.

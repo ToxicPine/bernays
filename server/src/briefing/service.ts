@@ -1,14 +1,15 @@
 // src/briefing/service.ts
-// High-level Briefing service for sockpuppets
+// High-level Briefing service for sockpuppets and the brief user gateway
 //
-// Wraps the low-level BriefingClient (outbound HTTP), local event
-// injection/projection, and agent name resolution into a single
-// interface that sockpuppets yield*.
+// All participants write to a single shared event store. No HTTP
+// transport — the store is the rendezvous point. Each participant
+// is identified by an AgentId provided at construction time.
 
 import { Context, Effect, Option } from "effect";
 import type { BriefingEvent } from "$/events/briefing.ts";
 import { BRIEFING_SCOPE } from "$/core/scope.ts";
 import {
+  AgentId,
   BriefingId,
   CorrelationId,
   EventId,
@@ -22,10 +23,6 @@ import {
   deriveBriefings,
   getActiveBriefings,
 } from "./view.ts";
-import {
-  type BriefingClientService,
-  makeBriefingClient,
-} from "./client.ts";
 
 // =============================================================================
 // Error Type
@@ -34,9 +31,7 @@ import {
 export type BriefingErrorCode =
   | "NotFound"
   | "InvalidState"
-  | "InjectionFailed"
-  | "RemoteFailed"
-  | "ResolutionFailed";
+  | "InjectionFailed";
 
 export interface BriefingError {
   readonly _tag: "BriefingError";
@@ -52,31 +47,15 @@ export const briefingError = (
 ): BriefingError => ({ _tag: "BriefingError", code, message, cause });
 
 // =============================================================================
-// Agent Registry
-// =============================================================================
-
-/**
- * Maps agent names to flycast URLs.
- * Provided at layer composition time.
- */
-export type AgentRegistry = (agent: string) => string | undefined;
-
-/**
- * Simple registry: maps name -> http://<name>.flycast
- */
-export const flycastRegistry: AgentRegistry = (agent: string) =>
-  `http://${agent}.flycast`;
-
-// =============================================================================
 // Service Interface
 // =============================================================================
 
 export interface BriefingService {
-  /** All briefings where this agent hasn't responded yet. */
+  /** All briefings where this agent is the recipient and hasn't responded yet. */
   readonly pending: Effect.Effect<readonly BriefingView[]>;
   /** All briefings currently in progress. */
   readonly active: Effect.Effect<readonly BriefingView[]>;
-  /** All briefings regardless of status. */
+  /** All briefings this agent is involved in. */
   readonly all: Effect.Effect<readonly BriefingView[]>;
   /** Look up a single briefing. */
   readonly get: (id: string) => Effect.Effect<Option.Option<BriefingView>>;
@@ -129,14 +108,10 @@ export class Briefing extends Context.Tag("sockpuppet/Briefing")<
 // =============================================================================
 
 export interface BriefingRuntimeConfig {
-  /** This agent's identity (e.g., "agent-a" or "agent-a.flycast") */
-  readonly agentId: string;
-  /** The event store for local event recording */
+  /** This agent's identity */
+  readonly self: AgentId;
+  /** The shared event store */
   readonly eventStore: EventStore<StorableEvent>;
-  /** Resolve agent names to URLs. Defaults to flycastRegistry. */
-  readonly agentRegistry?: AgentRegistry;
-  /** HTTP client timeout in ms. Defaults to 30_000. */
-  readonly timeoutMs?: number;
 }
 
 // =============================================================================
@@ -150,7 +125,7 @@ const makeEventBase = () => ({
   correlationId: CorrelationId(crypto.randomUUID()),
 });
 
-const fetchLocalBriefingEvents = async (
+const fetchBriefingEvents = async (
   eventStore: EventStore<StorableEvent>,
 ): Promise<readonly BriefingEvent[]> => {
   const result = await eventStore.fetch({
@@ -170,26 +145,12 @@ const fetchLocalBriefingEvents = async (
 export const makeBriefingService = (
   config: BriefingRuntimeConfig,
 ): BriefingService => {
-  const { agentId, eventStore } = config;
-  const registry = config.agentRegistry ?? flycastRegistry;
-  const client: BriefingClientService = makeBriefingClient(
-    config.timeoutMs ?? 30_000,
-  );
+  const { self, eventStore } = config;
   const injector: Injector<BriefingEvent> = makeInjector(
     BRIEFING_SCOPE,
     BriefingEventSchema,
     eventStore,
   );
-
-  const resolveAgent = (agent: string): Effect.Effect<string, BriefingError> => {
-    const url = registry(agent);
-    if (!url) {
-      return Effect.fail(
-        briefingError("ResolutionFailed", `Cannot resolve agent: ${agent}`),
-      );
-    }
-    return Effect.succeed(url);
-  };
 
   const injectEvent = (event: BriefingEvent): Effect.Effect<void, BriefingError> =>
     injector.append(event).pipe(
@@ -201,10 +162,10 @@ export const makeBriefingService = (
     );
 
   const allEvents = (): Effect.Effect<readonly BriefingEvent[]> =>
-    Effect.promise(() => fetchLocalBriefingEvents(eventStore));
+    Effect.promise(() => fetchBriefingEvents(eventStore));
 
   const allViews = (): Effect.Effect<ReadonlyMap<string, BriefingView>> =>
-    Effect.map(allEvents(), deriveBriefings);
+    Effect.map(allEvents(), (events) => deriveBriefings(events, self));
 
   const getBriefingOrFail = (
     briefingId: string,
@@ -218,12 +179,14 @@ export const makeBriefingService = (
 
   return {
     pending: Effect.map(allEvents(), (events) => {
-      const all = deriveBriefings(events);
-      return [...all.values()].filter((b) => b.status === "requested");
+      const all = deriveBriefings(events, self);
+      return [...all.values()].filter(
+        (b) => b.status === "requested" && b.toAgent === self,
+      );
     }),
 
     active: Effect.map(allEvents(), (events) => {
-      return getActiveBriefings(events).filter((b) => b.status === "active");
+      return getActiveBriefings(events, self).filter((b) => b.status === "active");
     }),
 
     all: Effect.map(allViews(), (views) => [...views.values()]),
@@ -236,60 +199,19 @@ export const makeBriefingService = (
 
     request: (agent, topic, options) =>
       Effect.gen(function* () {
-        const remoteUrl = yield* resolveAgent(agent);
         const briefingId = crypto.randomUUID();
 
-        // Record locally — "self" is the initiator
         const requestedEvent: BriefingEvent = {
           ...makeEventBase(),
           type: "BriefingRequested" as const,
           briefingId: BriefingId(briefingId),
-          fromAgent: "self",
-          toAgent: agent,
+          fromAgent: self,
+          toAgent: AgentId(agent),
           topic,
           scheduledAt: options?.scheduledAt,
           context: options?.context,
         };
         yield* injectEvent(requestedEvent);
-
-        // Call remote
-        const response = yield* client
-          .requestBriefing(remoteUrl, {
-            briefingId,
-            fromAgent: agentId,
-            topic,
-            scheduledAt: options?.scheduledAt,
-            context: options?.context,
-          })
-          .pipe(
-            Effect.catchAll((err) =>
-              Effect.fail(
-                briefingError("RemoteFailed", err.message, err),
-              )
-            ),
-          );
-
-        // Record remote's response locally
-        if (response.accepted) {
-          const acceptedEvent: BriefingEvent = {
-            ...makeEventBase(),
-            type: "BriefingAccepted" as const,
-            briefingId: BriefingId(briefingId),
-            fromAgent: "self",
-            toAgent: agent,
-          };
-          yield* injectEvent(acceptedEvent);
-        } else {
-          const declinedEvent: BriefingEvent = {
-            ...makeEventBase(),
-            type: "BriefingDeclined" as const,
-            briefingId: BriefingId(briefingId),
-            fromAgent: "self",
-            toAgent: agent,
-            reason: response.reason,
-          };
-          yield* injectEvent(declinedEvent);
-        }
 
         return yield* getBriefingOrFail(briefingId);
       }),
@@ -311,8 +233,7 @@ export const makeBriefingService = (
           ...makeEventBase(),
           type: "BriefingAccepted" as const,
           briefingId: BriefingId(briefingId),
-          fromAgent: existing.remoteAgent,
-          toAgent: "self",
+          acceptedBy: self,
         };
         yield* injectEvent(acceptedEvent);
 
@@ -336,8 +257,7 @@ export const makeBriefingService = (
           ...makeEventBase(),
           type: "BriefingDeclined" as const,
           briefingId: BriefingId(briefingId),
-          fromAgent: existing.remoteAgent,
-          toAgent: "self",
+          declinedBy: self,
           reason,
         };
         yield* injectEvent(declinedEvent);
@@ -358,31 +278,14 @@ export const makeBriefingService = (
           );
         }
 
-        // Record locally — sender is "self"
         const messageEvent: BriefingEvent = {
           ...makeEventBase(),
           type: "BriefingMessageSent" as const,
           briefingId: BriefingId(briefingId),
-          sender: "self",
+          sender: self,
           content,
         };
         yield* injectEvent(messageEvent);
-
-        // Send to remote
-        const remoteUrl = yield* resolveAgent(existing.remoteAgent);
-
-        yield* client
-          .sendMessage(remoteUrl, briefingId, {
-            sender: agentId,
-            content,
-          })
-          .pipe(
-            Effect.catchAll((err) =>
-              Effect.fail(
-                briefingError("RemoteFailed", err.message, err),
-              )
-            ),
-          );
       }),
 
     end: (briefingId, options) =>
@@ -398,33 +301,15 @@ export const makeBriefingService = (
           );
         }
 
-        // Record locally — endedBy is "self"
         const endEvent: BriefingEvent = {
           ...makeEventBase(),
           type: "BriefingEnded" as const,
           briefingId: BriefingId(briefingId),
-          endedBy: "self",
+          endedBy: self,
           reason: options?.reason,
           summary: options?.summary,
         };
         yield* injectEvent(endEvent);
-
-        // Notify remote
-        const remoteUrl = yield* resolveAgent(existing.remoteAgent);
-
-        yield* client
-          .endBriefing(remoteUrl, briefingId, {
-            endedBy: agentId,
-            reason: options?.reason,
-            summary: options?.summary,
-          })
-          .pipe(
-            Effect.catchAll((err) =>
-              Effect.fail(
-                briefingError("RemoteFailed", err.message, err),
-              )
-            ),
-          );
 
         return yield* getBriefingOrFail(briefingId);
       }),

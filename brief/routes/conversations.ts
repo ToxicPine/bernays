@@ -1,9 +1,11 @@
 // brief/routes/conversations.ts
-// Conversation CRUD routes — create, list, get, end conversations with agents
+// Conversation CRUD routes — thin wrappers over BriefingService
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
+import { Effect, Option } from "effect";
 import type { ServerContext } from "../context.ts";
 import {
+  BriefingViewSchema,
   ConversationListResponseSchema,
   ConversationResponseSchema,
   CreateConversationBodySchema,
@@ -25,7 +27,7 @@ const createConversationRoute = createRoute({
   path: "/",
   tags: ["Conversations"],
   description:
-    "Create a new conversation with an agent. Initiates a briefing on the target agent.",
+    "Create a new conversation with an agent by initiating a briefing.",
   request: {
     body: {
       content: {
@@ -52,18 +54,12 @@ const listConversationsRoute = createRoute({
   method: "get",
   path: "/",
   tags: ["Conversations"],
-  description:
-    "List conversations. Filter by agent or status. Paginated.",
+  description: "List all conversations. Optionally filter by status.",
   request: {
     query: z.object({
-      agentId: z.string().optional(),
-      status: z.enum(["active", "ended", "failed"]).optional(),
-      limit: z.coerce.number().int().min(1).max(100).default(50).openapi({
-        example: 50,
-      }),
-      offset: z.coerce.number().int().min(0).default(0).openapi({
-        example: 0,
-      }),
+      status: z
+        .enum(["requested", "declined", "active", "ended"])
+        .optional(),
     }),
   },
   responses: {
@@ -71,7 +67,7 @@ const listConversationsRoute = createRoute({
       content: {
         "application/json": { schema: ConversationListResponseSchema },
       },
-      description: "Paginated conversation list",
+      description: "List of conversations",
     },
   },
 });
@@ -80,7 +76,7 @@ const getConversationRoute = createRoute({
   method: "get",
   path: "/{id}",
   tags: ["Conversations"],
-  description: "Get a single conversation by ID.",
+  description: "Get a single conversation by briefing ID.",
   request: { params: IdParam },
   responses: {
     200: {
@@ -100,8 +96,7 @@ const endConversationRoute = createRoute({
   method: "delete",
   path: "/{id}",
   tags: ["Conversations"],
-  description:
-    "End a conversation. Notifies the agent and marks the conversation as ended.",
+  description: "End a conversation.",
   request: { params: IdParam },
   responses: {
     200: {
@@ -113,6 +108,10 @@ const endConversationRoute = createRoute({
     404: {
       content: { "application/json": { schema: ErrorSchema } },
       description: "Conversation not found",
+    },
+    422: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Cannot end conversation in current state",
     },
   },
 });
@@ -128,53 +127,50 @@ export const conversationsRoutes = (ctx: ServerContext) => {
   app.openapi(createConversationRoute, async (c) => {
     const body = c.req.valid("json");
 
-    try {
-      const conversation = await ctx.conversations.create(body.agentId, {
-        title: body.title,
+    const result = await Effect.runPromiseExit(
+      ctx.briefing.request(body.agentId, body.topic, {
         context: body.context,
-      });
+      }),
+    );
 
-      return c.json(
-        ConversationResponseSchema.parse({ conversation }),
-        201,
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      return c.json({ error: message }, 422);
+    if (result._tag === "Failure") {
+      return c.json({ error: "Failed to create conversation" }, 422);
     }
+
+    return c.json(
+      ConversationResponseSchema.parse({ briefing: result.value }),
+      201,
+    );
   });
 
   // GET /conversations
-  app.openapi(listConversationsRoute, (c) => {
-    const { agentId, status, limit, offset } = c.req.valid("query");
+  app.openapi(listConversationsRoute, async (c) => {
+    const { status } = c.req.valid("query");
 
-    const result = ctx.conversations.list({ agentId, status, limit, offset });
+    let briefings = await Effect.runPromise(ctx.briefing.all);
+
+    if (status) {
+      briefings = briefings.filter((b) => b.status === status);
+    }
 
     return c.json(
-      ConversationListResponseSchema.parse({
-        conversations: result.items,
-        pagination: {
-          total: result.total,
-          offset: result.offset,
-          limit: result.limit,
-          hasMore: result.hasMore,
-        },
-      }),
+      ConversationListResponseSchema.parse({ briefings }),
       200,
     );
   });
 
   // GET /conversations/:id
-  app.openapi(getConversationRoute, (c) => {
+  app.openapi(getConversationRoute, async (c) => {
     const { id } = c.req.valid("param");
-    const conversation = ctx.conversations.get(id);
 
-    if (!conversation) {
+    const briefing = await Effect.runPromise(ctx.briefing.get(id));
+
+    if (Option.isNone(briefing)) {
       return c.json({ error: "Conversation not found" }, 404);
     }
 
     return c.json(
-      ConversationResponseSchema.parse({ conversation }),
+      ConversationResponseSchema.parse({ briefing: briefing.value }),
       200,
     );
   });
@@ -183,13 +179,20 @@ export const conversationsRoutes = (ctx: ServerContext) => {
   app.openapi(endConversationRoute, async (c) => {
     const { id } = c.req.valid("param");
 
-    const conversation = await ctx.conversations.end(id);
-    if (!conversation) {
-      return c.json({ error: "Conversation not found" }, 404);
+    const result = await Effect.runPromiseExit(ctx.briefing.end(id));
+
+    if (result._tag === "Failure") {
+      const error = result.cause;
+      // Distinguish not-found from invalid-state
+      const briefing = await Effect.runPromise(ctx.briefing.get(id));
+      if (Option.isNone(briefing)) {
+        return c.json({ error: "Conversation not found" }, 404);
+      }
+      return c.json({ error: "Cannot end conversation in current state" }, 422);
     }
 
     return c.json(
-      ConversationResponseSchema.parse({ conversation }),
+      ConversationResponseSchema.parse({ briefing: result.value }),
       200,
     );
   });

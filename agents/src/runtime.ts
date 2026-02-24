@@ -64,7 +64,7 @@ const createSockpuppetLayer = (
   });
 
   const briefingLayer = makeBriefingLayer({
-    agentId: config.agentId ?? "default",
+    self: config.agentId,
     eventStore,
   });
 

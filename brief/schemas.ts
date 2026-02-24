@@ -13,67 +13,56 @@ export const ErrorSchema = z
   })
   .openapi("Error");
 
-export const PaginationSchema = z
-  .object({
-    total: z.number().int(),
-    offset: z.number().int(),
-    limit: z.number().int(),
-    hasMore: z.boolean(),
-  })
-  .openapi("Pagination");
-
 // =============================================================================
-// Conversations
+// Briefings (exposed as "conversations" to the user)
 // =============================================================================
 
-export const ConversationSchema = z
+const BriefingMessageSchema = z
   .object({
-    id: z.string(),
-    agentId: z.string(),
-    briefingId: z.string().nullable(),
-    title: z.string(),
-    status: z.enum(["active", "ended", "failed"]),
-    metadata: z.record(z.string(), z.unknown()),
-    createdAt: z.string(),
-    updatedAt: z.string(),
+    sender: z.string(),
+    content: z.string(),
+    timestamp: z.string(),
   })
-  .openapi("Conversation");
+  .openapi("BriefingMessage");
+
+export const BriefingViewSchema = z
+  .object({
+    briefingId: z.string(),
+    fromAgent: z.string(),
+    toAgent: z.string(),
+    topic: z.string(),
+    status: z.enum(["requested", "declined", "active", "ended"]),
+    messages: z.array(BriefingMessageSchema),
+    context: z.record(z.string(), z.unknown()).optional(),
+    requestedAt: z.string(),
+    scheduledAt: z.string().optional(),
+    acceptedAt: z.string().optional(),
+    endedBy: z.string().optional(),
+    endedAt: z.string().optional(),
+    reason: z.string().optional(),
+    summary: z.record(z.string(), z.unknown()).optional(),
+  })
+  .openapi("BriefingView");
 
 export const CreateConversationBodySchema = z
   .object({
     agentId: z.string().min(1),
-    title: z.string().optional(),
+    topic: z.string().min(1),
     context: z.record(z.string(), z.unknown()).optional(),
   })
   .openapi("CreateConversationBody");
 
 export const ConversationResponseSchema = z
   .object({
-    conversation: ConversationSchema,
+    briefing: BriefingViewSchema,
   })
   .openapi("ConversationResponse");
 
 export const ConversationListResponseSchema = z
   .object({
-    conversations: z.array(ConversationSchema),
-    pagination: PaginationSchema,
+    briefings: z.array(BriefingViewSchema),
   })
   .openapi("ConversationListResponse");
-
-// =============================================================================
-// Messages
-// =============================================================================
-
-export const MessageSchema = z
-  .object({
-    id: z.string(),
-    conversationId: z.string(),
-    role: z.enum(["user", "assistant"]),
-    content: z.string(),
-    metadata: z.record(z.string(), z.unknown()),
-    createdAt: z.string(),
-  })
-  .openapi("Message");
 
 export const SendMessageBodySchema = z
   .object({
@@ -83,33 +72,12 @@ export const SendMessageBodySchema = z
 
 export const SendMessageResponseSchema = z
   .object({
-    userMessage: MessageSchema,
-    assistantMessage: MessageSchema.nullable(),
+    ok: z.literal(true),
   })
   .openapi("SendMessageResponse");
 
 export const MessageListResponseSchema = z
   .object({
-    messages: z.array(MessageSchema),
-    pagination: PaginationSchema,
+    messages: z.array(BriefingMessageSchema),
   })
   .openapi("MessageListResponse");
-
-// =============================================================================
-// Webhook — for agents to push responses back
-// =============================================================================
-
-export const AgentMessageBodySchema = z
-  .object({
-    briefingId: z.string().min(1),
-    content: z.string().min(1),
-    sender: z.string().min(1),
-  })
-  .openapi("AgentMessageBody");
-
-export const AgentMessageResponseSchema = z
-  .object({
-    ok: z.literal(true),
-    message: MessageSchema,
-  })
-  .openapi("AgentMessageResponse");

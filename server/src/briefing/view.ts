@@ -1,11 +1,11 @@
 // src/briefing/view.ts
 // Derive briefing state from events — pure functions
 //
-// `endedBy` and message `sender` are written as `"self"` at event creation
-// time when the local agent performs the action. Remote actions arrive with
-// the remote agent's identity via the Host header. No normalization needed
-// at derivation time.
+// Events store real AgentId values. The view layer uses the caller's
+// identity only for filtering (which briefings are mine), not for
+// transforming field values.
 
+import type { AgentId } from "$/core/branded.ts";
 import type { BriefingEvent } from "$/events/briefing.ts";
 
 // =============================================================================
@@ -14,13 +14,14 @@ import type { BriefingEvent } from "$/events/briefing.ts";
 
 export interface BriefingBase {
   readonly briefingId: string;
-  readonly remoteAgent: string;
+  readonly fromAgent: AgentId;
+  readonly toAgent: AgentId;
   readonly topic: string;
   readonly requestedAt: string;
   readonly scheduledAt?: string;
   readonly context?: Record<string, unknown>;
   readonly messages: readonly {
-    readonly sender: "self" | (string & {});
+    readonly sender: AgentId;
     readonly content: string;
     readonly timestamp: string;
   }[];
@@ -28,14 +29,14 @@ export interface BriefingBase {
 
 export type BriefingView =
   | (BriefingBase & { readonly status: "requested" })
-  | (BriefingBase & { readonly status: "declined"; readonly endReason?: string })
+  | (BriefingBase & { readonly status: "declined"; readonly reason?: string })
   | (BriefingBase & { readonly status: "active"; readonly acceptedAt: string })
   | (BriefingBase & {
       readonly status: "ended";
       readonly acceptedAt: string;
-      readonly endedBy: "self" | (string & {});
+      readonly endedBy: AgentId;
       readonly endedAt: string;
-      readonly endReason?: string;
+      readonly reason?: string;
       readonly summary?: Record<string, unknown>;
     });
 
@@ -47,31 +48,26 @@ export type BriefingStatus = BriefingView["status"];
 
 interface BriefingAccumulator {
   briefingId: string;
-  fromAgent: string;
-  toAgent: string;
+  fromAgent: AgentId;
+  toAgent: AgentId;
   topic: string;
   requestedAt: string;
   scheduledAt?: string;
   context?: Record<string, unknown>;
-  messages: { sender: string; content: string; timestamp: string }[];
+  messages: { sender: AgentId; content: string; timestamp: string }[];
   status: BriefingStatus;
   acceptedAt?: string;
-  endedBy?: string;
+  endedBy?: AgentId;
   endedAt?: string;
-  endReason?: string;
+  reason?: string;
   summary?: Record<string, unknown>;
 }
 
 const toView = (acc: BriefingAccumulator): BriefingView => {
-  // The remote agent is whichever of fromAgent/toAgent is not "self".
-  // When this agent initiated, fromAgent was written as "self".
-  // When this agent received, toAgent was written as "self".
-  const remoteAgent =
-    acc.fromAgent === "self" ? acc.toAgent : acc.fromAgent;
-
   const base: BriefingBase = {
     briefingId: acc.briefingId,
-    remoteAgent,
+    fromAgent: acc.fromAgent,
+    toAgent: acc.toAgent,
     topic: acc.topic,
     requestedAt: acc.requestedAt,
     scheduledAt: acc.scheduledAt,
@@ -83,7 +79,7 @@ const toView = (acc: BriefingAccumulator): BriefingView => {
     case "requested":
       return { ...base, status: "requested" };
     case "declined":
-      return { ...base, status: "declined", endReason: acc.endReason };
+      return { ...base, status: "declined", reason: acc.reason };
     case "active":
       return { ...base, status: "active", acceptedAt: acc.acceptedAt! };
     case "ended":
@@ -93,7 +89,7 @@ const toView = (acc: BriefingAccumulator): BriefingView => {
         acceptedAt: acc.acceptedAt!,
         endedBy: acc.endedBy!,
         endedAt: acc.endedAt!,
-        endReason: acc.endReason,
+        reason: acc.reason,
         summary: acc.summary,
       };
   }
@@ -104,10 +100,12 @@ const toView = (acc: BriefingAccumulator): BriefingView => {
 // =============================================================================
 
 /**
- * Derive all briefing views from events.
+ * Derive all briefing views from events, filtered to briefings that
+ * involve the given agent.
  */
 export const deriveBriefings = (
   events: readonly BriefingEvent[],
+  self: AgentId,
 ): ReadonlyMap<string, BriefingView> => {
   const accumulators = new Map<string, BriefingAccumulator>();
 
@@ -141,7 +139,7 @@ export const deriveBriefings = (
         const existing = accumulators.get(id);
         if (existing) {
           existing.status = "declined";
-          existing.endReason = event.reason;
+          existing.reason = event.reason;
         }
         break;
       }
@@ -164,7 +162,7 @@ export const deriveBriefings = (
         if (existing) {
           existing.status = "ended";
           existing.endedBy = event.endedBy;
-          existing.endReason = event.reason;
+          existing.reason = event.reason;
           existing.summary = event.summary;
           existing.endedAt = event.timestamp;
         }
@@ -173,32 +171,37 @@ export const deriveBriefings = (
     }
   }
 
+  // Filter to briefings involving this agent
   const result = new Map<string, BriefingView>();
   for (const [id, acc] of accumulators) {
-    result.set(id, toView(acc));
+    if (acc.fromAgent === self || acc.toAgent === self) {
+      result.set(id, toView(acc));
+    }
   }
   return result;
 };
 
 /**
- * Get active briefings (requested or in-progress).
+ * Get active briefings (requested or in-progress) for the given agent.
  */
 export const getActiveBriefings = (
   events: readonly BriefingEvent[],
+  self: AgentId,
 ): readonly BriefingView[] => {
-  const all = deriveBriefings(events);
+  const all = deriveBriefings(events, self);
   return [...all.values()].filter(
     (b) => b.status === "requested" || b.status === "active",
   );
 };
 
 /**
- * Get a specific briefing by ID.
+ * Get a specific briefing by ID (only if the agent is a participant).
  */
 export const getBriefing = (
   events: readonly BriefingEvent[],
+  self: AgentId,
   briefingId: string,
 ): BriefingView | undefined => {
-  const all = deriveBriefings(events);
+  const all = deriveBriefings(events, self);
   return all.get(briefingId);
 };

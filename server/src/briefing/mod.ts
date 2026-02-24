@@ -2,18 +2,6 @@
 // Briefing module — agent-to-agent structured conversations
 
 export {
-  BriefingClient,
-  type BriefingClientError,
-  briefingClientError,
-  type BriefingClientErrorCode,
-  type BriefingClientService,
-  type BriefingEndResponse,
-  type BriefingMessageResponse,
-  type BriefingRequestResponse,
-  makeBriefingClient,
-} from "./client.ts";
-
-export {
   type BriefingBase,
   type BriefingStatus,
   type BriefingView,
@@ -23,13 +11,11 @@ export {
 } from "./view.ts";
 
 export {
-  type AgentRegistry,
   Briefing,
   type BriefingError,
   briefingError,
   type BriefingErrorCode,
   type BriefingRuntimeConfig,
   type BriefingService,
-  flycastRegistry,
   makeBriefingService,
 } from "./service.ts";

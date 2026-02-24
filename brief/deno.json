@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "exports": "./server.ts",
   "imports": {
-    "@db/sqlite": "jsr:@db/sqlite@^0.12",
     "effect": "npm:effect@^3.19.14",
     "hono": "npm:hono@^4.7.0",
     "hono/logger": "npm:hono@^4.7.0/logger",
