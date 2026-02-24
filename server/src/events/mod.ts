@@ -46,6 +46,7 @@ export {
 
 // Briefing Events (scope: "briefing")
 export {
+  BRIEFING_SCOPE,
   type BriefingAccepted,
   BriefingAcceptedSchema,
   type BriefingDeclined,
@@ -58,7 +59,6 @@ export {
   BriefingMessageSentSchema,
   type BriefingRequested,
   BriefingRequestedSchema,
-  BRIEFING_SCOPE,
 } from "./briefing.ts";
 
 // Event Templates

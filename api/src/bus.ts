@@ -50,7 +50,10 @@ export const submitEvent = (
       !("scope" in payload)
     ) {
       return yield* Effect.fail(
-        busError("ValidationFailed", "Payload Must Be An Object With A 'scope' Field"),
+        busError(
+          "ValidationFailed",
+          "Payload Must Be An Object With A 'scope' Field",
+        ),
       );
     }
 
@@ -67,7 +70,10 @@ export const submitEvent = (
     const schema = ctx.registry.getEventSchema(scope);
     if (!schema) {
       return yield* Effect.fail(
-        busError("UnknownScope", `No Platform Registered For Scope '${rawScope}'`),
+        busError(
+          "UnknownScope",
+          `No Platform Registered For Scope '${rawScope}'`,
+        ),
       );
     }
 
@@ -88,7 +94,10 @@ export const submitEvent = (
     const injector = ctx.injectors.get(scope);
     if (!injector) {
       return yield* Effect.fail(
-        busError("UnknownScope", `No Injector Registered For Scope '${rawScope}'`),
+        busError(
+          "UnknownScope",
+          `No Injector Registered For Scope '${rawScope}'`,
+        ),
       );
     }
 

@@ -85,7 +85,10 @@ export interface ProfileViewedResult {
 
 export const BeginSignInResultSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("pending") }),
-  z.object({ status: z.literal("two_factor_required"), challengeType: z.string() }),
+  z.object({
+    status: z.literal("two_factor_required"),
+    challengeType: z.string(),
+  }),
   z.object({ status: z.literal("authenticated") }),
   z.object({ status: z.literal("failed"), error: z.string() }),
 ]);
@@ -187,7 +190,9 @@ export const makeLinkedInActions = (
   pool: BrowserPoolService,
   account: LinkedInAccount,
 ): LinkedInActions => {
-  const getSession = (preferConfigId?: string): Effect.Effect<CdpSession, ExecuteError> => {
+  const getSession = (
+    preferConfigId?: string,
+  ): Effect.Effect<CdpSession, ExecuteError> => {
     const configId = preferConfigId
       ? (preferConfigId as unknown as import("@bernays/server/core").BrowserConfigId)
       : account.browserBindings[0]?.configId;
@@ -246,7 +251,11 @@ export const makeLinkedInActions = (
       }).pipe(
         Effect.catchAll((cause) =>
           Effect.fail(
-            executeError(ConnectionErrorCode, "Failed to send connection request", cause),
+            executeError(
+              ConnectionErrorCode,
+              "Failed to send connection request",
+              cause,
+            ),
           )
         ),
       ),
@@ -260,7 +269,11 @@ export const makeLinkedInActions = (
       }).pipe(
         Effect.catchAll((cause) =>
           Effect.fail(
-            executeError(ConnectionErrorCode, "Failed to withdraw invitation", cause),
+            executeError(
+              ConnectionErrorCode,
+              "Failed to withdraw invitation",
+              cause,
+            ),
           )
         ),
       ),
@@ -303,7 +316,11 @@ export const makeLinkedInActions = (
       }).pipe(
         Effect.catchAll((cause) =>
           Effect.fail(
-            executeError(TwoFactorErrorCode, "Failed to submit 2FA code", cause),
+            executeError(
+              TwoFactorErrorCode,
+              "Failed to submit 2FA code",
+              cause,
+            ),
           )
         ),
       ),

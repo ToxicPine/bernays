@@ -55,7 +55,15 @@ export function makePlatformLayer<
   TActions extends ActionsRecord,
   TTag extends Context.Tag<
     any,
-    PlatformService<TScope, TIdentity, TActions, TInbox, TThread, TBrowser, TContact>
+    PlatformService<
+      TScope,
+      TIdentity,
+      TActions,
+      TInbox,
+      TThread,
+      TBrowser,
+      TContact
+    >
   >,
 >(
   tag: TTag,

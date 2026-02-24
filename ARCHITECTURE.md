@@ -92,7 +92,8 @@ Sockpuppets interact with three services:
 
 - **Platform** — inbox, threads, browsers, contacts, actions
 - **Journal** — record decisions, restore state on restart
-- **Briefing** — request, accept/decline, and conduct briefings with other agents
+- **Briefing** — request, accept/decline, and conduct briefings with other
+  agents
 
 They never see: EventStore, BrowserPool, Projections, Injection, schemas.
 Everything complex is hidden behind these three interfaces.
@@ -787,7 +788,9 @@ interface PlatformService<
   readonly inbox: Effect.Effect<TInbox>;
   readonly thread: (id: ThreadId) => Effect.Effect<Option<TThread>>;
   readonly browsers: Effect.Effect<readonly TBrowser[]>;
-  readonly contact: (id: ParticipantId<TIdentity>) => Effect.Effect<Option<TContact>>;
+  readonly contact: (
+    id: ParticipantId<TIdentity>,
+  ) => Effect.Effect<Option<TContact>>;
 
   // Platform-specific actions
   readonly actions: TActions;
@@ -1116,7 +1119,8 @@ export const makeLinkedInActions = (
 ### Platform Layer Factory
 
 The `makePlatformLayer` function is generic over the context tag with a tight
-constraint linking the tag's service type to the exact `PlatformService` parameters:
+constraint linking the tag's service type to the exact `PlatformService`
+parameters:
 
 ```typescript
 // runtime/sockpuppet/platform-runtime.ts
@@ -1146,10 +1150,13 @@ export function makePlatformLayer<
 ```
 
 Key type design:
-- `TScope extends Scope` ensures alignment with `StorableEvent.scope` (also `Scope`)
+
+- `TScope extends Scope` ensures alignment with `StorableEvent.scope` (also
+  `Scope`)
 - The `TTag` constraint links to exact `PlatformService` type parameters
 - This allows TypeScript to verify types without internal casts
-- `Context.Tag.Identifier<TTag>` extracts the identifier from `typeof LinkedInPlatform`
+- `Context.Tag.Identifier<TTag>` extracts the identifier from
+  `typeof LinkedInPlatform`
 
 ### Usage in Sockpuppets
 
@@ -1177,7 +1184,7 @@ const platformLayer = makePlatformLayer(LinkedInPlatform, {
   account,
   eventStore,
   browserPool,
-  actions,  // Actions inside config, required
+  actions, // Actions inside config, required
 });
 
 const journalLayer = makeJournalLayer({
@@ -1246,7 +1253,10 @@ const linkedInBot = Effect.gen(function* () {
   const pending = yield* briefing.pending;
   for (const req of pending) {
     yield* briefing.accept(req.briefingId);
-    yield* briefing.send(req.briefingId, `Online with ${repliedThreads.size} threads handled.`);
+    yield* briefing.send(
+      req.briefingId,
+      `Online with ${repliedThreads.size} threads handled.`,
+    );
     yield* briefing.end(req.briefingId, {
       summary: { threadsHandled: repliedThreads.size },
     });
@@ -1315,16 +1325,17 @@ const linkedInBot = Effect.gen(function* () {
 ## Agent-to-Agent Briefings
 
 Any participant in the bernays system — sockpuppets, the `brief` user gateway,
-future tooling — can conduct structured conversations with any other participant.
-A **briefing** is a lifecycle-managed dialogue between two named agents, tracked
-through events in the `"briefing"` scope of a single shared event store.
+future tooling — can conduct structured conversations with any other
+participant. A **briefing** is a lifecycle-managed dialogue between two named
+agents, tracked through events in the `"briefing"` scope of a single shared
+event store.
 
 ### Centralized Event Log Model
 
 All participants share one Postgres event store. There is no HTTP transport
-between agents for briefings — the shared store is the rendezvous point.
-Each participant is identified by an `AgentId` (a branded string) provided
-at construction time.
+between agents for briefings — the shared store is the rendezvous point. Each
+participant is identified by an `AgentId` (a branded string) provided at
+construction time.
 
 ```mermaid
 graph TB
@@ -1334,8 +1345,8 @@ graph TB
 ```
 
 Agent A writes a `BriefingRequested` event with `fromAgent: "agent-a"`,
-`toAgent: "agent-b"`. Agent B sees it next time it polls its pending
-briefings. No resolution, no URL mapping, no network hop between agents.
+`toAgent: "agent-b"`. Agent B sees it next time it polls its pending briefings.
+No resolution, no URL mapping, no network hop between agents.
 
 ### Agent Identity
 
@@ -1348,9 +1359,9 @@ const AgentId = (value: string): AgentId => value as AgentId;
 
 Every event field that identifies an agent (`fromAgent`, `toAgent`, `sender`,
 `acceptedBy`, `declinedBy`, `endedBy`) carries an `AgentId`. No `"self"`
-convention — events store real names. The `BriefingService` is constructed
-with a `self: AgentId` that identifies the local participant, used for
-filtering (which briefings are mine) and stamping outgoing events.
+convention — events store real names. The `BriefingService` is constructed with
+a `self: AgentId` that identifies the local participant, used for filtering
+(which briefings are mine) and stamping outgoing events.
 
 The `brief` user gateway is just another participant with its own `AgentId`
 (e.g., `AgentId("user")`). It reads and writes the same event log as every
@@ -1375,11 +1386,11 @@ stateDiagram-v2
 2. **Accepted/Declined** — Agent B polls its pending briefings, sees the
    request, and writes `BriefingAccepted` or `BriefingDeclined`.
 
-3. **Messages** — Either agent writes `BriefingMessageSent` events. Both
-   sides see messages by reading the shared event stream.
+3. **Messages** — Either agent writes `BriefingMessageSent` events. Both sides
+   see messages by reading the shared event stream.
 
-4. **Ended** — Either agent writes `BriefingEnded`. An optional summary
-   captures the outcome.
+4. **Ended** — Either agent writes `BriefingEnded`. An optional summary captures
+   the outcome.
 
 ### Event Schema
 
@@ -1395,19 +1406,20 @@ BriefingMessageSent { briefingId, sender, content }
 BriefingEnded       { briefingId, endedBy, reason?, summary? }
 ```
 
-- Every event carries a `timestamp` (ISO 8601) from `StorableEvent` — this is when
-  the event was recorded.
-- `BriefingRequested.scheduledAt` is when the briefing should occur. Omit for immediate.
+- Every event carries a `timestamp` (ISO 8601) from `StorableEvent` — this is
+  when the event was recorded.
+- `BriefingRequested.scheduledAt` is when the briefing should occur. Omit for
+  immediate.
 - Messages are timestamped via the event's `timestamp` field.
-- The derived `BriefingView` exposes `requestedAt`, `scheduledAt`, `acceptedAt`, and
-  `endedAt` — all derived from the corresponding event timestamps.
+- The derived `BriefingView` exposes `requestedAt`, `scheduledAt`, `acceptedAt`,
+  and `endedAt` — all derived from the corresponding event timestamps.
 
 ### Briefing Service
 
-The `Briefing` service is what sockpuppets `yield*` to participate in
-briefings — both initiating and receiving. It wraps event injection/projection
-and agent identity into a single interface. The service is constructed with
-just two things: the agent's identity and the shared event store.
+The `Briefing` service is what sockpuppets `yield*` to participate in briefings
+— both initiating and receiving. It wraps event injection/projection and agent
+identity into a single interface. The service is constructed with just two
+things: the agent's identity and the shared event store.
 
 ```typescript
 interface BriefingRuntimeConfig {
@@ -1440,13 +1452,21 @@ interface BriefingService {
   ) => Effect.Effect<BriefingView, BriefingError>;
 
   /** Accept a pending briefing request. */
-  readonly accept: (briefingId: string) => Effect.Effect<BriefingView, BriefingError>;
+  readonly accept: (
+    briefingId: string,
+  ) => Effect.Effect<BriefingView, BriefingError>;
 
   /** Decline a pending briefing request. */
-  readonly decline: (briefingId: string, reason?: string) => Effect.Effect<BriefingView, BriefingError>;
+  readonly decline: (
+    briefingId: string,
+    reason?: string,
+  ) => Effect.Effect<BriefingView, BriefingError>;
 
   /** Send a message in an active briefing. */
-  readonly send: (briefingId: string, content: string) => Effect.Effect<void, BriefingError>;
+  readonly send: (
+    briefingId: string,
+    content: string,
+  ) => Effect.Effect<void, BriefingError>;
 
   /** End a briefing, optionally with a reason and structured summary. */
   readonly end: (
@@ -1467,13 +1487,19 @@ const briefBot = Effect.gen(function* () {
 
   const b = yield* briefing.request("agent-b", "Daily Status Sync");
 
-  yield* briefing.send(b.briefingId, "Processed 42 messages today. 3 require follow-up.");
+  yield* briefing.send(
+    b.briefingId,
+    "Processed 42 messages today. 3 require follow-up.",
+  );
 
   yield* briefing.end(b.briefingId, {
     summary: { messagesProcessed: 42, followUps: 3 },
   });
 
-  yield* journal.record({ kind: "briefing_completed", briefingId: b.briefingId });
+  yield* journal.record({
+    kind: "briefing_completed",
+    briefingId: b.briefingId,
+  });
 });
 ```
 
@@ -1519,18 +1545,18 @@ endpoints are needed.
 
 | Method | Path                          | Description                                    |
 | ------ | ----------------------------- | ---------------------------------------------- |
-| GET    | `/briefings?agentId=...`      | List briefings for an agent (optional &status)  |
-| GET    | `/briefings/{id}?agentId=...` | Get a specific briefing                         |
+| GET    | `/briefings?agentId=...`      | List briefings for an agent (optional &status) |
+| GET    | `/briefings/{id}?agentId=...` | Get a specific briefing                        |
 
 ### The `brief` Package
 
-The `brief` package is a user-facing HTTP gateway into the briefing system.
-It allows external callers (dashboards, LLM orchestrators) to open
-conversations with agents and exchange messages.
+The `brief` package is a user-facing HTTP gateway into the briefing system. It
+allows external callers (dashboards, LLM orchestrators) to open conversations
+with agents and exchange messages.
 
 `brief` is just another `BriefingService` participant with its own `AgentId`
-(e.g., `AgentId("user")`). It has no database of its own — it reads and
-writes the same shared Postgres event log. Its routes are thin wrappers:
+(e.g., `AgentId("user")`). It has no database of its own — it reads and writes
+the same shared Postgres event log. Its routes are thin wrappers:
 
 - `POST /conversations` calls `briefing.request(agentId, topic)`
 - `POST /conversations/:id/messages` calls `briefing.send(id, content)`
@@ -1540,13 +1566,13 @@ writes the same shared Postgres event log. Its routes are thin wrappers:
 ### Views
 
 Briefing state is derived from events by pure functions, following the same
-pattern as platform views. `BriefingView` is a discriminated union on `status`
-— each state carries exactly the fields that exist in that state.
+pattern as platform views. `BriefingView` is a discriminated union on `status` —
+each state carries exactly the fields that exist in that state.
 
 Events store real `AgentId` values — no normalization. `fromAgent` is who
 initiated, `toAgent` is who was asked. The view derivation function takes a
-`self: AgentId` parameter for **filtering** (which briefings involve me),
-not for transforming field values.
+`self: AgentId` parameter for **filtering** (which briefings involve me), not
+for transforming field values.
 
 ```typescript
 interface BriefingBase {
@@ -1569,13 +1595,13 @@ type BriefingView =
   | (BriefingBase & { status: "declined"; reason?: string })
   | (BriefingBase & { status: "active"; acceptedAt: string })
   | (BriefingBase & {
-      status: "ended";
-      acceptedAt: string;
-      endedBy: AgentId;
-      endedAt: string;
-      reason?: string;
-      summary?: Record<string, unknown>;
-    });
+    status: "ended";
+    acceptedAt: string;
+    endedBy: AgentId;
+    endedAt: string;
+    reason?: string;
+    summary?: Record<string, unknown>;
+  });
 ```
 
 ---
@@ -1635,19 +1661,19 @@ brief/
 
 ## Dependency Matrix
 
-| Layer | Service        | Depends On              | Responsibility                         |
-| ----- | -------------- | ----------------------- | -------------------------------------- |
-| 0     | `Database`     | —                       | Raw SQL access                         |
-| 0     | `EventStore`   | Database                | Append-only event log                  |
-| 0     | `ConfigStore`  | Database                | Browser configs                        |
-| 1     | `BrowserPool`  | ConfigStore             | Launch browsers, return CDP URLs       |
-| 2     | `API`          | Injection, Projection   | HTTP event bus + control plane         |
-| 3     | `Projection`   | EventStore              | Type-safe filtered reads               |
-| 3     | `Injection`    | EventStore              | Type-safe validated writes             |
-| 4     | `Platform`     | Projection, BrowserPool | Derivation + actions for sockpuppets   |
-| 4     | `Journal`      | Injection               | Sockpuppet decision log                |
-| 4     | `Briefing`     | Injection, EventStore     | Agent-to-agent structured conversations |
-| 5     | `Sockpuppet`   | Platform, Journal, Briefing | Human-like agent                     |
+| Layer | Service       | Depends On                  | Responsibility                          |
+| ----- | ------------- | --------------------------- | --------------------------------------- |
+| 0     | `Database`    | —                           | Raw SQL access                          |
+| 0     | `EventStore`  | Database                    | Append-only event log                   |
+| 0     | `ConfigStore` | Database                    | Browser configs                         |
+| 1     | `BrowserPool` | ConfigStore                 | Launch browsers, return CDP URLs        |
+| 2     | `API`         | Injection, Projection       | HTTP event bus + control plane          |
+| 3     | `Projection`  | EventStore                  | Type-safe filtered reads                |
+| 3     | `Injection`   | EventStore                  | Type-safe validated writes              |
+| 4     | `Platform`    | Projection, BrowserPool     | Derivation + actions for sockpuppets    |
+| 4     | `Journal`     | Injection                   | Sockpuppet decision log                 |
+| 4     | `Briefing`    | Injection, EventStore       | Agent-to-agent structured conversations |
+| 5     | `Sockpuppet`  | Platform, Journal, Briefing | Human-like agent                        |
 
 ---
 

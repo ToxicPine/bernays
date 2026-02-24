@@ -6,8 +6,8 @@ import { Effect, Layer } from "effect";
 import {
   type LinkedInTestConfig,
   loadLinkedInTestConfig,
-  type LocalTestConfig,
   loadLocalTestConfig,
+  type LocalTestConfig,
 } from "../lib/mod.ts";
 import {
   createInMemoryConfigStore,
@@ -16,8 +16,8 @@ import {
   type StorableEvent,
 } from "@bernays/server/store";
 import {
-  makeLocalBackendWithTestUtils,
   type LocalBackendWithTestUtils,
+  makeLocalBackendWithTestUtils,
 } from "@bernays/server/browsers";
 import {
   Journal,
@@ -179,12 +179,18 @@ const fullE2EProgram = (
 
     // Handle 2FA if required
     if (signInResult.status === "two_factor_required") {
-      yield* Effect.log(`2FA required (${signInResult.challengeType}), waiting for code...`);
-      return yield* Effect.fail(new Error("2FA required but not handled in test"));
+      yield* Effect.log(
+        `2FA required (${signInResult.challengeType}), waiting for code...`,
+      );
+      return yield* Effect.fail(
+        new Error("2FA required but not handled in test"),
+      );
     }
 
     if (signInResult.status === "failed") {
-      return yield* Effect.fail(new Error(`Sign-in failed: ${signInResult.error}`));
+      return yield* Effect.fail(
+        new Error(`Sign-in failed: ${signInResult.error}`),
+      );
     }
 
     yield* journal.record({ kind: "signed_in", ts: Date.now() });
@@ -194,7 +200,9 @@ const fullE2EProgram = (
     const inbox = yield* platform.inbox;
     const browsers = yield* platform.browsers;
     yield* Effect.log(
-      `Found ${Object.keys(inbox.byThreadId).length} threads, ${browsers.length} browsers`,
+      `Found ${
+        Object.keys(inbox.byThreadId).length
+      } threads, ${browsers.length} browsers`,
     );
 
     // Step 3: Send message
@@ -302,7 +310,9 @@ Deno.test({
     const configId = BrowserConfigId(TEST_BROWSER_ID);
 
     await t.step("launch browser", async () => {
-      const session = await Effect.runPromise(ctx!.backend.pool.launch(configId));
+      const session = await Effect.runPromise(
+        ctx!.backend.pool.launch(configId),
+      );
       console.log(`Browser launched, CDP URL: ${session.cdpUrl}`);
       const running = await Effect.runPromise(
         ctx!.backend.pool.isRunning(configId),
@@ -321,7 +331,9 @@ Deno.test({
       );
 
       if (result.status === "two_factor_required") {
-        console.log(`2FA required (${result.challengeType}), test would need manual code entry`);
+        console.log(
+          `2FA required (${result.challengeType}), test would need manual code entry`,
+        );
       } else {
         assertEquals(result.status, "authenticated");
       }

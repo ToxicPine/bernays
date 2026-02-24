@@ -23,7 +23,12 @@ export {
 } from "./branded.ts";
 
 // Scope Infrastructure
-export { BRIEFING_SCOPE, CORE_SCOPE, JOURNAL_SCOPE, ScopeSchema } from "./scope.ts";
+export {
+  BRIEFING_SCOPE,
+  CORE_SCOPE,
+  JOURNAL_SCOPE,
+  ScopeSchema,
+} from "./scope.ts";
 
 // Hashing Utilities
 export {
@@ -57,5 +62,3 @@ export {
   type Identifiable,
   type StoreService,
 } from "./store-factory.ts";
-
-

@@ -32,13 +32,13 @@ export type BriefingView =
   | (BriefingBase & { readonly status: "declined"; readonly reason?: string })
   | (BriefingBase & { readonly status: "active"; readonly acceptedAt: string })
   | (BriefingBase & {
-      readonly status: "ended";
-      readonly acceptedAt: string;
-      readonly endedBy: AgentId;
-      readonly endedAt: string;
-      readonly reason?: string;
-      readonly summary?: Record<string, unknown>;
-    });
+    readonly status: "ended";
+    readonly acceptedAt: string;
+    readonly endedBy: AgentId;
+    readonly endedAt: string;
+    readonly reason?: string;
+    readonly summary?: Record<string, unknown>;
+  });
 
 export type BriefingStatus = BriefingView["status"];
 

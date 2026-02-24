@@ -2,10 +2,7 @@
 // Local Playwright pool implementation - returns CDP URLs
 
 import { Effect } from "effect";
-import {
-  type BrowserServer,
-  chromium,
-} from "playwright";
+import { type BrowserServer, chromium } from "playwright";
 import type { BrowserConfigId as BrowserConfigIdType } from "$/core/branded.ts";
 import type { ConfigStoreService } from "$/store/config-store.ts";
 import {

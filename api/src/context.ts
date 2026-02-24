@@ -3,11 +3,11 @@
 
 import { Effect, Option } from "effect";
 import {
-  type EventStore,
-  type StorableEvent,
+  type ConfigStoreService,
   configurePostgresEventStore,
   createPostgresConfigStore,
-  type ConfigStoreService,
+  type EventStore,
+  type StorableEvent,
 } from "@bernays/server/store";
 import {
   type AnyPlatform,
@@ -17,7 +17,11 @@ import {
 } from "@bernays/server/platforms";
 import { type Injector, makeInjector } from "@bernays/server/projections";
 import { makeProjection, type Projection } from "@bernays/server/projections";
-import { type Scope, ParticipantIdFromString, BRIEFING_SCOPE } from "@bernays/server/core";
+import {
+  BRIEFING_SCOPE,
+  ParticipantIdFromString,
+  type Scope,
+} from "@bernays/server/core";
 import { BriefingEventSchema } from "@bernays/server/events";
 import type { BaseAccount } from "@bernays/server/views";
 
@@ -59,7 +63,9 @@ export interface ServerContext {
 // to AnyPlatform directly. This helper erases platform-specific types for
 // registry consumption. Safe because the API only reads from behaviors.
 // deno-lint-ignore no-explicit-any
-const asPlatform = (p: PlatformDefinition<any, any, any, any, any, any, any, any, any>): AnyPlatform => p;
+const asPlatform = (
+  p: PlatformDefinition<any, any, any, any, any, any, any, any, any>,
+): AnyPlatform => p;
 
 const PLATFORMS: readonly AnyPlatform[] = [
   asPlatform(linkedInPlatform),
@@ -103,7 +109,10 @@ export const createServerContext = async (
   }
 
   // Register briefing scope for read access (agents write directly via BriefingService)
-  projections.set(BRIEFING_SCOPE, makeProjection(BRIEFING_SCOPE, BriefingEventSchema, eventStore));
+  projections.set(
+    BRIEFING_SCOPE,
+    makeProjection(BRIEFING_SCOPE, BriefingEventSchema, eventStore),
+  );
 
   // Create account stores per platform identity.
   // Wrap platform-specific stores to satisfy AccountStoreView (which uses plain
@@ -115,7 +124,8 @@ export const createServerContext = async (
     connectionString: databaseUrl,
   });
   accountStores.set("linkedin", {
-    get: (id) => linkedInAccountStore.get(ParticipantIdFromString<"linkedin">(id)),
+    get: (id) =>
+      linkedInAccountStore.get(ParticipantIdFromString<"linkedin">(id)),
     list: () => linkedInAccountStore.list(),
   });
 

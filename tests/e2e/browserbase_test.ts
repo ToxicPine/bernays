@@ -36,10 +36,7 @@ import {
   linkedInPlatform,
   makeLinkedInActions,
 } from "@bernays/plugins/linkedin";
-import {
-  BrowserConfigId,
-  ParticipantId,
-} from "@bernays/server/core";
+import { BrowserConfigId, ParticipantId } from "@bernays/server/core";
 
 const TEST_ACCOUNT_ID = "e2e-browserbase-account";
 const TEST_BROWSER_ID = "e2e-browserbase-browser";
@@ -92,7 +89,10 @@ Deno.test.beforeAll(async () => {
   };
   await Effect.runPromise(accountStore.upsert(account));
 
-  const browserPool = makeBrowserbaseBackend(config.browserbaseApiKey, configStore);
+  const browserPool = makeBrowserbaseBackend(
+    config.browserbaseApiKey,
+    configStore,
+  );
 
   ctx = {
     config,
@@ -148,10 +148,14 @@ Deno.test({
 
     await t.step("launch browser via pool", async () => {
       const configId = BrowserConfigId(TEST_BROWSER_ID);
-      const session = await Effect.runPromise(ctx!.browserPool.launch(configId));
+      const session = await Effect.runPromise(
+        ctx!.browserPool.launch(configId),
+      );
       console.log(`Pool launched browser, CDP URL: ${session.cdpUrl}`);
 
-      const running = await Effect.runPromise(ctx!.browserPool.isRunning(configId));
+      const running = await Effect.runPromise(
+        ctx!.browserPool.isRunning(configId),
+      );
       console.log(`Browser running: ${running}`);
     });
 
@@ -182,7 +186,9 @@ Deno.test({
       const result = await Effect.runPromise(
         Effect.provide(program, Layer.merge(platformLayer, journalLayer)),
       );
-      console.log(`Sockpuppet result: ${result.threads} threads, ${result.entries} journal entries`);
+      console.log(
+        `Sockpuppet result: ${result.threads} threads, ${result.entries} journal entries`,
+      );
       assertGreaterOrEqual(result.entries, 1);
     });
 

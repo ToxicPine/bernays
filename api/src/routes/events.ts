@@ -142,8 +142,9 @@ export const eventsRoutes = (ctx: ServerContext) => {
       const result = await Effect.runPromiseExit(submitEvent(ctx, payload));
       if (result._tag === "Failure") {
         const cause = result.cause;
-        const message =
-          cause._tag === "Fail" ? cause.error.message : "Internal Error";
+        const message = cause._tag === "Fail"
+          ? cause.error.message
+          : "Internal Error";
         results.push({ ok: false, error: message });
       } else {
         results.push({ ok: true, eventId: result.value.eventId });
@@ -159,18 +160,19 @@ export const eventsRoutes = (ctx: ServerContext) => {
 
   // GET /events
   app.openapi(listEventsRoute, async (c) => {
-    const { scope, since, correlation, intent, limit, offset } =
-      c.req.valid("query");
+    const { scope, since, correlation, intent, limit, offset } = c.req.valid(
+      "query",
+    );
 
     type StoreQuery =
       | { type: "all" }
       | { type: "since"; timestamp: string }
       | { type: "byScope"; scope: ReturnType<typeof makeScope> }
       | {
-          type: "byScope";
-          scope: ReturnType<typeof makeScope>;
-          since: string;
-        }
+        type: "byScope";
+        scope: ReturnType<typeof makeScope>;
+        since: string;
+      }
       | { type: "byCorrelation"; correlationId: string }
       | { type: "byIntent"; intentId: string };
 

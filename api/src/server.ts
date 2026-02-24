@@ -26,8 +26,7 @@ export const createApp = (ctx: ServerContext) => {
     c.json({
       status: "ok",
       platforms: ctx.registry.platforms.map((p) => p.scope),
-    }),
-  );
+    }));
 
   // Mount routes
   app.route("/events", eventsRoutes(ctx));

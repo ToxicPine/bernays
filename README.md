@@ -69,8 +69,8 @@ Your agent gets two things:
 
 ```typescript
 // this could have been Reddit, or X:
-const linkedIn = yield* LinkedIn; // inbox, threads, post, reply, update profile
-const journal = yield* Journal; // memory that survives forever
+const linkedIn = yield * LinkedIn; // inbox, threads, post, reply, update profile
+const journal = yield * Journal; // memory that survives forever
 ```
 
 Then, it does its voodoo:

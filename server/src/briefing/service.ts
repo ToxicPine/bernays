@@ -8,12 +8,7 @@
 import { Context, Effect, Option } from "effect";
 import type { BriefingEvent } from "$/events/briefing.ts";
 import { BRIEFING_SCOPE } from "$/core/scope.ts";
-import {
-  AgentId,
-  BriefingId,
-  CorrelationId,
-  EventId,
-} from "$/core/branded.ts";
+import { AgentId, BriefingId, CorrelationId, EventId } from "$/core/branded.ts";
 import type { Injector } from "$/projections/injector.ts";
 import type { EventStore, StorableEvent } from "$/store/mod.ts";
 import { BriefingEventSchema } from "$/events/briefing.ts";
@@ -152,11 +147,17 @@ export const makeBriefingService = (
     eventStore,
   );
 
-  const injectEvent = (event: BriefingEvent): Effect.Effect<void, BriefingError> =>
+  const injectEvent = (
+    event: BriefingEvent,
+  ): Effect.Effect<void, BriefingError> =>
     injector.append(event).pipe(
       Effect.catchAll((err) =>
         Effect.fail(
-          briefingError("InjectionFailed", `Failed to record event: ${err.message}`, err),
+          briefingError(
+            "InjectionFailed",
+            `Failed to record event: ${err.message}`,
+            err,
+          ),
         )
       ),
     );
@@ -172,9 +173,9 @@ export const makeBriefingService = (
   ): Effect.Effect<BriefingView, BriefingError> =>
     Effect.flatMap(allViews(), (views) => {
       const b = views.get(briefingId);
-      return b
-        ? Effect.succeed(b)
-        : Effect.fail(briefingError("NotFound", `Briefing not found: ${briefingId}`));
+      return b ? Effect.succeed(b) : Effect.fail(
+        briefingError("NotFound", `Briefing not found: ${briefingId}`),
+      );
     });
 
   return {
@@ -186,7 +187,9 @@ export const makeBriefingService = (
     }),
 
     active: Effect.map(allEvents(), (events) => {
-      return getActiveBriefings(events, self).filter((b) => b.status === "active");
+      return getActiveBriefings(events, self).filter((b) =>
+        b.status === "active"
+      );
     }),
 
     all: Effect.map(allViews(), (views) => [...views.values()]),

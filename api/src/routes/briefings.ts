@@ -8,18 +8,12 @@
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { Effect } from "effect";
+import { AgentId, BRIEFING_SCOPE } from "@bernays/server/core";
 import {
-  AgentId,
-  BRIEFING_SCOPE,
-} from "@bernays/server/core";
-import {
-  BriefingEventSchema,
   type BriefingEvent,
+  BriefingEventSchema,
 } from "@bernays/server/events";
-import {
-  deriveBriefings,
-  getBriefing,
-} from "@bernays/server/briefing";
+import { deriveBriefings, getBriefing } from "@bernays/server/briefing";
 import type { ServerContext } from "$/context.ts";
 import { ErrorSchema } from "$/schemas.ts";
 
@@ -131,7 +125,9 @@ const queryBriefingEvents = async (
 ): Promise<readonly BriefingEvent[]> => {
   const projection = ctx.projections.get(BRIEFING_SCOPE);
   if (!projection) return [];
-  return (await Effect.runPromise(projection.query())) as readonly BriefingEvent[];
+  return (await Effect.runPromise(
+    projection.query(),
+  )) as readonly BriefingEvent[];
 };
 
 // =============================================================================

@@ -7,16 +7,13 @@ export {
   LinkedInTestConfigSchema,
   loadConfig,
   loadLinkedInTestConfig,
+  loadLocalTestConfig,
   type LocalTestConfig,
   LocalTestConfigSchema,
-  loadLocalTestConfig,
   validateBrowserbase,
   validateDatabase,
 } from "./config.ts";
 
 export { cleanupTestData, getEventCount } from "./database.ts";
 
-export {
-  createSession,
-  type TestSession,
-} from "./browser.ts";
+export { createSession, type TestSession } from "./browser.ts";
