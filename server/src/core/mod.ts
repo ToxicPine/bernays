@@ -57,10 +57,4 @@ export {
   type StoreService,
 } from "./store-factory.ts";
 
-// Platform Account Store Factory
-export {
-  type AccountStoreService,
-  createPlatformAccountStore,
-  type PlatformAccountStoreConfig,
-  type PostgresAccountStoreOptions,
-} from "./platform-account-store.ts";
+
