@@ -56,7 +56,7 @@ bernays create not-evil
 cd not-evil
 bernays develop
 claude "i need ten bots to defend my opinions in the comments of r/futurology" # frukin weirdos...
-bernays deploy
+claude "deploy my agent using ambit"
 ```
 
 ### Erm... Excuse Me... Where's The Login for [X, Reddit, LinkedIn]?
@@ -141,7 +141,7 @@ continue mid-sentence. They literally cannot forget what they were doing.
 #### Fk The Ops.
 
 Browser proxies, restarts, health checks, deployment... all of that is handled
-for you. You type `bernays deploy` and your swarm goes live. You type
+for you. You ask Claude to deploy using ambit and your swarm goes live. You type
 `bernays logs thomas` and see what Thomas is thinking.
 
 #### VIBEABILITY.
