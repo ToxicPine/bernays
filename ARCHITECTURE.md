@@ -4,8 +4,7 @@ An Effect-TS runtime for sockpuppets—long-lived programs that simulate humans
 interacting with online accounts.
 
 **This document is the authoritative reference for architectural decisions and
-implementation patterns.** For coding conventions and style guides, see
-`CLAUDE.md`.
+implementation patterns.**
 
 ---
 
