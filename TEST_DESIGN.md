@@ -642,19 +642,19 @@ tests/
 ├── lib/
 │   ├── mod.ts                     # Existing test utilities
 │   └── board.ts                   # createBoard() handler (~40 lines)
-│
-plugins/
-└── messageboard/
-    ├── mod.ts                     # PlatformDefinition, tags, layers
-    ├── schemas.ts                 # 3 event schemas + union
-    ├── behavior.ts                # State, applyEvent, materialize*
-    ├── service.ts                 # MessageBoardPlatform tag, actions factory
-    └── account.ts                 # MessageBoardAccount type
+└── plugins/
+    └── messageboard/
+        ├── mod.ts                 # PlatformDefinition, tags, layers
+        ├── schemas.ts             # 3 event schemas + union
+        ├── behavior.ts            # State, applyEvent, materialize*
+        ├── service.ts             # MessageBoardPlatform tag, actions factory
+        └── account.ts             # MessageBoardAccount type
 ```
 
-The `messageboard` plugin lives alongside the real plugins. It's a legitimate
-(if minimal) platform implementation, not a mock. The board handler is a test
-utility — a pure function, not a deployable server.
+The `messageboard` plugin is test infrastructure — it exists solely to exercise
+the bernays machinery and has no purpose outside of `messageboard_test.ts`. It
+lives under `tests/` alongside the board handler and other test utilities, not
+in `plugins/` where the real platform integrations live.
 
 No `board/` directory. No `deno.json` for the board. No Fly.io config. The
 entire "server" is `createBoard(apiKey)` returning a `Request → Response`

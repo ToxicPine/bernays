@@ -3,7 +3,7 @@
 
 import { Context, Effect } from "effect";
 import { z } from "@zod/zod";
-import type { ThreadId } from "@bernays/server/core";
+import { BrowserConfigId, type ThreadId } from "@bernays/server/core";
 import type { BrowserPoolService, CdpSession } from "@bernays/server/browsers";
 import {
   type ExecuteError,
@@ -194,7 +194,7 @@ export const makeLinkedInActions = (
     preferConfigId?: string,
   ): Effect.Effect<CdpSession, ExecuteError> => {
     const configId = preferConfigId
-      ? (preferConfigId as unknown as import("@bernays/server/core").BrowserConfigId)
+      ? BrowserConfigId(preferConfigId)
       : account.browserBindings[0]?.configId;
 
     if (!configId) {

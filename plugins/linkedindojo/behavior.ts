@@ -4,6 +4,7 @@
 import {
   type BrowserConfigId,
   ParticipantId,
+  ParticipantIdFromString,
   type ParticipantId as ParticipantIdType,
   type ThreadId,
 } from "@bernays/server/core";
@@ -11,12 +12,11 @@ import {
   applyGraphEvent,
   calculateUnreadCount,
   emptyGraphState,
-  extractParticipants,
   type GraphMessage,
   type GraphState,
+  graphNodesToMessages,
   materializeThreadGraphs,
   type ThreadGraph,
-  toMessageViews,
 } from "@bernays/server/views";
 import type { PlatformBehavior } from "@bernays/server/platforms";
 import { makeInjectorTag } from "@bernays/server/projections";
@@ -43,7 +43,7 @@ import {
 const LINKEDIN_IDENTITY = "linkedin" as const;
 type LinkedInIdentity = typeof LINKEDIN_IDENTITY;
 
-interface LinkedInDojoPluginState {
+export interface LinkedInDojoPluginState {
   graph: GraphState;
   browserStatus: Map<string, {
     authStatus: LinkedInAuthStatus;
@@ -63,13 +63,18 @@ const toLinkedInThread = (
   graph: ThreadGraph<LinkedInDojoScope, GraphMessage, LinkedInAnchor>,
   participantId: ParticipantIdType<LinkedInIdentity>,
 ): LinkedInThread => {
-  const messages = toMessageViews<LinkedInIdentity>(graph);
+  const messages = graphNodesToMessages(graph.nodes).map((m) => ({
+    id: m.canonicalId,
+    senderId: ParticipantIdFromString<LinkedInIdentity>(m.senderId),
+    content: m.content,
+    timestamp: m.timestamp,
+  }));
   const unreadCount = calculateUnreadCount(messages, participantId);
 
   return {
     threadId: graph.id,
     messages,
-    participants: extractParticipants<LinkedInIdentity>(graph.anchor),
+    participants: graph.anchor.participants.map((id) => ({ id })),
     anchor: graph.anchor,
     unreadCount,
     isSponsored: false,
@@ -176,7 +181,12 @@ export const linkedInDojoBehavior: PlatformBehavior<
 
     const byThreadId: Record<string, LinkedInIndexMeta> = {};
     for (const thread of threads.values()) {
-      const messages = toMessageViews<LinkedInIdentity>(thread);
+      const messages = graphNodesToMessages(thread.nodes).map((m) => ({
+        id: m.canonicalId,
+        senderId: ParticipantIdFromString<LinkedInIdentity>(m.senderId),
+        content: m.content,
+        timestamp: m.timestamp,
+      }));
       const unreadCount = calculateUnreadCount(messages, participantId);
       byThreadId[thread.id] = {
         lastActivity: thread.lastActivity,

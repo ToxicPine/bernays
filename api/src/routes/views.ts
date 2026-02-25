@@ -334,7 +334,8 @@ export const viewsRoutes = (ctx: ServerContext) => {
     if (!resolved?.projection) {
       return c.json({ error: "Unknown Platform Or No Projection" }, 404);
     }
-    if (!resolved.def.behavior.materializeContact) {
+    const { behavior } = resolved.def;
+    if (!behavior.materializeContact) {
       return c.json(
         { error: "Platform Does Not Support Contact Derivation" },
         404,
@@ -342,7 +343,6 @@ export const viewsRoutes = (ctx: ServerContext) => {
     }
     const contactId = makeParticipantId(platform, rawParticipantId);
     const events = await Effect.runPromise(resolved.projection.query());
-    const { behavior } = resolved.def;
     const state = behavior.emptyState();
     for (const event of events) behavior.applyEvent(state, event);
     const contact = behavior.materializeContact(state, contactId);

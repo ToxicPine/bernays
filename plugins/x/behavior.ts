@@ -4,6 +4,7 @@
 import {
   type BrowserConfigId,
   ParticipantId,
+  ParticipantIdFromString,
   type ParticipantId as ParticipantIdType,
   type ThreadId,
 } from "@bernays/server/core";
@@ -11,12 +12,11 @@ import {
   applyGraphEvent,
   calculateUnreadCount,
   emptyGraphState,
-  extractParticipants,
   type GraphMessage,
   type GraphState,
+  graphNodesToMessages,
   materializeThreadGraphs,
   type ThreadGraph,
-  toMessageViews,
 } from "@bernays/server/views";
 import type { PlatformBehavior } from "@bernays/server/platforms";
 
@@ -34,7 +34,7 @@ type XScope = typeof X_SCOPE;
 
 // Plugin State
 
-interface XPluginState {
+export interface XPluginState {
   graph: GraphState;
   browserStatus: Map<string, {
     authStatus: XAuthStatus;
@@ -60,13 +60,18 @@ const toXThread = (
   graph: ThreadGraph<XScope, GraphMessage, XAnchor>,
   participantId: ParticipantIdType<"x">,
 ): XThread => {
-  const messages = toMessageViews<"x">(graph);
+  const messages = graphNodesToMessages(graph.nodes).map((m) => ({
+    id: m.canonicalId,
+    senderId: ParticipantIdFromString<"x">(m.senderId),
+    content: m.content,
+    timestamp: m.timestamp,
+  }));
   const unreadCount = calculateUnreadCount(messages, participantId);
 
   return {
     threadId: graph.id,
     messages,
-    participants: extractParticipants<"x">(graph.anchor),
+    participants: graph.anchor.participants.map((id) => ({ id })),
     anchor: graph.anchor,
     unreadCount,
     lastActivity: graph.lastActivity,
@@ -218,7 +223,12 @@ export const xBehavior: PlatformBehavior<
     let totalUnread = 0;
 
     for (const thread of threads.values()) {
-      const messages = toMessageViews<"x">(thread);
+      const messages = graphNodesToMessages(thread.nodes).map((m) => ({
+        id: m.canonicalId,
+        senderId: ParticipantIdFromString<"x">(m.senderId),
+        content: m.content,
+        timestamp: m.timestamp,
+      }));
       const unreadCount = calculateUnreadCount(messages, participantId);
       totalUnread += unreadCount;
 

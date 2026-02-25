@@ -8,18 +8,16 @@
 
 import postgres from "postgres";
 import { Duration, Effect, Layer, PubSub, Schedule, Stream } from "effect";
-import { Err, Ok } from "$/core/result.ts";
 import type { Scope } from "$/core/branded.ts";
 import {
   createEventStoreError,
-  type EventStore,
+  type EventStoreError,
   type EventStoreQuery,
   type EventStoreService,
   EventStoreTag,
-  liftStoreToEffect,
   type StorableEvent,
   StorableEventSchema,
-} from "./mod.ts";
+} from "./types.ts";
 import { getCorrelationId, getIntentId } from "./utils.ts";
 
 export interface PostgresEventStoreOptions {
@@ -49,7 +47,6 @@ const ensureSchema = async (
   sql: postgres.Sql,
   schema: string,
 ): Promise<void> => {
-  // public always exists
   if (schema === "public") return;
   assertIdentifier(schema, "schema");
   await sql.unsafe(`create schema if not exists "${schema}"`);
@@ -64,7 +61,6 @@ const ensureSetup = async (
 
   const qt = qualifiedTable(schema, table);
 
-  // Main table
   await sql.unsafe(`
     create table if not exists ${qt} (
       event_id uuid primary key,
@@ -92,154 +88,19 @@ const ensureSetup = async (
   );
 };
 
-/**
- * Create a Postgres-backed event store.
- *
- * This function is async because it auto-creates the schema/table/indexes.
- */
-export const createPostgresEventStore = async <
-  TEvent extends StorableEvent = StorableEvent,
->(
-  options: PostgresEventStoreOptions,
-): Promise<EventStore<TEvent>> => {
-  const {
-    databaseUrl,
-    schema = "public",
-    table = "events",
-    maxConnections = 5,
-  } = options;
-
-  const sql = postgres(databaseUrl, {
-    max: maxConnections,
-    onnotice: () => {}, // Suppress NOTICE/WARNING messages (e.g., "already exists, skipping")
-  });
-
-  try {
-    await ensureSetup(sql, schema, table);
-  } catch (cause) {
-    // Close immediately if setup failed
-    try {
-      await sql.end({ timeout: 5 });
-    } catch {
-      // ignore
+const payloadsFromRows = (rows: unknown): StorableEvent[] => {
+  if (!Array.isArray(rows)) return [];
+  const out: StorableEvent[] = [];
+  for (const row of rows) {
+    if (row && typeof row === "object" && "payload" in row) {
+      const payload = (row as { payload: unknown }).payload;
+      const parsed = StorableEventSchema.safeParse(payload);
+      if (parsed.success) {
+        out.push(payload as StorableEvent);
+      }
     }
-    throw cause;
   }
-
-  const qt = qualifiedTable(schema, table);
-
-  return {
-    async append(events: readonly TEvent[]) {
-      try {
-        await sql.begin(async (tx) => {
-          for (const event of events) {
-            const correlationId = getCorrelationId(event);
-            const intentId = getIntentId(event);
-
-            await tx.unsafe(
-              `insert into ${qt}
-                (event_id, ts, scope, type, correlation_id, intent_id, payload)
-              values
-                ($1, $2, $3, $4, $5, $6, $7)
-              on conflict (event_id) do nothing`,
-              [
-                event.eventId,
-                event.timestamp,
-                event.scope,
-                event.type,
-                correlationId ?? null,
-                intentId ?? null,
-                event,
-              ],
-            );
-          }
-        });
-        return Ok(undefined);
-      } catch (cause) {
-        return Err(
-          createEventStoreError(
-            "AppendFailed",
-            "Failed to append events",
-            cause,
-          ),
-        );
-      }
-    },
-
-    async fetch(query?: EventStoreQuery) {
-      const q = query ?? { type: "all" as const };
-
-      try {
-        const payloadsFromRows = (rows: unknown): TEvent[] => {
-          if (!Array.isArray(rows)) return [];
-          const out: TEvent[] = [];
-          for (const row of rows) {
-            if (row && typeof row === "object" && "payload" in row) {
-              const payload = (row as { payload: unknown }).payload;
-              // Validate base event structure
-              const baseResult = StorableEventSchema.safeParse(payload);
-              if (baseResult.success) {
-                // Trust extended fields (full validation at ingestion)
-                out.push(payload as TEvent);
-              }
-            }
-          }
-          return out;
-        };
-
-        switch (q.type) {
-          case "all": {
-            const rows = await sql.unsafe(
-              `select payload from ${qt} order by ts asc, event_id asc`,
-            );
-            return Ok(payloadsFromRows(rows));
-          }
-          case "since": {
-            const rows = await sql.unsafe(
-              `select payload from ${qt} where ts >= $1 order by ts asc, event_id asc`,
-              [q.timestamp],
-            );
-            return Ok(payloadsFromRows(rows));
-          }
-          case "byScope": {
-            const sinceCond = "since" in q && q.since ? "and ts >= $2" : "";
-            const params = "since" in q && q.since
-              ? [q.scope, q.since]
-              : [q.scope];
-            const rows = await sql.unsafe(
-              `select payload from ${qt} where scope = $1 ${sinceCond} order by ts asc, event_id asc`,
-              params,
-            );
-            return Ok(payloadsFromRows(rows));
-          }
-          case "byCorrelation": {
-            const rows = await sql.unsafe(
-              `select payload from ${qt} where correlation_id = $1 order by ts asc, event_id asc`,
-              [q.correlationId],
-            );
-            return Ok(payloadsFromRows(rows));
-          }
-          case "byIntent": {
-            const rows = await sql.unsafe(
-              `select payload from ${qt} where intent_id = $1 order by ts asc, event_id asc`,
-              [q.intentId],
-            );
-            return Ok(payloadsFromRows(rows));
-          }
-        }
-      } catch (cause) {
-        return Err(
-          createEventStoreError("QueryFailed", "Failed to fetch events", cause),
-        );
-      }
-    },
-  };
-};
-
-export const configurePostgresEventStore = (
-  options: PostgresEventStoreOptions,
-): Effect.Effect<EventStore<StorableEvent>> => {
-  return Effect.promise(() => createPostgresEventStore(options));
+  return out;
 };
 
 /**
@@ -249,7 +110,8 @@ export const configurePostgresEventStore = (
  * for new events on a short interval (default 1s) and publishes them to a
  * PubSub. Subscribers receive scope-filtered chunks.
  *
- * The poll fiber and PubSub are scoped to the layer's lifetime.
+ * The SQL connection, poll fiber, and PubSub are all scoped to the layer's
+ * lifetime.
  */
 export const EventStorePostgres = (
   options: PostgresEventStoreOptions & {
@@ -260,36 +122,138 @@ export const EventStorePostgres = (
   Layer.scoped(
     EventStoreTag,
     Effect.gen(function* () {
-      const store = yield* configurePostgresEventStore(options);
-      const base = liftStoreToEffect(store);
+      const {
+        databaseUrl,
+        schema = "public",
+        table = "events",
+        maxConnections = 5,
+      } = options;
+      const qt = qualifiedTable(schema, table);
       const interval = options.pollInterval ?? Duration.seconds(1);
 
-      // PubSub for broadcasting new events to subscribers.
+      const sql = yield* Effect.acquireRelease(
+        Effect.tryPromise({
+          try: async () => {
+            const client = postgres(databaseUrl, {
+              max: maxConnections,
+              onnotice: () => {},
+            });
+            await ensureSetup(client, schema, table);
+            return client;
+          },
+          catch: (err) =>
+            createEventStoreError(
+              "ConnectionError",
+              "Failed to connect to Postgres",
+              err,
+            ),
+        }).pipe(Effect.orDie),
+        (client) => Effect.promise(() => client.end({ timeout: 5 }).catch(() => {})),
+      );
+
+      const fetch = (
+        query?: EventStoreQuery,
+      ): Effect.Effect<readonly StorableEvent[], EventStoreError> =>
+        Effect.tryPromise({
+          try: async () => {
+            const q = query ?? { type: "all" as const };
+            switch (q.type) {
+              case "all": {
+                const rows = await sql.unsafe(
+                  `select payload from ${qt} order by ts asc, event_id asc`,
+                );
+                return payloadsFromRows(rows);
+              }
+              case "since": {
+                const rows = await sql.unsafe(
+                  `select payload from ${qt} where ts >= $1 order by ts asc, event_id asc`,
+                  [q.timestamp],
+                );
+                return payloadsFromRows(rows);
+              }
+              case "byScope": {
+                const sinceCond = "since" in q && q.since ? "and ts >= $2" : "";
+                const params = "since" in q && q.since
+                  ? [q.scope, q.since]
+                  : [q.scope];
+                const rows = await sql.unsafe(
+                  `select payload from ${qt} where scope = $1 ${sinceCond} order by ts asc, event_id asc`,
+                  params,
+                );
+                return payloadsFromRows(rows);
+              }
+              case "byCorrelation": {
+                const rows = await sql.unsafe(
+                  `select payload from ${qt} where correlation_id = $1 order by ts asc, event_id asc`,
+                  [q.correlationId],
+                );
+                return payloadsFromRows(rows);
+              }
+              case "byIntent": {
+                const rows = await sql.unsafe(
+                  `select payload from ${qt} where intent_id = $1 order by ts asc, event_id asc`,
+                  [q.intentId],
+                );
+                return payloadsFromRows(rows);
+              }
+            }
+          },
+          catch: (err) =>
+            createEventStoreError("QueryFailed", "Failed to fetch events", err),
+        });
+
+      const appendToStore = (
+        events: readonly StorableEvent[],
+      ): Effect.Effect<void, EventStoreError> =>
+        Effect.tryPromise({
+          try: async () => {
+            await sql.begin(async (tx) => {
+              for (const event of events) {
+                const correlationId = getCorrelationId(event);
+                const intentId = getIntentId(event);
+                await tx.unsafe(
+                  `insert into ${qt}
+                    (event_id, ts, scope, type, correlation_id, intent_id, payload)
+                  values
+                    ($1, $2, $3, $4, $5, $6, $7)
+                  on conflict (event_id) do nothing`,
+                  [
+                    event.eventId,
+                    event.timestamp,
+                    event.scope,
+                    event.type,
+                    correlationId ?? null,
+                    intentId ?? null,
+                    event,
+                  ],
+                );
+              }
+            });
+          },
+          catch: (err) =>
+            createEventStoreError(
+              "AppendFailed",
+              "Failed to append events",
+              err,
+            ),
+        });
+
       const pubsub = yield* PubSub.unbounded<readonly StorableEvent[]>();
 
       // Track the latest timestamp we've seen across ALL scopes.
-      // The poll fiber queries for events newer than this.
       let cursor: string | undefined;
 
-      // Initialize cursor from the latest event in the store.
-      // If this fails, the layer can't start — die.
-      const initResult = yield* base.fetch({ type: "all" }).pipe(Effect.orDie);
+      const initResult = yield* fetch({ type: "all" }).pipe(Effect.orDie);
       if (initResult.length > 0) {
         cursor = initResult[initResult.length - 1].timestamp;
       }
 
       // Background poll fiber: queries for new events and publishes to PubSub.
       yield* Effect.gen(function* () {
-        const result = yield* base.fetch(
-          cursor
-            ? { type: "since", timestamp: cursor }
-            : { type: "all" },
+        const result = yield* fetch(
+          cursor ? { type: "since", timestamp: cursor } : { type: "all" },
         );
 
-        // Filter out events we've already seen (since is >=, not >).
-        // We use eventId dedup via a cursor approach: skip events at
-        // exactly the cursor timestamp that we already delivered.
-        // Simpler: just advance cursor past what we've seen.
         const newEvents = cursor
           ? result.filter((e) => e.timestamp > cursor!)
           : result;
@@ -300,23 +264,21 @@ export const EventStorePostgres = (
         }
       }).pipe(
         Effect.catchAll((err) =>
-          Effect.logWarning("EventStore poll failed", { error: err }),
+          Effect.logWarning("EventStore poll failed", { error: err })
         ),
         Effect.repeat(Schedule.spaced(interval)),
         Effect.forkScoped,
       );
 
       const service: EventStoreService = {
-        fetch: base.fetch,
+        fetch,
 
         append: (events) =>
           Effect.gen(function* () {
-            yield* base.append(events);
-            // Also publish directly for zero-latency delivery to local
-            // subscribers (the poll fiber will skip these via cursor).
+            yield* appendToStore(events);
             if (events.length > 0) {
               yield* PubSub.publish(pubsub, events);
-              // Advance cursor so poll fiber doesn't re-deliver.
+              // Advance cursor so the poll fiber doesn't re-deliver.
               const last = events[events.length - 1];
               if (!cursor || last.timestamp > cursor) {
                 cursor = last.timestamp;
@@ -328,16 +290,14 @@ export const EventStorePostgres = (
           Stream.unwrapScoped(
             Effect.gen(function* () {
               const queue = yield* PubSub.subscribe(pubsub);
-
               return Stream.fromQueue(queue).pipe(
-                Stream.map((chunk) => {
-                  const filtered = chunk.filter((e) => {
+                Stream.map((chunk) =>
+                  chunk.filter((e) => {
                     if (e.scope !== scope) return false;
                     if (since && e.timestamp <= since) return false;
                     return true;
-                  });
-                  return filtered;
-                }),
+                  })
+                ),
                 Stream.filter((chunk) => chunk.length > 0),
               );
             }),

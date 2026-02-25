@@ -2,7 +2,7 @@
 // Event routes — submit events and read the event log
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
-import { Effect } from "effect";
+import { Effect, Either } from "effect";
 import { Scope as makeScope } from "@bernays/server/core";
 import type { ServerContext } from "$/context.ts";
 import { submitEvent } from "$/bus.ts";
@@ -192,9 +192,11 @@ export const eventsRoutes = (ctx: ServerContext) => {
       query = { type: "all" };
     }
 
-    const result = await ctx.eventStore.fetch(query);
+    const fetchResult = await Effect.runPromise(
+      Effect.either(ctx.eventStore.fetch(query)),
+    );
 
-    if (!result.ok) {
+    if (Either.isLeft(fetchResult)) {
       return c.json(
         EventsListResponseSchema.parse({
           events: [],
@@ -204,8 +206,8 @@ export const eventsRoutes = (ctx: ServerContext) => {
       );
     }
 
-    const total = result.value.length;
-    const page = result.value.slice(offset, offset + limit);
+    const total = fetchResult.right.length;
+    const page = fetchResult.right.slice(offset, offset + limit);
 
     return c.json(
       EventsListResponseSchema.parse({

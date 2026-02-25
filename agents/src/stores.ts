@@ -4,8 +4,8 @@
 import { Effect, Option } from "effect";
 import {
   type ConfigStoreService,
-  configurePostgresEventStore,
   createPostgresConfigStore,
+  EventStorePostgres,
 } from "@bernays/server/store";
 import {
   createPostgresLinkedInAccountStore,
@@ -80,9 +80,7 @@ export const initializeStores = async () => {
   const accountStore = await createPostgresLinkedInAccountStore({
     connectionString: databaseUrl,
   });
-  const eventStore = await Effect.runPromise(
-    configurePostgresEventStore({ databaseUrl }),
-  );
+  const eventStoreLayer = EventStorePostgres({ databaseUrl });
 
   const configId = BrowserConfigId("main");
   const participantId = ParticipantId("linkedin", config.accountId);
@@ -94,5 +92,5 @@ export const initializeStores = async () => {
     configId,
   );
 
-  return { configStore, accountStore, eventStore, account };
+  return { configStore, accountStore, eventStoreLayer, account };
 };

@@ -1,13 +1,12 @@
 // api/src/context.ts
 // Shared server context — stores, registries, projections
 
-import { Effect, Layer } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import {
   type ConfigStoreService,
-  configurePostgresEventStore,
-  type EventStore,
-  EventStoreLive,
-  type StorableEvent,
+  EventStorePostgres,
+  EventStoreTag,
+  type EventStoreService,
 } from "@bernays/server/store";
 import {
   type AnyPlatform,
@@ -30,6 +29,7 @@ import {
 } from "@bernays/server/core";
 import { BriefingEventSchema } from "@bernays/server/events";
 import type { BaseAccount } from "@bernays/server/views";
+import type { StorableEvent } from "@bernays/server/store";
 
 // Plugins
 import {
@@ -50,8 +50,8 @@ export interface AccountStoreView {
 }
 
 export interface ServerContext {
-  /** The raw event store — used by the GET /events endpoint for unscoped queries. */
-  readonly eventStore: EventStore<StorableEvent>;
+  /** The event store service — used by the GET /events endpoint for unscoped queries. */
+  readonly eventStore: EventStoreService;
   readonly configStore: ConfigStoreService;
   readonly registry: PlatformRegistry;
   readonly injectors: ReadonlyMap<Scope, Injector<StorableEvent>>;
@@ -65,8 +65,8 @@ export interface ServerContext {
 
 // deno-lint-ignore no-explicit-any
 const asPlatform = (
-  p: PlatformDefinition<any, any, any, any, any, any, any, any, any>,
-): AnyPlatform => p;
+  p: PlatformDefinition<any, any, any, any, any, any, any, any, any, any>,
+): AnyPlatform => p as AnyPlatform;
 
 const PLATFORMS: readonly AnyPlatform[] = [
   asPlatform(linkedInPlatform),
@@ -85,10 +85,13 @@ export const createServerContext = async (
 ): Promise<ServerContext> => {
   const { databaseUrl } = config;
 
-  // Initialize stores
-  const eventStore = await Effect.runPromise(
-    configurePostgresEventStore({ databaseUrl }),
+  // Build a managed runtime for the EventStore so the Layer's scope
+  // (SQL connection + poll fiber) stays alive for the server's lifetime.
+  const eventStoreRuntime = ManagedRuntime.make(
+    EventStorePostgres({ databaseUrl }),
   );
+  const eventStore = await eventStoreRuntime.runPromise(EventStoreTag);
+
   const { createPostgresConfigStore } = await import("@bernays/server/store");
   const configStore = await createPostgresConfigStore({
     connectionString: databaseUrl,
@@ -97,8 +100,10 @@ export const createServerContext = async (
   // Register platforms
   const registry = createPlatformRegistry(PLATFORMS);
 
-  // Create injectors and projections per scope via layers
-  const eventStoreLayer = EventStoreLive(eventStore);
+  // Provide a Layer.succeed layer for injection/projection layers so they
+  // share the same already-initialised EventStoreService.
+  const eventStoreLayer = Layer.succeed(EventStoreTag, eventStore);
+
   const injectors = new Map<Scope, Injector<StorableEvent>>();
   const projections = new Map<Scope, Projection<StorableEvent>>();
 
@@ -106,11 +111,9 @@ export const createServerContext = async (
     const scope = platform.scope;
     const schema = platform.eventSchema;
 
-    // Create scope-specific tags
     const injTag = makeInjectorTag<StorableEvent>(`${scope}/Injection`);
     const projTag = makeProjectionTag<StorableEvent>(`${scope}/Projection`);
 
-    // Build layers
     const injLayer = makeInjectionLayer(injTag, scope, schema).pipe(
       Layer.provide(eventStoreLayer),
     );
@@ -118,7 +121,6 @@ export const createServerContext = async (
       Layer.provide(eventStoreLayer),
     );
 
-    // Resolve services
     const inj = await Effect.runPromise(
       Effect.provide(injTag, injLayer),
     );

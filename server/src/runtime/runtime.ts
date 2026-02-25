@@ -3,7 +3,6 @@
 
 import { Context, Effect, Layer } from "effect";
 import type { Scope as ScopeType } from "$/core/branded.ts";
-import type { EventStore, StorableEvent } from "$/store/mod.ts";
 import type { BrowserPoolService } from "$/browsers/mod.ts";
 import type { BaseAccount } from "$/views/browser.ts";
 import type { PlatformDefinition } from "$/platforms/mod.ts";
@@ -13,7 +12,6 @@ import type { PlatformDefinition } from "$/platforms/mod.ts";
 // =============================================================================
 
 export interface RuntimeConfig {
-  readonly eventStore: EventStore<StorableEvent>;
   readonly browserPool: BrowserPoolService;
   readonly platforms: ReadonlyMap<
     ScopeType,
@@ -55,9 +53,6 @@ export interface RuntimeService {
     scope: ScopeType,
   ) => Effect.Effect<readonly BaseAccount<string>[]>;
 
-  /** Get the event store */
-  readonly eventStore: EventStore<StorableEvent>;
-
   /** Get the browser pool */
   readonly browserPool: BrowserPoolService;
 }
@@ -76,7 +71,7 @@ export class Runtime extends Context.Tag("automation/Runtime")<
  * Create a Runtime service implementation from config.
  */
 const makeRuntimeService = (config: RuntimeConfig): RuntimeService => {
-  const { eventStore, browserPool, platforms, accountLoader } = config;
+  const { browserPool, platforms, accountLoader } = config;
 
   return {
     start: Effect.void,
@@ -86,8 +81,6 @@ const makeRuntimeService = (config: RuntimeConfig): RuntimeService => {
     getPlatform: (scope) => platforms.get(scope),
 
     getAccounts: (scope) => Effect.promise(() => accountLoader(scope)),
-
-    eventStore,
 
     browserPool,
   };

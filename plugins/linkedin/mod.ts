@@ -26,7 +26,7 @@ import type { LinkedInBrowser } from "./browser.ts";
 import type { LinkedInContact } from "./contact.ts";
 
 // Behavior
-import { linkedInBehavior } from "./behavior.ts";
+import { linkedInBehavior, type LinkedInPluginState } from "./behavior.ts";
 
 export const linkedInPlatform: PlatformDefinition<
   LinkedInScope,
@@ -37,7 +37,8 @@ export const linkedInPlatform: PlatformDefinition<
   LinkedInInbox,
   LinkedInAccount,
   LinkedInBrowser,
-  LinkedInContact
+  LinkedInContact,
+  LinkedInPluginState
 > = {
   scope: LINKEDIN_SCOPE,
   identity: "linkedin",
@@ -141,7 +142,7 @@ export {
 } from "./account.ts";
 
 // Behavior
-export { linkedInBehavior } from "./behavior.ts";
+export { linkedInBehavior, type LinkedInPluginState } from "./behavior.ts";
 
 // Service (Platform Tag & Actions)
 export {

@@ -47,10 +47,6 @@ export interface BaseThreadView<TAnchor> {
 
 // Helper Functions
 
-/**
- * Calculate unread count from messages.
- * Unread = messages after last own message that aren't own.
- */
 export const calculateUnreadCount = (
   messages: readonly MessageView[],
   ownerId: ParticipantId,

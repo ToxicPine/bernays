@@ -34,5 +34,3 @@ export {
   type NodeState,
   type ThreadGraph,
 } from "./graph.ts";
-
-export { extractParticipants, toMessageViews } from "./behavior-utils.ts";

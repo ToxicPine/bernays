@@ -14,17 +14,20 @@ import {
 } from "../lib/mod.ts";
 import {
   type ConfigStoreService,
-  configurePostgresEventStore,
   createPostgresConfigStore,
-  type EventStore,
-  type StorableEvent,
+  EventStorePostgres,
+  EventStoreTag,
+  type EventStoreService,
 } from "@bernays/server/store";
+import { ManagedRuntime } from "effect";
 import {
   type BrowserPoolService,
   makeBrowserbaseBackend,
 } from "@bernays/server/browsers";
 import {
   Journal,
+  JournalInjectionLive,
+  JournalProjectionLive,
   makeJournalLayer,
   makePlatformLayer,
 } from "@bernays/server/runtime";
@@ -34,6 +37,8 @@ import {
   type LinkedInAccountStoreService,
   LinkedInPlatform,
   linkedInPlatform,
+  LinkedInProjection,
+  LinkedInProjectionLive,
   makeLinkedInActions,
 } from "@bernays/plugins/linkedin";
 import { BrowserConfigId, ParticipantId } from "@bernays/server/core";
@@ -43,7 +48,8 @@ const TEST_BROWSER_ID = "e2e-browserbase-browser";
 
 interface Context {
   config: E2EConfig;
-  eventStore: EventStore<StorableEvent>;
+  eventStore: EventStoreService;
+  eventStoreRuntime: ManagedRuntime.ManagedRuntime<EventStoreTag, never>;
   configStore: ConfigStoreService;
   accountStore: LinkedInAccountStoreService;
   browserPool: BrowserPoolService;
@@ -61,9 +67,10 @@ Deno.test.beforeAll(async () => {
     config.browserbaseProjectId,
   );
 
-  const eventStore = await Effect.runPromise(
-    configurePostgresEventStore({ databaseUrl: config.databaseUrl }),
+  const eventStoreRuntime = ManagedRuntime.make(
+    EventStorePostgres({ databaseUrl: config.databaseUrl }),
   );
+  const eventStore = await eventStoreRuntime.runPromise(EventStoreTag);
   const configStore = await createPostgresConfigStore({
     connectionString: config.databaseUrl,
   });
@@ -97,6 +104,7 @@ Deno.test.beforeAll(async () => {
   ctx = {
     config,
     eventStore,
+    eventStoreRuntime,
     configStore,
     accountStore,
     browserPool,
@@ -111,6 +119,7 @@ Deno.test.afterAll(async () => {
   if (Deno.args.includes("--cleanup") && ctx?.config) {
     await cleanupTestData(ctx.config.databaseUrl);
   }
+  await ctx?.eventStoreRuntime.dispose();
   ctx = undefined;
 });
 
@@ -141,9 +150,10 @@ Deno.test({
     });
 
     await t.step("verify postgres connectivity", async () => {
-      const result = await ctx!.eventStore.fetch({ type: "all" });
-      if (!result.ok) throw new Error(result.error.message);
-      console.log(`Events in DB: ${result.value.length}`);
+      const events = await Effect.runPromise(
+        ctx!.eventStore.fetch({ type: "all" }),
+      );
+      console.log(`Events in DB: ${events.length}`);
     });
 
     await t.step("launch browser via pool", async () => {
@@ -161,17 +171,19 @@ Deno.test({
 
     await t.step("run sockpuppet", async () => {
       const actions = makeLinkedInActions(ctx!.browserPool, ctx!.account);
-      const platformLayer = makePlatformLayer(LinkedInPlatform, {
+      const platformLayer = makePlatformLayer(LinkedInPlatform, LinkedInProjection, {
         platform: linkedInPlatform,
         account: ctx!.account,
-        eventStore: ctx!.eventStore,
-        browserPool: ctx!.browserPool,
         actions,
       });
-      const journalLayer = makeJournalLayer({
-        participantId: ctx!.account.id,
-        eventStore: ctx!.eventStore,
-      });
+      const journalLayer = makeJournalLayer(ctx!.account.id);
+
+      const sockpuppetLayer = Layer.merge(platformLayer, journalLayer).pipe(
+        Layer.provide(LinkedInProjectionLive),
+        Layer.provide(JournalInjectionLive),
+        Layer.provide(JournalProjectionLive),
+        Layer.provide(Layer.succeed(EventStoreTag, ctx!.eventStore)),
+      );
 
       const program = Effect.gen(function* () {
         const platform = yield* LinkedInPlatform;
@@ -184,7 +196,7 @@ Deno.test({
       });
 
       const result = await Effect.runPromise(
-        Effect.provide(program, Layer.merge(platformLayer, journalLayer)),
+        Effect.provide(program, sockpuppetLayer),
       );
       console.log(
         `Sockpuppet result: ${result.threads} threads, ${result.entries} journal entries`,

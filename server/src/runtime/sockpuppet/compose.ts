@@ -11,19 +11,26 @@ import type { Briefing } from "$/briefing/service.ts";
  * Compose Platform, Journal, and Briefing layers into a single layer.
  * Generic over the platform tag type.
  */
-export const makeSockpuppetLayer = <TPlatform>(
+export function makeSockpuppetLayer<TPlatform>(
+  platformLayer: Layer.Layer<TPlatform>,
+  journalLayer: Layer.Layer<Journal>,
+  briefingLayer: Layer.Layer<Briefing>,
+): Layer.Layer<TPlatform | Journal | Briefing>;
+export function makeSockpuppetLayer<TPlatform>(
+  platformLayer: Layer.Layer<TPlatform>,
+  journalLayer: Layer.Layer<Journal>,
+): Layer.Layer<TPlatform | Journal>;
+export function makeSockpuppetLayer<TPlatform>(
   platformLayer: Layer.Layer<TPlatform>,
   journalLayer: Layer.Layer<Journal>,
   briefingLayer?: Layer.Layer<Briefing>,
-): Layer.Layer<TPlatform | Journal | Briefing> => {
+) {
   const base = Layer.merge(platformLayer, journalLayer);
   if (briefingLayer) {
-    return Layer.merge(base, briefingLayer) as Layer.Layer<
-      TPlatform | Journal | Briefing
-    >;
+    return Layer.merge(base, briefingLayer);
   }
-  return base as unknown as Layer.Layer<TPlatform | Journal | Briefing>;
-};
+  return base;
+}
 
 // Sockpuppet Execution
 

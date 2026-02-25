@@ -227,6 +227,7 @@ export interface PlatformDefinition<
  * Type-erased platform definition for schema collection.
  * Used when you need to work with platforms without knowing their specific types.
  */
+// deno-lint-ignore no-explicit-any
 export type AnyPlatform = PlatformDefinition<
   Scope,
   string,
@@ -237,7 +238,7 @@ export type AnyPlatform = PlatformDefinition<
   BaseAccount<string>,
   BaseBoundBrowser,
   BaseContact<string>,
-  unknown
+  any
 >;
 
 // =============================================================================

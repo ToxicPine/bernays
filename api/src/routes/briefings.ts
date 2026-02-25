@@ -11,7 +11,6 @@ import { Effect } from "effect";
 import { AgentId, BRIEFING_SCOPE } from "@bernays/server/core";
 import {
   type BriefingEvent,
-  BriefingEventSchema,
 } from "@bernays/server/events";
 import { deriveBriefings, getBriefing } from "@bernays/server/briefing";
 import type { ServerContext } from "$/context.ts";

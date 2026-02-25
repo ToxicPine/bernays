@@ -4,6 +4,7 @@
 import {
   type BrowserConfigId,
   ParticipantId,
+  ParticipantIdFromString,
   type ParticipantId as ParticipantIdType,
   type ThreadId,
 } from "@bernays/server/core";
@@ -11,12 +12,11 @@ import {
   applyGraphEvent,
   calculateUnreadCount,
   emptyGraphState,
-  extractParticipants,
   type GraphMessage,
   type GraphState,
+  graphNodesToMessages,
   materializeThreadGraphs,
   type ThreadGraph,
-  toMessageViews,
 } from "@bernays/server/views";
 import type { PlatformBehavior } from "@bernays/server/platforms";
 
@@ -34,7 +34,7 @@ type RedditScope = typeof REDDIT_SCOPE;
 
 // Plugin State
 
-interface RedditPluginState {
+export interface RedditPluginState {
   graph: GraphState;
   browserStatus: Map<string, {
     authStatus: RedditAuthStatus;
@@ -42,7 +42,6 @@ interface RedditPluginState {
     bannedReason?: string;
     rateLimitedUntil?: string;
   }>;
-  // Track which accounts have been banned (for updating all browsers)
   bannedAccounts: Map<string, string | undefined>; // participantId -> reason
   contacts: Map<string, {
     username?: string;
@@ -61,13 +60,18 @@ const toRedditThread = (
   graph: ThreadGraph<RedditScope, GraphMessage, RedditAnchor>,
   participantId: ParticipantIdType<"reddit">,
 ): RedditThread => {
-  const messages = toMessageViews<"reddit">(graph);
+  const messages = graphNodesToMessages(graph.nodes).map((m) => ({
+    id: m.canonicalId,
+    senderId: ParticipantIdFromString<"reddit">(m.senderId),
+    content: m.content,
+    timestamp: m.timestamp,
+  }));
   const unreadCount = calculateUnreadCount(messages, participantId);
 
   return {
     threadId: graph.id,
     messages,
-    participants: extractParticipants<"reddit">(graph.anchor),
+    participants: graph.anchor.participants.map((id) => ({ id })),
     anchor: graph.anchor,
     unreadCount,
     lastActivity: graph.lastActivity,
@@ -209,7 +213,12 @@ export const redditBehavior: PlatformBehavior<
     let unreadTotal = 0;
 
     for (const thread of threads.values()) {
-      const messages = toMessageViews<"reddit">(thread);
+      const messages = graphNodesToMessages(thread.nodes).map((m) => ({
+        id: m.canonicalId,
+        senderId: ParticipantIdFromString<"reddit">(m.senderId),
+        content: m.content,
+        timestamp: m.timestamp,
+      }));
       const unreadCount = calculateUnreadCount(messages, participantId);
       unreadTotal += unreadCount;
 
