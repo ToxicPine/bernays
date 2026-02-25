@@ -103,14 +103,15 @@ Everything complex is hidden behind these three interfaces.
 Events flow through one path:
 
 ```
-Source → Injection → EventStore → Projection → Plugin State (Ref) → Sockpuppet
+Source → Injection → EventStore → Projection (subscribe) → Plugin State (Ref) → Sockpuppet
 ```
 
 Auth events, message events, rate limit events—all platform-scoped, all the same
 pipe. No separate loops for different event types. Injection validates and
-persists to the EventStore. Projection reads validated events from the store.
-Plugin state is maintained by folding events from Projection into a `Ref`.
-Sockpuppets read from the state via pure materialization.
+persists to the EventStore. The EventStore pushes new events to subscribers.
+Projection wraps the store's subscribe stream with Zod validation. A background
+fiber folds events from the Projection stream into plugin-wide state held in a
+`Ref`. Sockpuppets read from the state via pure materialization.
 
 Events enter the system from two sources:
 
@@ -126,19 +127,19 @@ Inbox, threads, auth state, rate limits, contacts—all derived from the event
 stream by folding events into plugin-wide state. Sockpuppets read from this
 state via pure materialization functions.
 
-How and when events flow from the store into the plugin state is an
-implementation detail behind the EventStore/Projection boundary. Today, the
-Projection polls the store. If the EventStore is later backed by a reactive
-database, the Projection can surface change notifications without any code
-above it changing.
+The EventStore is reactive: it exposes a `subscribe` stream that delivers new
+events as they arrive. Projection wraps this stream with Zod validation.
+How the stream is produced is an implementation detail inside the EventStore —
+in-memory stores push directly on append; Postgres stores poll internally.
+Nothing above the Projection knows or cares.
 
 This enables:
 
 - **Restartability**: Rebuild state by replaying events from the store
 - **Auditability**: Complete history of everything that happened
 - **Consistency**: Single source of truth, no sync issues
-- **Swappable reactivity**: The EventStore boundary hides whether reads are
-  polled or pushed
+- **Swappable backend**: The EventStore boundary hides whether the stream is
+  backed by a PubSub, a poll loop, or a native change stream
 
 ### 4. Scope-Based Event Routing
 
@@ -211,20 +212,17 @@ graph LR
     ACT[Platform Actions] --> INJ[Injection]
     API[HTTP API] --> INJ
     INJ --> ES[(EventStore)]
-    ES --> PR[Projection]
-    PR --> REF[Ref / Plugin State]
-    REF --> PL[Platform Service]
-    PL --> SP[Sockpuppet]
+    ES -->|"subscribe stream"| PR[Projection]
+    PR -->|"background fiber folds"| PL[Platform Service]
+    PL -->|"Ref.get + materialize"| SP[Sockpuppet]
 ```
 
 All events flow through Injection, which validates via Zod and persists to the
-append-only event store. Projection reads validated events from the store. Plugin
-state is built by folding events from Projection into a `Ref`. The platform
-service materializes views from this state on read.
-
-How the Projection surfaces new events—polling, change notifications, or
-reactive push—depends on the EventStore implementation. The abstraction above
-the Projection doesn't change either way.
+append-only event store. The EventStore pushes new events to subscribers via a
+scoped stream. Projection wraps this stream with Zod validation. A background
+fiber folds events from the stream into plugin-wide state held in a `Ref`
+(internal to the platform layer). The platform service materializes views from
+this state via pure functions on read.
 
 ---
 
@@ -911,8 +909,8 @@ graph TB
     API --> INJ
     PL -->|"actions emit events"| INJ
     INJ --> ES
-    PR --> ES
-    PL -->|"query events"| PR
+    ES -->|"subscribe stream"| PR
+    PL -->|"subscribe + fold into Ref"| PR
     PL --> BP
     JN --> INJ
     JN --> PR
@@ -948,8 +946,8 @@ class Database extends Context.Tag("Database")<Database, DatabaseService>() {}
 
 ### EventStore
 
-Append-only log, validates base shape only. Provided as an Effect service via
-`Context.Tag`:
+Append-only log with reactive subscriptions, validates base shape only. Provided
+as an Effect service via `Context.Tag`:
 
 ```typescript
 type EventQuery =
@@ -958,21 +956,39 @@ type EventQuery =
   | { readonly tag: "byCorrelation"; readonly correlationId: CorrelationId };
 
 interface EventStoreService {
+  /** Append events atomically (deduplicated by eventId). */
   readonly append: (
     events: readonly StorableEvent[],
   ) => Effect.Effect<void, EventStoreError>;
-  readonly query: (
-    q: EventQuery,
+
+  /** One-shot query (for startup hydration and API reads). */
+  readonly fetch: (
+    query?: EventQuery,
   ) => Effect.Effect<readonly StorableEvent[], EventStoreError>;
+
+  /** Scope-filtered stream of new events. How the stream is produced is
+   *  an implementation detail: in-memory stores push on append via PubSub,
+   *  Postgres stores poll internally on a short interval. */
+  readonly subscribe: (
+    scope: Scope,
+    since?: string,
+  ) => Stream.Stream<readonly StorableEvent[], EventStoreError>;
 }
 
-class EventStore
-  extends Context.Tag("EventStore")<EventStore, EventStoreService>() {}
+class EventStoreTag
+  extends Context.Tag("EventStore")<EventStoreTag, EventStoreService>() {}
 ```
 
-Implementations (Postgres, file, in-memory) provide `EventStoreService` via
-`Layer.succeed(EventStore, ...)` or `Layer.effect(EventStore, ...)`. Consumers
-declare `EventStore` as a dependency rather than accepting it as a config field.
+Implementations (Postgres, in-memory) provide `EventStoreService` via
+`Layer.succeed(EventStoreTag, ...)` or `Layer.effect(EventStoreTag, ...)`.
+Consumers declare `EventStoreTag` as a dependency rather than accepting a raw
+EventStore as a config field.
+
+| Backend | `subscribe` strategy |
+|---------|----------------------|
+| In-memory | `append` pushes to an internal `PubSub`. `subscribe` reads with scope filter. Zero latency. |
+| Postgres | Background fiber polls `WHERE scope = $1 AND ts > $2` on a short interval. Yields chunks via `Stream.async`. |
+| Future reactive DB | Native change stream, wrapped as `Stream`. |
 
 ### ConfigStore
 
@@ -1095,14 +1111,19 @@ interface Injection<TEvent extends StorableEvent> {
 }
 ```
 
-### Projection (validated reads)
+### Projection (validated reads + reactive stream)
 
 Scope-filtered, Zod-validated reads from the store:
 
 ```typescript
 interface Projection<TEvent extends StorableEvent> {
   readonly scope: Scope;
+
+  /** One-shot query (for startup hydration and API reads). */
   readonly query: (since?: string) => Effect.Effect<readonly TEvent[], EventStoreError>;
+
+  /** Reactive stream of validated events (for background state fiber). */
+  readonly subscribe: (since?: string) => Stream.Stream<readonly TEvent[], EventStoreError>;
 }
 ```
 
@@ -1111,12 +1132,10 @@ versions) are filtered out with warnings, not crashes. This is the **read-time
 Zod boundary** that handles schema evolution, distinct from the write-time
 validation in Injection.
 
-How the Projection surfaces events — polling, change notifications, or reactive
-push — is an implementation detail that depends on the EventStore. Today,
-`query()` polls. If the EventStore is later backed by a reactive database, the
-Projection can gain a `subscribe` or streaming interface without any code above
-it changing. The reactivity boundary lives inside EventStore and Projection, not
-above them.
+`query()` is a one-shot read for startup hydration and API requests.
+`subscribe()` wraps the EventStore's reactive `subscribe` stream with the same
+Zod validation. The platform layer uses `query()` to hydrate initial state, then
+`subscribe()` in a background fiber to keep the state current.
 
 ---
 
@@ -1192,9 +1211,9 @@ export const makeLinkedInActions = (
 
 ### Platform Layer Factory
 
-The `makePlatformLayer` function wires reactive state, the EventBus, and the
-background fiber. It is generic over the context tag with a tight constraint
-linking the tag's service type to the exact `PlatformService` parameters:
+The `makePlatformLayer` function wires reactive state via a background fiber. It
+is generic over the context tag with a tight constraint linking the tag's service
+type to the exact `PlatformService` parameters:
 
 ```typescript
 // runtime/sockpuppet/platform-runtime.ts
@@ -1214,24 +1233,33 @@ export function makePlatformLayer<
     readonly account: TAccount;
     readonly actions: TActions;
   },
-): Layer.Layer<Context.Tag.Identifier<TTag>, never, Injection<TEvent> | Projection<TEvent> | BrowserPool> {
+): Layer.Layer<Context.Tag.Identifier<TTag>, never, Projection<TEvent> | BrowserPool> {
   return Layer.scoped(tag, Effect.gen(function* () {
     const behavior = platform.behavior;
-    const projection = yield* Projection<TEvent>;
+    const projection = yield* ProjectionTag;
 
-    // 1. Build state from events via Projection
+    // 1. Hydrate: full fold from existing events
     const events = yield* projection.query();
     const state = behavior.emptyState();
     for (const event of events) behavior.applyEvent(state, event);
     const stateRef = yield* Ref.make(state);
 
-    // NOTE: Today this is a one-time fold at startup. When the EventStore
-    // supports reactive notifications, the Projection can surface new
-    // events incrementally and the state fiber applies them to the Ref.
-    // That change lives inside the Projection/EventStore boundary —
-    // nothing above here needs to change.
+    // 2. Subscribe: background fiber folds new events into state
+    const lastTimestamp = events.length > 0
+      ? events[events.length - 1].timestamp
+      : undefined;
 
-    // 2. Build service (reads from ref + materializes)
+    yield* projection.subscribe(lastTimestamp).pipe(
+      Stream.runForEach((chunk) =>
+        Ref.update(stateRef, (s) => {
+          for (const event of chunk) behavior.applyEvent(s, event);
+          return s;
+        })
+      ),
+      Effect.forkScoped,  // runs for the lifetime of the layer
+    );
+
+    // 3. Service: reads from ref + materializes (pure, no IO)
     return {
       scope: platform.scope,
       identity: platform.identity,
@@ -1262,11 +1290,13 @@ Key type design:
 
 - `TScope extends Scope` ensures alignment with `StorableEvent.scope`
 - The `TTag` constraint links to exact `PlatformService` type parameters
-- `Injection`, `Projection`, and `BrowserPool` are Effect service dependencies
-  (via `Context.Tag`), not config fields. The platform layer never sees the raw
+- `Projection` and `BrowserPool` are Effect service dependencies (via
+  `Context.Tag`), not config fields. The platform layer never sees the raw
   `EventStore`
 - `Context.Tag.Identifier<TTag>` extracts the identifier from
   `typeof LinkedInPlatform`
+- The background fiber is scoped to the layer's lifetime — when the layer is
+  released (sockpuppet exits), the fiber is interrupted automatically
 
 ### Usage in Sockpuppets
 
