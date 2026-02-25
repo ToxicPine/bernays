@@ -84,11 +84,12 @@ export type PlatformMethod<
 export type ActionsRecord = object;
 
 // =============================================================================
-// Platform Behavior (Pure Derivation)
+// Platform Behavior (Incremental State + Pure Materialization)
 // =============================================================================
 
 /**
- * PlatformBehavior encapsulates pure derivation logic for a platform.
+ * PlatformBehavior encapsulates incremental state management and pure view
+ * materialization for a platform.
  *
  * Two scope parameters enable the "dojo" pattern:
  * - TScope: The `scope` field on events (e.g., "linkedin" or "linkedindojo")
@@ -97,7 +98,13 @@ export type ActionsRecord = object;
  * For production platforms, these are the same.
  * For dojo, they differ (events scoped to dojo, but identity shared with production).
  *
- * The behavior only does pure derivation. Actions live in the service layer.
+ * TPluginState is fully opaque to the framework. Each plugin defines its own
+ * state type, reducer logic, and materialization strategy. The framework wires
+ * emptyState, applyEvent, and materialize* through the Projection/Ref machinery
+ * but never inspects or constrains what TPluginState contains.
+ *
+ * The behavior only does pure derivation/materialization. Actions live in the
+ * service layer.
  */
 export interface PlatformBehavior<
   TScope extends Scope,
@@ -109,56 +116,59 @@ export interface PlatformBehavior<
   TAccount extends BaseAccount<TIdentity>,
   TBrowser extends BaseBoundBrowser = BaseBoundBrowser,
   TContact extends BaseContact<TIdentity> = BaseContact<TIdentity>,
+  TPluginState = unknown,
 > {
   readonly scope: TScope;
   readonly identity: TIdentity;
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Derivation — fold events into views (pure functions)
+  // Incremental state management
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /** Create an empty plugin-wide state. */
+  readonly emptyState: () => TPluginState;
+
+  /** Apply a single event to the plugin state. Mutates in place. */
+  readonly applyEvent: (state: TPluginState, event: TEvent) => void;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // View materialization — pure projections from accumulated state
   // ─────────────────────────────────────────────────────────────────────────
 
   /**
-   * Derive inbox view from events for a specific account.
+   * Materialize inbox view from plugin state for a specific account.
    * Returns thread summaries indexed by thread ID.
    */
-  readonly deriveInbox: (
-    events: readonly TEvent[],
+  readonly materializeInbox: (
+    state: TPluginState,
     participantId: ParticipantId<TIdentity>,
   ) => TInbox;
 
   /**
-   * Derive thread view from events for a specific thread.
+   * Materialize thread view from plugin state for a specific thread.
    * Returns undefined if thread doesn't exist.
    */
-  readonly deriveThread: (
-    events: readonly TEvent[],
+  readonly materializeThread: (
+    state: TPluginState,
     threadId: ThreadId,
   ) => TThread | undefined;
 
   /**
-   * Derive browser status from events.
+   * Materialize browser status from plugin state.
    * Returns platform-specific browser views with auth status, rate limits, etc.
-   *
-   * @param events - All events for this scope
-   * @param account - The account with browser bindings
-   * @param runningConfigIds - Set of currently running browser config IDs
    */
-  readonly deriveBrowsers: (
-    events: readonly TEvent[],
+  readonly materializeBrowsers: (
+    state: TPluginState,
     account: TAccount,
     runningConfigIds: ReadonlySet<BrowserConfigId>,
   ) => readonly TBrowser[];
 
   /**
-   * Derive contact info from events for a specific participant.
-   * Optional - not all platforms have rich contact info.
-   *
-   * @param events - All events for this scope
-   * @param participantId - The participant to look up
-   * @returns Contact info or undefined if not found
+   * Materialize contact info from plugin state for a specific participant.
+   * Optional — not all platforms have rich contact info.
    */
-  readonly deriveContact?: (
-    events: readonly TEvent[],
+  readonly materializeContact?: (
+    state: TPluginState,
     participantId: ParticipantId<TIdentity>,
   ) => TContact | undefined;
 }
@@ -187,6 +197,7 @@ export interface PlatformDefinition<
   TAccount extends BaseAccount<TIdentity>,
   TBrowser extends BaseBoundBrowser = BaseBoundBrowser,
   TContact extends BaseContact<TIdentity> = BaseContact<TIdentity>,
+  TPluginState = unknown,
 > {
   readonly scope: TScope;
   readonly identity: TIdentity;
@@ -203,7 +214,8 @@ export interface PlatformDefinition<
     TInbox,
     TAccount,
     TBrowser,
-    TContact
+    TContact,
+    TPluginState
   >;
 }
 
@@ -224,7 +236,8 @@ export type AnyPlatform = PlatformDefinition<
   BaseInboxView<unknown>,
   BaseAccount<string>,
   BaseBoundBrowser,
-  BaseContact<string>
+  BaseContact<string>,
+  unknown
 >;
 
 // =============================================================================

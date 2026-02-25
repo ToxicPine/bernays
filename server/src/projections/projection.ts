@@ -1,22 +1,24 @@
 // src/projections/projection.ts
-// Type-safe, filtered access to the event store
+// Type-safe, filtered access to the event store (read-side mirror of Injection)
 
-import { Effect } from "effect";
+import { Context, Effect, Layer, Stream } from "effect";
 import type { z } from "@zod/zod";
 import type { Scope } from "$/core/branded.ts";
-import type {
-  EventStore,
-  EventStoreError,
-  StorableEvent,
+import {
+  type EventStoreError,
+  EventStoreTag,
+  type StorableEvent,
 } from "$/store/mod.ts";
 
+// =============================================================================
 // Projection Interface
+// =============================================================================
 
 /**
- * Projection provides type-safe, filtered access to the event store.
+ * Projection provides type-safe, filtered, reactive access to the event store.
  *
  * Guarantees:
- * 1. Filtering by scope at the database level
+ * 1. Filtering by scope at the store level
  * 2. Zod validation against the scope's schema
  * 3. Type narrowing to the scope's event union
  *
@@ -25,134 +27,116 @@ import type {
 export interface Projection<TEvent extends StorableEvent> {
   readonly scope: Scope;
 
-  /**
-   * Query events for this scope.
-   * @param since - Optional timestamp to filter events since
-   */
+  /** One-shot query (for startup hydration and API reads). */
   readonly query: (
     since?: string,
   ) => Effect.Effect<readonly TEvent[], EventStoreError>;
+
+  /** Reactive stream of validated events (for background state fiber). */
+  readonly subscribe: (
+    since?: string,
+  ) => Stream.Stream<readonly TEvent[], EventStoreError>;
 }
 
-// Projection Factory
+// =============================================================================
+// Zod validation helper (shared by query and subscribe)
+// =============================================================================
 
-/**
- * Creates a projection for a specific scope.
- *
- * @param scope - The scope to filter events by
- * @param schema - Zod schema to validate and type events
- * @param store - The event store to read from
- */
-export const makeProjection = <TEvent extends StorableEvent>(
-  scope: Scope,
+const validateChunk = <TEvent extends StorableEvent>(
+  events: readonly StorableEvent[],
   schema: z.ZodType<TEvent>,
-  store: EventStore,
-): Projection<TEvent> => ({
-  scope,
-
-  query: (since) =>
-    Effect.gen(function* () {
-      const result = yield* Effect.tryPromise({
-        try: () =>
-          store.fetch(
-            since
-              ? { type: "byScope", scope, since }
-              : { type: "byScope", scope },
-          ),
-        catch: (err) => ({
-          code: "QueryFailed" as const,
-          message: err instanceof Error ? err.message : String(err),
-        }),
-      });
-
-      if (!result.ok) {
-        return yield* Effect.fail(result.error);
-      }
-
-      // Validate each event against schema, filter out invalid
-      const validated: TEvent[] = [];
-      for (const event of result.value) {
-        const parseResult = schema.safeParse(event);
-        if (parseResult.success) {
-          validated.push(parseResult.data);
-        } else {
-          yield* Effect.logWarning("Event validation failed in projection", {
-            scope,
-            eventId: event.eventId,
-            type: event.type,
-          });
-        }
-      }
-
-      return validated;
-    }),
-});
-
-// Effect-based Projection Factory
-
-/**
- * Creates a projection using the EventStore Effect service.
- */
-export const makeProjectionEffect = <TEvent extends StorableEvent>(
   scope: Scope,
-  schema: z.ZodType<TEvent>,
-): Effect.Effect<Projection<TEvent>, never, EventStoreEffect> =>
-  Effect.gen(function* () {
-    const store = yield* EventStoreEffect;
+): Effect.Effect<readonly TEvent[]> => {
+  const validated: TEvent[] = [];
+  const warnings: Effect.Effect<void>[] = [];
 
-    return {
-      scope,
-
-      query: (since) =>
-        Effect.gen(function* () {
-          const events = yield* store.query(
-            since
-              ? { type: "byScope", scope, since }
-              : { type: "byScope", scope },
-          ).pipe(
-            Effect.mapError((err) => ({
-              code: "QueryFailed" as const,
-              message: err.message,
-            })),
-          );
-
-          const validated: TEvent[] = [];
-          for (const event of events) {
-            const parseResult = schema.safeParse(event);
-            if (parseResult.success) {
-              validated.push(parseResult.data);
-            } else {
-              yield* Effect.logWarning(
-                "Event validation failed in projection",
-                {
-                  scope,
-                  eventId: event.eventId,
-                  type: event.type,
-                },
-              );
-            }
-          }
-
-          return validated;
+  for (const event of events) {
+    const parseResult = schema.safeParse(event);
+    if (parseResult.success) {
+      validated.push(parseResult.data);
+    } else {
+      warnings.push(
+        Effect.logWarning("Event validation failed in projection", {
+          scope,
+          eventId: event.eventId,
+          type: event.type,
         }),
-    };
+      );
+    }
+  }
+
+  if (warnings.length === 0) return Effect.succeed(validated);
+
+  return Effect.gen(function* () {
+    yield* Effect.all(warnings, { discard: true });
+    return validated;
   });
+};
 
-// EventStore Effect Service
+// =============================================================================
+// Tag Factory
+// =============================================================================
 
-import { Context } from "effect";
-import type { EventStoreQuery } from "$/store/mod.ts";
+/**
+ * Creates an Effect service tag for a specific Projection type.
+ *
+ * @example
+ * ```typescript
+ * const LinkedInProjection = makeProjectionTag<LinkedInEvent>("linkedin/Projection");
+ * ```
+ */
+export const makeProjectionTag = <TEvent extends StorableEvent>(
+  name: string,
+) => Context.GenericTag<Projection<TEvent>>(name);
 
-interface EventStoreEffectService {
-  readonly append: (
-    events: readonly StorableEvent[],
-  ) => Effect.Effect<void, { readonly message: string }>;
-  readonly query: (
-    query?: EventStoreQuery,
-  ) => Effect.Effect<readonly StorableEvent[], { readonly message: string }>;
-}
+// =============================================================================
+// Layer Factory
+// =============================================================================
 
-export class EventStoreEffect extends Context.Tag("EventStoreEffect")<
-  EventStoreEffect,
-  EventStoreEffectService
->() {}
+/**
+ * Creates a Layer that provides a Projection for a specific scope.
+ * Resolves EventStoreTag from context.
+ *
+ * @param tag - The scope-specific Projection tag
+ * @param scope - The event scope
+ * @param schema - Zod schema to validate events on read
+ *
+ * @example
+ * ```typescript
+ * const LinkedInProjection = makeProjectionTag<LinkedInEvent>("linkedin/Projection");
+ * const layer = makeProjectionLayer(LinkedInProjection, LINKEDIN_SCOPE, LinkedInEventSchema);
+ * ```
+ */
+export const makeProjectionLayer = <TEvent extends StorableEvent>(
+  tag: Context.Tag<any, Projection<TEvent>>,
+  scope: Scope,
+  schema: z.ZodType<TEvent>,
+): Layer.Layer<Context.Tag.Identifier<typeof tag>, never, EventStoreTag> =>
+  Layer.effect(
+    tag,
+    Effect.gen(function* () {
+      const store = yield* EventStoreTag;
+
+      const projection: Projection<TEvent> = {
+        scope,
+
+        query: (since) =>
+          Effect.gen(function* () {
+            const events = yield* store.fetch(
+              since
+                ? { type: "byScope", scope, since }
+                : { type: "byScope", scope },
+            );
+            return yield* validateChunk(events, schema, scope);
+          }),
+
+        subscribe: (since) =>
+          store.subscribe(scope, since).pipe(
+            Stream.mapEffect((chunk) => validateChunk(chunk, schema, scope)),
+            Stream.filter((chunk) => chunk.length > 0),
+          ),
+      };
+
+      return projection;
+    }),
+  );

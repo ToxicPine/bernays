@@ -2,7 +2,7 @@
 // Thread graph building from message events.
 //
 // Builds a graph structure from message events, preserving all platform-specific
-// fields. Adapters use this to implement deriveInbox and deriveThread.
+// fields. Plugins use this via emptyGraphState/applyGraphEvent/materializeThreadGraphs.
 //
 // Design:
 // - Uses Zod schemas with .passthrough() to preserve platform fields
@@ -121,88 +121,107 @@ export interface ThreadGraph<
   readonly lastActivity: string;
 }
 
-// Graph State (internal)
+// Graph State
 
-interface NodeState {
+/**
+ * Internal node representation within the graph state.
+ */
+export interface NodeState {
   readonly message: GraphMessage;
   deleted: boolean;
   editedContent?: string;
 }
 
-interface GraphState {
+/**
+ * Accumulated state from applying graph events incrementally.
+ * Plugins include this in their plugin-wide state for thread tracking.
+ */
+export interface GraphState {
   readonly nodes: Map<string, NodeState>;
   readonly children: Map<string, string[]>;
 }
 
-// Graph Builder
+// Graph Incremental Primitives
 
 /**
- * Build thread graphs from a sequence of scope-filtered events.
+ * Create an empty graph state for incremental event application.
+ */
+export const emptyGraphState = (): GraphState => ({
+  nodes: new Map(),
+  children: new Map(),
+});
+
+/**
+ * Apply a single event to the graph state. Mutates in place.
  *
- * This is a utility function that behaviors use to build their
- * deriveInbox and deriveThread implementations. It processes
- * anchor, reply, and mutation events to build a thread graph.
+ * Parses the event against GraphEventSchema. Events that don't match
+ * (non-graph events) are silently ignored, so this is safe to call
+ * with any event in the scope.
  *
- * IMPORTANT: Events must be pre-filtered by scope via the Projection layer.
- * The scope parameter types the returned ThreadGraph instances, ensuring
- * compile-time safety when working with scope-specific threads.
+ * @param state - The graph state to update
+ * @param event - A storable event (may or may not be a graph event)
+ */
+export const applyGraphEvent = (
+  state: GraphState,
+  event: StorableEvent,
+): void => {
+  const result = GraphEventSchema.safeParse(event);
+  if (!result.success) return;
+
+  const parsed = result.data;
+
+  if (parsed.kind === "anchor") {
+    if (!state.nodes.has(parsed.canonicalId)) {
+      state.nodes.set(parsed.canonicalId, {
+        message: parsed,
+        deleted: false,
+      });
+    }
+  } else if (parsed.kind === "reply") {
+    if (!state.nodes.has(parsed.canonicalId)) {
+      state.nodes.set(parsed.canonicalId, {
+        message: parsed,
+        deleted: false,
+      });
+
+      const children = state.children.get(parsed.predecessorId) ?? [];
+      children.push(parsed.canonicalId);
+      state.children.set(parsed.predecessorId, children);
+    }
+  } else if (parsed.kind === "mutation") {
+    const node = state.nodes.get(parsed.canonicalId);
+    if (node) {
+      if (parsed.mutation === "deleted") {
+        node.deleted = true;
+      } else if (parsed.editedContent !== undefined) {
+        node.editedContent = parsed.editedContent;
+      }
+    }
+  }
+};
+
+/**
+ * Materialize thread graphs from accumulated graph state.
+ *
+ * Reads the accumulated nodes and children maps, groups them into
+ * threads rooted at anchor messages, and returns typed ThreadGraph
+ * instances.
  *
  * @template TScope - The platform scope (e.g., "linkedin", "x")
  * @template TMessage - The message event type (defaults to GraphMessage)
  * @template TAnchor - The anchor type (defaults to unknown)
  * @param scope - The platform scope for typing the output
- * @param events - Events to process (pre-filtered by scope from Projection)
+ * @param state - The accumulated graph state
  * @returns Map of ThreadId to scope-typed ThreadGraph
  */
-export function buildThreadGraphs<
+export function materializeThreadGraphs<
   TScope extends string,
   TMessage extends GraphMessage = GraphMessage,
   TAnchor = unknown,
 >(
   scope: TScope,
-  events: readonly StorableEvent[],
+  state: GraphState,
 ): Map<ThreadId, ThreadGraph<TScope, TMessage, TAnchor>> {
-  const state: GraphState = {
-    nodes: new Map(),
-    children: new Map(),
-  };
-
-  for (const event of events) {
-    const result = GraphEventSchema.safeParse(event);
-    if (!result.success) continue;
-
-    const parsed = result.data;
-
-    if (parsed.kind === "anchor") {
-      if (!state.nodes.has(parsed.canonicalId)) {
-        state.nodes.set(parsed.canonicalId, {
-          message: parsed,
-          deleted: false,
-        });
-      }
-    } else if (parsed.kind === "reply") {
-      if (!state.nodes.has(parsed.canonicalId)) {
-        state.nodes.set(parsed.canonicalId, {
-          message: parsed,
-          deleted: false,
-        });
-
-        const children = state.children.get(parsed.predecessorId) ?? [];
-        children.push(parsed.canonicalId);
-        state.children.set(parsed.predecessorId, children);
-      }
-    } else if (parsed.kind === "mutation") {
-      const node = state.nodes.get(parsed.canonicalId);
-      if (node) {
-        if (parsed.mutation === "deleted") {
-          node.deleted = true;
-        } else if (parsed.editedContent !== undefined) {
-          node.editedContent = parsed.editedContent;
-        }
-      }
-    }
-  }
-
   // Filter to anchor nodes using type guard for safe narrowing
   const roots = [...state.nodes.values()].filter(
     (n): n is NodeState & { message: GraphAnchor } => isGraphAnchor(n.message),
@@ -243,6 +262,39 @@ export function buildThreadGraphs<
   }
 
   return result;
+}
+
+// Graph Builder (convenience composition)
+
+/**
+ * Build thread graphs from a sequence of scope-filtered events.
+ *
+ * Convenience function that composes emptyGraphState + applyGraphEvent +
+ * materializeThreadGraphs. Equivalent to creating empty state, folding all
+ * events through applyGraphEvent, then materializing.
+ *
+ * IMPORTANT: Events must be pre-filtered by scope via the Projection layer.
+ * The scope parameter types the returned ThreadGraph instances, ensuring
+ * compile-time safety when working with scope-specific threads.
+ *
+ * @template TScope - The platform scope (e.g., "linkedin", "x")
+ * @template TMessage - The message event type (defaults to GraphMessage)
+ * @template TAnchor - The anchor type (defaults to unknown)
+ * @param scope - The platform scope for typing the output
+ * @param events - Events to process (pre-filtered by scope from Projection)
+ * @returns Map of ThreadId to scope-typed ThreadGraph
+ */
+export function buildThreadGraphs<
+  TScope extends string,
+  TMessage extends GraphMessage = GraphMessage,
+  TAnchor = unknown,
+>(
+  scope: TScope,
+  events: readonly StorableEvent[],
+): Map<ThreadId, ThreadGraph<TScope, TMessage, TAnchor>> {
+  const state = emptyGraphState();
+  for (const event of events) applyGraphEvent(state, event);
+  return materializeThreadGraphs<TScope, TMessage, TAnchor>(scope, state);
 }
 
 /**

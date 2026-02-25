@@ -1,12 +1,12 @@
 // api/src/context.ts
 // Shared server context — stores, registries, projections
 
-import { Effect, Option } from "effect";
+import { Effect, Layer } from "effect";
 import {
   type ConfigStoreService,
   configurePostgresEventStore,
-  createPostgresConfigStore,
   type EventStore,
+  EventStoreLive,
   type StorableEvent,
 } from "@bernays/server/store";
 import {
@@ -15,8 +15,14 @@ import {
   type PlatformDefinition,
   type PlatformRegistry,
 } from "@bernays/server/platforms";
-import { type Injector, makeInjector } from "@bernays/server/projections";
-import { makeProjection, type Projection } from "@bernays/server/projections";
+import {
+  type Injector,
+  makeInjectorTag,
+  makeInjectionLayer,
+  type Projection,
+  makeProjectionTag,
+  makeProjectionLayer,
+} from "@bernays/server/projections";
 import {
   BRIEFING_SCOPE,
   ParticipantIdFromString,
@@ -37,15 +43,14 @@ import {
 
 /**
  * Read-only view of an account store — only the operations the API needs.
- * This avoids variance issues with the full AccountStoreService<TScope, TAccount>
- * (which has contravariant parameters due to .get() accepting ParticipantId<TScope>).
  */
 export interface AccountStoreView {
-  readonly get: (id: string) => Effect.Effect<Option.Option<BaseAccount>>;
+  readonly get: (id: string) => Effect.Effect<import("effect").Option.Option<BaseAccount>>;
   readonly list: () => Effect.Effect<readonly BaseAccount[]>;
 }
 
 export interface ServerContext {
+  /** The raw event store — used by the GET /events endpoint for unscoped queries. */
   readonly eventStore: EventStore<StorableEvent>;
   readonly configStore: ConfigStoreService;
   readonly registry: PlatformRegistry;
@@ -58,10 +63,6 @@ export interface ServerContext {
 // Platform Registration
 // =============================================================================
 
-// PlatformDefinition has invariant type parameters (behavior methods are both
-// covariant and contravariant), so TypeScript can't widen specific platforms
-// to AnyPlatform directly. This helper erases platform-specific types for
-// registry consumption. Safe because the API only reads from behaviors.
 // deno-lint-ignore no-explicit-any
 const asPlatform = (
   p: PlatformDefinition<any, any, any, any, any, any, any, any, any>,
@@ -69,8 +70,6 @@ const asPlatform = (
 
 const PLATFORMS: readonly AnyPlatform[] = [
   asPlatform(linkedInPlatform),
-  // asPlatform(xPlatform),
-  // asPlatform(redditPlatform),
 ];
 
 // =============================================================================
@@ -90,6 +89,7 @@ export const createServerContext = async (
   const eventStore = await Effect.runPromise(
     configurePostgresEventStore({ databaseUrl }),
   );
+  const { createPostgresConfigStore } = await import("@bernays/server/store");
   const configStore = await createPostgresConfigStore({
     connectionString: databaseUrl,
   });
@@ -97,27 +97,55 @@ export const createServerContext = async (
   // Register platforms
   const registry = createPlatformRegistry(PLATFORMS);
 
-  // Create injectors and projections per scope
+  // Create injectors and projections per scope via layers
+  const eventStoreLayer = EventStoreLive(eventStore);
   const injectors = new Map<Scope, Injector<StorableEvent>>();
   const projections = new Map<Scope, Projection<StorableEvent>>();
 
   for (const platform of PLATFORMS) {
     const scope = platform.scope;
     const schema = platform.eventSchema;
-    injectors.set(scope, makeInjector(scope, schema, eventStore));
-    projections.set(scope, makeProjection(scope, schema, eventStore));
+
+    // Create scope-specific tags
+    const injTag = makeInjectorTag<StorableEvent>(`${scope}/Injection`);
+    const projTag = makeProjectionTag<StorableEvent>(`${scope}/Projection`);
+
+    // Build layers
+    const injLayer = makeInjectionLayer(injTag, scope, schema).pipe(
+      Layer.provide(eventStoreLayer),
+    );
+    const projLayer = makeProjectionLayer(projTag, scope, schema).pipe(
+      Layer.provide(eventStoreLayer),
+    );
+
+    // Resolve services
+    const inj = await Effect.runPromise(
+      Effect.provide(injTag, injLayer),
+    );
+    const proj = await Effect.runPromise(
+      Effect.provide(projTag, projLayer),
+    );
+
+    injectors.set(scope, inj);
+    projections.set(scope, proj);
   }
 
-  // Register briefing scope for read access (agents write directly via BriefingService)
-  projections.set(
-    BRIEFING_SCOPE,
-    makeProjection(BRIEFING_SCOPE, BriefingEventSchema, eventStore),
+  // Briefing projection for read access
+  const briefingProjTag = makeProjectionTag<StorableEvent>(
+    "briefing/Projection",
   );
+  const briefingProjLayer = makeProjectionLayer(
+    briefingProjTag,
+    BRIEFING_SCOPE,
+    BriefingEventSchema,
+  ).pipe(Layer.provide(eventStoreLayer));
 
-  // Create account stores per platform identity.
-  // Wrap platform-specific stores to satisfy AccountStoreView (which uses plain
-  // string IDs). The wrapper just forwards calls — branded ParticipantId<TScope>
-  // is a string at runtime, so this is safe.
+  const briefingProj = await Effect.runPromise(
+    Effect.provide(briefingProjTag, briefingProjLayer),
+  );
+  projections.set(BRIEFING_SCOPE, briefingProj);
+
+  // Create account stores per platform identity
   const accountStores = new Map<string, AccountStoreView>();
 
   const linkedInAccountStore = await createPostgresLinkedInAccountStore({

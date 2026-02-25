@@ -21,12 +21,17 @@ export {
 } from "./thread.ts";
 
 export {
+  applyGraphEvent,
   buildThreadGraphs,
+  emptyGraphState,
   findThreadRoot,
   type GraphMessage,
   type GraphNode,
   graphNodesToMessages,
   type GraphNodeView,
+  type GraphState,
+  materializeThreadGraphs,
+  type NodeState,
   type ThreadGraph,
 } from "./graph.ts";
 

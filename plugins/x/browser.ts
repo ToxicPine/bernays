@@ -24,7 +24,7 @@ export type XAuthStatus =
  * X-specific browser view.
  * Extends BaseBoundBrowser with X-specific status fields.
  *
- * The behavior's `deriveBrowsers` function produces these from events:
+ * The behavior's `materializeBrowsers` function produces these from state:
  * - Auth events determine authStatus
  * - Auth events with issue field determine suspended status
  * - Rate limit events determine rateLimitedUntil

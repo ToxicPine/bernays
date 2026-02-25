@@ -4,15 +4,22 @@
 // All participants write to a single shared event store. No HTTP
 // transport — the store is the rendezvous point. Each participant
 // is identified by an AgentId provided at construction time.
+//
+// Writes go through Injector, reads go through Projection. The service
+// never sees the raw EventStore.
 
-import { Context, Effect, Option } from "effect";
+import { Context, Effect, Layer, Option } from "effect";
 import type { BriefingEvent } from "$/events/briefing.ts";
 import { BRIEFING_SCOPE } from "$/core/scope.ts";
 import { AgentId, BriefingId, CorrelationId, EventId } from "$/core/branded.ts";
 import type { Injector } from "$/projections/injector.ts";
-import type { EventStore, StorableEvent } from "$/store/mod.ts";
+import type { Projection } from "$/projections/projection.ts";
 import { BriefingEventSchema } from "$/events/briefing.ts";
-import { makeInjector } from "$/projections/injector.ts";
+import { makeInjectorTag, makeInjectionLayer } from "$/projections/injector.ts";
+import {
+  makeProjectionTag,
+  makeProjectionLayer,
+} from "$/projections/projection.ts";
 import {
   type BriefingView,
   deriveBriefings,
@@ -99,15 +106,36 @@ export class Briefing extends Context.Tag("sockpuppet/Briefing")<
 >() {}
 
 // =============================================================================
-// Configuration
+// Scoped Tags for Briefing's Injection/Projection
 // =============================================================================
 
-export interface BriefingRuntimeConfig {
-  /** This agent's identity */
-  readonly self: AgentId;
-  /** The shared event store */
-  readonly eventStore: EventStore<StorableEvent>;
-}
+/** Injector tag for briefing events. */
+export const BriefingInjection = makeInjectorTag<BriefingEvent>(
+  "briefing/Injection",
+);
+
+/** Projection tag for briefing events. */
+export const BriefingProjection = makeProjectionTag<BriefingEvent>(
+  "briefing/Projection",
+);
+
+// =============================================================================
+// Briefing Injection/Projection Layers
+// =============================================================================
+
+/** Layer providing BriefingInjection. Depends on EventStoreTag. */
+export const BriefingInjectionLive = makeInjectionLayer(
+  BriefingInjection,
+  BRIEFING_SCOPE,
+  BriefingEventSchema,
+);
+
+/** Layer providing BriefingProjection. Depends on EventStoreTag. */
+export const BriefingProjectionLive = makeProjectionLayer(
+  BriefingProjection,
+  BRIEFING_SCOPE,
+  BriefingEventSchema,
+);
 
 // =============================================================================
 // Implementation
@@ -120,33 +148,11 @@ const makeEventBase = () => ({
   correlationId: CorrelationId(crypto.randomUUID()),
 });
 
-const fetchBriefingEvents = async (
-  eventStore: EventStore<StorableEvent>,
-): Promise<readonly BriefingEvent[]> => {
-  const result = await eventStore.fetch({
-    type: "byScope",
-    scope: BRIEFING_SCOPE,
-  });
-  if (!result.ok) return [];
-
-  const events: BriefingEvent[] = [];
-  for (const raw of result.value) {
-    const parsed = BriefingEventSchema.safeParse(raw);
-    if (parsed.success) events.push(parsed.data);
-  }
-  return events;
-};
-
-export const makeBriefingService = (
-  config: BriefingRuntimeConfig,
+const makeBriefingServiceImpl = (
+  self: AgentId,
+  injector: Injector<BriefingEvent>,
+  projection: Projection<BriefingEvent>,
 ): BriefingService => {
-  const { self, eventStore } = config;
-  const injector: Injector<BriefingEvent> = makeInjector(
-    BRIEFING_SCOPE,
-    BriefingEventSchema,
-    eventStore,
-  );
-
   const injectEvent = (
     event: BriefingEvent,
   ): Effect.Effect<void, BriefingError> =>
@@ -163,7 +169,9 @@ export const makeBriefingService = (
     );
 
   const allEvents = (): Effect.Effect<readonly BriefingEvent[]> =>
-    Effect.promise(() => fetchBriefingEvents(eventStore));
+    projection.query().pipe(
+      Effect.catchAll(() => Effect.succeed([] as readonly BriefingEvent[])),
+    );
 
   const allViews = (): Effect.Effect<ReadonlyMap<string, BriefingView>> =>
     Effect.map(allEvents(), (events) => deriveBriefings(events, self));
@@ -318,3 +326,21 @@ export const makeBriefingService = (
       }),
   };
 };
+
+// =============================================================================
+// Briefing Layer
+// =============================================================================
+
+/**
+ * Create a Layer that provides the Briefing service.
+ * Depends on BriefingInjection and BriefingProjection.
+ */
+export const makeBriefingLayer = (self: AgentId) =>
+  Layer.effect(
+    Briefing,
+    Effect.gen(function* () {
+      const injector = yield* BriefingInjection;
+      const projection = yield* BriefingProjection;
+      return makeBriefingServiceImpl(self, injector, projection);
+    }),
+  );

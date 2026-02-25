@@ -15,7 +15,10 @@ export {
   type BriefingError,
   briefingError,
   type BriefingErrorCode,
-  type BriefingRuntimeConfig,
+  BriefingInjection,
+  BriefingInjectionLive,
+  BriefingProjection,
+  BriefingProjectionLive,
   type BriefingService,
-  makeBriefingService,
+  makeBriefingLayer,
 } from "./service.ts";

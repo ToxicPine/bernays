@@ -19,7 +19,7 @@ export type LinkedInAuthStatus = "authenticated" | "expired" | "unknown";
  * LinkedIn-specific browser view.
  * Extends BaseBoundBrowser with LinkedIn-specific status fields.
  *
- * The behavior's `deriveBrowsers` function produces these from events:
+ * The behavior's `materializeBrowsers` function produces these from state:
  * - Auth events determine authStatus
  * - Rate limit events determine rateLimitedUntil
  * - Invite tracking events determine weeklyInvitesRemaining

@@ -13,6 +13,10 @@ import {
   type LinkedInScope,
 } from "./schemas.ts";
 
+// Injection/Projection
+import { makeInjectorTag, makeInjectionLayer } from "@bernays/server/projections";
+import { makeProjectionTag, makeProjectionLayer } from "@bernays/server/projections";
+
 // Views
 import type { LinkedInInbox, LinkedInThread } from "./views.ts";
 
@@ -41,6 +45,34 @@ export const linkedInPlatform: PlatformDefinition<
   anchorSchema: LinkedInAnchorSchema,
   behavior: linkedInBehavior,
 };
+
+// =============================================================================
+// LinkedIn Injection/Projection Tags & Layers
+// =============================================================================
+
+/** Injector tag for LinkedIn events. */
+export const LinkedInInjection = makeInjectorTag<LinkedInEvent>(
+  "linkedin/Injection",
+);
+
+/** Projection tag for LinkedIn events. */
+export const LinkedInProjection = makeProjectionTag<LinkedInEvent>(
+  "linkedin/Projection",
+);
+
+/** Layer providing LinkedInInjection. Depends on EventStoreTag. */
+export const LinkedInInjectionLive = makeInjectionLayer(
+  LinkedInInjection,
+  LINKEDIN_SCOPE,
+  LinkedInEventSchema,
+);
+
+/** Layer providing LinkedInProjection. Depends on EventStoreTag. */
+export const LinkedInProjectionLive = makeProjectionLayer(
+  LinkedInProjection,
+  LINKEDIN_SCOPE,
+  LinkedInEventSchema,
+);
 
 // Scope
 export { LINKEDIN_SCOPE } from "./schemas.ts";

@@ -1,11 +1,7 @@
 // packages/master/src/runtime/mod.ts
 // Runtime module exports
-//
-// Note: For hashing utilities, import from $/core/mod.ts
-// Note: For graph utilities, import from $/views/mod.ts
 
 // Sockpuppet Services
-// Note: Platform tags are now platform-specific (e.g., LinkedInPlatform from plugins)
 export {
   Journal,
   type JournalEntryInput,
@@ -21,19 +17,25 @@ export { makePlatformService } from "$/platforms/mod.ts";
 
 // Journal Layer
 export {
-  type JournalRuntimeConfig,
-  makeInMemoryJournalLayer,
+  JournalInjection,
+  JournalInjectionLive,
+  JournalProjection,
+  JournalProjectionLive,
   makeJournalLayer,
 } from "./sockpuppet/journal-runtime.ts";
 
 // Briefing Layer
 export {
-  type BriefingRuntimeConfig,
+  Briefing,
+  BriefingInjection,
+  BriefingInjectionLive,
+  BriefingProjection,
+  BriefingProjectionLive,
   makeBriefingLayer,
 } from "./sockpuppet/briefing-runtime.ts";
 
-// Briefing Service (re-export tag for sockpuppets)
-export { Briefing, type BriefingService } from "$/briefing/service.ts";
+// Briefing Service types
+export { type BriefingService } from "$/briefing/service.ts";
 
 // Runtime Service
 export {

@@ -1,20 +1,12 @@
 // src/runtime/sockpuppet/briefing-runtime.ts
 // Briefing service layer for sockpuppet runtime composition
+// Re-exports from the canonical briefing service location.
 
-import { Layer } from "effect";
-import {
+export {
   Briefing,
-  type BriefingRuntimeConfig,
-  makeBriefingService,
+  BriefingInjection,
+  BriefingInjectionLive,
+  BriefingProjection,
+  BriefingProjectionLive,
+  makeBriefingLayer,
 } from "$/briefing/service.ts";
-
-export type { BriefingRuntimeConfig };
-
-/**
- * Create a Layer that provides the Briefing service.
- * Follows the same pattern as makeJournalLayer.
- */
-export const makeBriefingLayer = (
-  config: BriefingRuntimeConfig,
-): Layer.Layer<Briefing> =>
-  Layer.succeed(Briefing, makeBriefingService(config));

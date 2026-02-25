@@ -8,10 +8,13 @@ import {
   type ThreadId,
 } from "@bernays/server/core";
 import {
-  buildThreadGraphs,
+  applyGraphEvent,
   calculateUnreadCount,
+  emptyGraphState,
   extractParticipants,
   type GraphMessage,
+  type GraphState,
+  materializeThreadGraphs,
   type ThreadGraph,
   toMessageViews,
 } from "@bernays/server/views";
@@ -28,6 +31,25 @@ import { X_SCOPE } from "./schemas.ts";
 // Type Alias
 
 type XScope = typeof X_SCOPE;
+
+// Plugin State
+
+interface XPluginState {
+  graph: GraphState;
+  browserStatus: Map<string, {
+    authStatus: XAuthStatus;
+    rateLimitedUntil?: string;
+    suspended: boolean;
+    canRead: boolean;
+    canWrite: boolean;
+  }>;
+  accountSuspended: boolean;
+  contacts: Map<string, {
+    handle?: string;
+    following: boolean;
+    lastInteraction?: string;
+  }>;
+}
 
 // Helper Functions
 
@@ -63,23 +85,133 @@ export const xBehavior: PlatformBehavior<
   XInbox,
   XAccount,
   XBrowser,
-  XContact
+  XContact,
+  XPluginState
 > = {
   scope: X_SCOPE,
   identity: "x",
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Derivation
+  // Incremental state management
   // ─────────────────────────────────────────────────────────────────────────
 
-  deriveInbox: (
-    events: readonly XEvent[],
+  emptyState: (): XPluginState => ({
+    graph: emptyGraphState(),
+    browserStatus: new Map(),
+    accountSuspended: false,
+    contacts: new Map(),
+  }),
+
+  applyEvent: (state: XPluginState, event: XEvent): void => {
+    // Always apply to graph state (non-graph events are silently ignored)
+    applyGraphEvent(state.graph, event);
+
+    if (event.type === "AuthObserved") {
+      const authEvent = event as {
+        configId: string;
+        authenticated: boolean;
+        canRead?: boolean;
+        canWrite?: boolean;
+        issue?: string;
+      };
+      const { configId } = authEvent;
+      if (configId) {
+        const isSuspended = authEvent.issue === "suspended";
+        state.browserStatus.set(configId, {
+          authStatus: authEvent.authenticated ? "authenticated" : "expired",
+          rateLimitedUntil: state.browserStatus.get(configId)?.rateLimitedUntil,
+          suspended: isSuspended,
+          canRead: authEvent.canRead ?? false,
+          canWrite: authEvent.canWrite ?? false,
+        });
+      }
+    }
+
+    if (event.type === "RateLimitObserved") {
+      const rateLimitEvent = event as {
+        configId: string;
+        retryAfter?: string;
+      };
+      const existing = state.browserStatus.get(rateLimitEvent.configId);
+      if (existing) {
+        state.browserStatus.set(rateLimitEvent.configId, {
+          ...existing,
+          rateLimitedUntil: rateLimitEvent.retryAfter,
+        });
+      }
+    }
+
+    if (event.type === "AccountSuspended") {
+      state.accountSuspended = true;
+    }
+
+    if (event.type === "TweetObserved") {
+      const tweetEvent = event as {
+        authorId: string;
+        authorHandle: string;
+        createdAt: string;
+      };
+      const contactId = tweetEvent.authorId;
+      const existing = state.contacts.get(contactId);
+      const lastInteraction = existing?.lastInteraction;
+      state.contacts.set(contactId, {
+        handle: tweetEvent.authorHandle,
+        following: existing?.following ?? false,
+        lastInteraction:
+          !lastInteraction || tweetEvent.createdAt > lastInteraction
+            ? tweetEvent.createdAt
+            : lastInteraction,
+      });
+    }
+
+    if (event.type === "FollowObserved") {
+      const followEvent = event as {
+        targetUserId: string;
+        targetHandle: string;
+        followedAt: string;
+      };
+      const contactId = followEvent.targetUserId;
+      const existing = state.contacts.get(contactId);
+      const lastInteraction = existing?.lastInteraction;
+      state.contacts.set(contactId, {
+        handle: followEvent.targetHandle,
+        following: true,
+        lastInteraction:
+          !lastInteraction || followEvent.followedAt > lastInteraction
+            ? followEvent.followedAt
+            : lastInteraction,
+      });
+    }
+
+    if (event.type === "AnchorMessageObserved") {
+      const anchorEvent = event as {
+        anchor: { participants: readonly string[] };
+      };
+      for (const pid of anchorEvent.anchor.participants) {
+        const existing = state.contacts.get(pid);
+        const lastInteraction = existing?.lastInteraction;
+        if (!lastInteraction || event.timestamp > lastInteraction) {
+          state.contacts.set(pid, {
+            handle: existing?.handle,
+            following: existing?.following ?? false,
+            lastInteraction: event.timestamp,
+          });
+        }
+      }
+    }
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // View materialization
+  // ─────────────────────────────────────────────────────────────────────────
+
+  materializeInbox: (
+    state: XPluginState,
     participantId: ParticipantIdType<"x">,
   ): XInbox => {
-    // Events are pre-filtered by scope via the Projection layer
-    const threads = buildThreadGraphs<XScope, GraphMessage, XAnchor>(
+    const threads = materializeThreadGraphs<XScope, GraphMessage, XAnchor>(
       X_SCOPE,
-      events,
+      state.graph,
     );
 
     const byThreadId: Record<string, XIndexMeta> = {};
@@ -104,14 +236,13 @@ export const xBehavior: PlatformBehavior<
     };
   },
 
-  deriveThread: (
-    events: readonly XEvent[],
+  materializeThread: (
+    state: XPluginState,
     threadId: ThreadId,
   ): XThread | undefined => {
-    // Events are pre-filtered by scope via the Projection layer
-    const threads = buildThreadGraphs<XScope, GraphMessage, XAnchor>(
+    const threads = materializeThreadGraphs<XScope, GraphMessage, XAnchor>(
       X_SCOPE,
-      events,
+      state.graph,
     );
     const thread = threads.get(threadId);
 
@@ -119,176 +250,62 @@ export const xBehavior: PlatformBehavior<
       return undefined;
     }
 
-    const authEvent = events.find((e) => e.type === "AuthObserved");
-    const participantId = authEvent
-      ? (authEvent as { participantId: ParticipantIdType<"x"> }).participantId
-      : ParticipantId("x", "");
-
+    // Find participantId from the first anchor node's participants
+    // (incremental path doesn't have access to raw events, so we derive from the graph)
+    const participantId = ParticipantId("x", "");
     return toXThread(thread, participantId);
   },
 
-  deriveBrowsers: (
-    events: readonly XEvent[],
+  materializeBrowsers: (
+    state: XPluginState,
     account: XAccount,
     runningConfigIds: ReadonlySet<BrowserConfigId>,
   ): readonly XBrowser[] => {
-    // Build browser status from events
-    const browserStatus = new Map<
-      string,
-      {
-        authStatus: XAuthStatus;
-        rateLimitedUntil?: string;
-        suspended: boolean;
-        canRead: boolean;
-        canWrite: boolean;
-      }
-    >();
-
-    // Process auth events (latest wins)
-    for (const event of events) {
-      if (event.type === "AuthObserved") {
-        const authEvent = event as {
-          configId: string;
-          authenticated: boolean;
-          canRead?: boolean;
-          canWrite?: boolean;
-          issue?: string;
-        };
-        const { configId } = authEvent;
-        if (configId) {
-          const isSuspended = authEvent.issue === "suspended";
-          browserStatus.set(configId, {
-            authStatus: authEvent.authenticated ? "authenticated" : "expired",
-            rateLimitedUntil: browserStatus.get(configId)?.rateLimitedUntil,
-            suspended: isSuspended,
-            canRead: authEvent.canRead ?? false,
-            canWrite: authEvent.canWrite ?? false,
-          });
-        }
-      }
-
-      // Process rate limit events
-      if (event.type === "RateLimitObserved") {
-        const rateLimitEvent = event as {
-          configId: string;
-          retryAfter?: string;
-        };
-        const existing = browserStatus.get(rateLimitEvent.configId);
-        if (existing) {
-          browserStatus.set(rateLimitEvent.configId, {
-            ...existing,
-            rateLimitedUntil: rateLimitEvent.retryAfter,
-          });
-        }
-      }
-
-      // Process account suspension events
-      if (event.type === "AccountSuspended") {
-        // Mark all browsers for this account as suspended
-        for (const binding of account.browserBindings) {
-          const existing = browserStatus.get(binding.configId);
-          if (existing) {
-            browserStatus.set(binding.configId, {
-              ...existing,
-              suspended: true,
-              canWrite: false,
-            });
-          }
-        }
-      }
-    }
-
-    // Map account's browser bindings to XBrowser
     return account.browserBindings.map((binding) => {
-      const status = browserStatus.get(binding.configId) ?? {
+      const status = state.browserStatus.get(binding.configId) ?? {
         authStatus: "unknown" as const,
         suspended: false,
         canRead: false,
         canWrite: false,
       };
 
+      const suspended = state.accountSuspended || status.suspended;
+      const canWrite = state.accountSuspended ? false : status.canWrite;
+
       return {
         configId: binding.configId,
         isRunning: runningConfigIds.has(binding.configId),
         metadata: binding.metadata,
         authStatus: status.authStatus,
-        suspended: status.suspended,
+        suspended,
         rateLimitedUntil: status.rateLimitedUntil,
         canRead: status.canRead,
-        canWrite: status.canWrite,
+        canWrite,
       };
     });
   },
 
-  deriveContact: (
-    events: readonly XEvent[],
+  materializeContact: (
+    state: XPluginState,
     participantId: ParticipantIdType<"x">,
   ): XContact | undefined => {
-    let handle: string | undefined;
-    let following = false;
-    let lastInteraction: string | undefined;
+    const contact = state.contacts.get(participantId as string);
 
-    for (const event of events) {
-      // Extract info from tweets
-      if (event.type === "TweetObserved") {
-        const tweetEvent = event as {
-          authorId: string;
-          authorHandle: string;
-          createdAt: string;
-        };
-        if (tweetEvent.authorId === participantId) {
-          handle = tweetEvent.authorHandle;
-          if (
-            !lastInteraction ||
-            tweetEvent.createdAt > lastInteraction
-          ) {
-            lastInteraction = tweetEvent.createdAt;
-          }
-        }
-      }
-
-      // Track follow status
-      if (event.type === "FollowObserved") {
-        const followEvent = event as {
-          targetUserId: string;
-          targetHandle: string;
-          followedAt: string;
-        };
-        if (followEvent.targetUserId === participantId) {
-          following = true;
-          handle = followEvent.targetHandle;
-          if (
-            !lastInteraction ||
-            followEvent.followedAt > lastInteraction
-          ) {
-            lastInteraction = followEvent.followedAt;
-          }
-        }
-      }
-
-      // Extract from DM anchor participants
-      if (event.type === "AnchorMessageObserved") {
-        const anchorEvent = event as {
-          anchor: { participants: readonly string[] };
-        };
-        if (anchorEvent.anchor.participants.includes(participantId as string)) {
-          if (!lastInteraction || event.timestamp > lastInteraction) {
-            lastInteraction = event.timestamp;
-          }
-        }
-      }
+    if (!contact) {
+      return undefined;
     }
 
     // Only return contact if we found any info
-    if (!handle && !lastInteraction) {
+    if (!contact.handle && !contact.lastInteraction) {
       return undefined;
     }
 
     return {
       id: participantId,
-      handle,
-      following,
-      lastInteraction,
+      handle: contact.handle,
+      following: contact.following,
+      lastInteraction: contact.lastInteraction,
     };
   },
+
 };

@@ -62,8 +62,8 @@ export interface BaseAccount<TScope extends string = string> {
  * - LinkedIn: authStatus, rateLimitedUntil, weeklyInvitesRemaining
  * - X: authStatus, suspended, etc.
  *
- * The behavior's `deriveBrowsers` function produces platform-specific
- * browser types from events.
+ * The behavior's `materializeBrowsers` function produces platform-specific
+ * browser types from accumulated plugin state.
  */
 export interface BaseBoundBrowser {
   readonly configId: BrowserConfigId;

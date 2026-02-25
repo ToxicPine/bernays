@@ -1,7 +1,7 @@
-// src/platform/service.ts
-// Platform service - what sockpuppets use
+// src/platforms/service.ts
+// Platform service — what sockpuppets use
 
-import { Effect, Option } from "effect";
+import { Effect, Option, Ref, type Scope as EffectScope, Stream } from "effect";
 import type {
   BrowserConfigId,
   ParticipantId,
@@ -23,14 +23,8 @@ import type { ActionsRecord, PlatformDefinition } from "$/platforms/mod.ts";
 
 /**
  * PlatformService is what sockpuppets use to interact with a platform.
- * It combines projection, behavior, and actions into a clean interface.
- *
- * The sockpuppet sees:
- * - inbox: thread summaries
- * - thread(id): full thread view
- * - browsers: available browsers with platform-specific status
- * - contact(id): contact info for a participant
- * - actions: curried methods for platform operations
+ * Views are materialized from a Ref holding plugin-wide state. A background
+ * fiber keeps the state current by subscribing to the Projection stream.
  */
 export interface PlatformService<
   TScope extends Scope,
@@ -61,18 +55,19 @@ export interface PlatformService<
 }
 
 // =============================================================================
-// Platform Service Factory
+// Platform Service Factory (Ref-based, reactive)
 // =============================================================================
 
 /**
- * Creates a PlatformService for a specific platform and account.
- * This is a generic factory that creates the derivation-based properties.
- * Each platform extends this with its own actions.
+ * Creates a PlatformService backed by a Ref that is kept current by a
+ * background fiber subscribing to the Projection stream.
  *
- * @param platform - The platform definition
- * @param account - The account to create the service for
- * @param projection - Type-safe projection for this platform's events
- * @param actions - Platform-specific actions (created by platform's makeXxxActions)
+ * 1. Hydrate: query all existing events, fold into state, create Ref
+ * 2. Subscribe: fork a background fiber that folds new events into the Ref
+ * 3. Materialize: each service method reads from Ref + pure materialization
+ *
+ * Must be run within a Scope (Layer.scoped) so the background fiber is
+ * interrupted when the layer is released.
  */
 export const makePlatformService = <
   TScope extends Scope,
@@ -85,6 +80,7 @@ export const makePlatformService = <
   TBrowser extends BaseBoundBrowser,
   TContact extends BaseContact<TIdentity>,
   TActions extends ActionsRecord,
+  TPluginState,
 >(
   platform: PlatformDefinition<
     TScope,
@@ -95,7 +91,8 @@ export const makePlatformService = <
     TInbox,
     TAccount,
     TBrowser,
-    TContact
+    TContact,
+    TPluginState
   >,
   account: TAccount,
   projection: Projection<TEvent>,
@@ -110,15 +107,35 @@ export const makePlatformService = <
     TBrowser,
     TContact
   >,
-  never,
-  BrowserPool
+  EventStoreError,
+  BrowserPool | EffectScope.Scope
 > =>
   Effect.gen(function* () {
     const pool = yield* BrowserPool;
     const behavior = platform.behavior;
 
-    const queryEvents = projection.query();
+    // 1. Hydrate: full fold from existing events
+    const events = yield* projection.query();
+    const state = behavior.emptyState();
+    for (const event of events) behavior.applyEvent(state, event);
+    const stateRef = yield* Ref.make(state);
 
+    // 2. Subscribe: background fiber folds new events into state
+    const lastTimestamp = events.length > 0
+      ? events[events.length - 1].timestamp
+      : undefined;
+
+    yield* projection.subscribe(lastTimestamp).pipe(
+      Stream.runForEach((chunk) =>
+        Ref.update(stateRef, (s) => {
+          for (const event of chunk) behavior.applyEvent(s, event);
+          return s;
+        })
+      ),
+      Effect.forkScoped,
+    );
+
+    // 3. Helper: get running browser config IDs
     const getRunningConfigIds = Effect.gen(function* () {
       const results = yield* Effect.forEach(
         account.browserBindings,
@@ -135,40 +152,30 @@ export const makePlatformService = <
       );
     });
 
-    const getBrowsers = Effect.gen(function* () {
-      const events = yield* queryEvents;
-      const runningIds = yield* getRunningConfigIds;
-      return behavior.deriveBrowsers(events, account, runningIds);
-    });
-
+    // 4. Service: reads from ref + materializes
     return {
       scope: platform.scope,
       identity: platform.identity,
       participantId: account.id,
 
-      inbox: Effect.gen(function* () {
-        const events = yield* queryEvents;
-        return behavior.deriveInbox(events, account.id);
-      }),
+      inbox: Effect.map(Ref.get(stateRef), (s) =>
+        behavior.materializeInbox(s, account.id)),
 
       thread: (threadId) =>
-        Effect.gen(function* () {
-          const events = yield* queryEvents;
-          return Option.fromNullable(behavior.deriveThread(events, threadId));
-        }),
+        Effect.map(Ref.get(stateRef), (s) =>
+          Option.fromNullable(behavior.materializeThread(s, threadId))),
 
-      browsers: getBrowsers,
+      browsers: Effect.gen(function* () {
+        const s = yield* Ref.get(stateRef);
+        const runningIds = yield* getRunningConfigIds;
+        return behavior.materializeBrowsers(s, account, runningIds);
+      }),
 
       contact: (participantId) =>
-        Effect.gen(function* () {
-          if (!behavior.deriveContact) {
-            return Option.none();
-          }
-          const events = yield* queryEvents;
-          return Option.fromNullable(
-            behavior.deriveContact(events, participantId),
-          );
-        }),
+        Effect.map(Ref.get(stateRef), (s) =>
+          Option.fromNullable(
+            behavior.materializeContact?.(s, participantId),
+          )),
 
       actions,
     };

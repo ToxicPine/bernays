@@ -7,16 +7,20 @@
 // - Stores full event JSON in a jsonb `payload` column, plus common index fields
 
 import postgres from "postgres";
+import { Duration, Effect, Layer, PubSub, Schedule, Stream } from "effect";
 import { Err, Ok } from "$/core/result.ts";
+import type { Scope } from "$/core/branded.ts";
 import {
   createEventStoreError,
   type EventStore,
   type EventStoreQuery,
+  type EventStoreService,
+  EventStoreTag,
+  liftStoreToEffect,
   type StorableEvent,
   StorableEventSchema,
 } from "./mod.ts";
 import { getCorrelationId, getIntentId } from "./utils.ts";
-import { Effect } from "effect";
 
 export interface PostgresEventStoreOptions {
   readonly databaseUrl: string;
@@ -237,3 +241,109 @@ export const configurePostgresEventStore = (
 ): Effect.Effect<EventStore<StorableEvent>> => {
   return Effect.promise(() => createPostgresEventStore(options));
 };
+
+/**
+ * Create a Postgres-backed EventStore Layer with reactive subscribe.
+ *
+ * Subscribe is implemented via internal polling: a background fiber queries
+ * for new events on a short interval (default 1s) and publishes them to a
+ * PubSub. Subscribers receive scope-filtered chunks.
+ *
+ * The poll fiber and PubSub are scoped to the layer's lifetime.
+ */
+export const EventStorePostgres = (
+  options: PostgresEventStoreOptions & {
+    /** Poll interval for subscribe. Default: 1 second. */
+    readonly pollInterval?: Duration.DurationInput;
+  },
+): Layer.Layer<EventStoreTag> =>
+  Layer.scoped(
+    EventStoreTag,
+    Effect.gen(function* () {
+      const store = yield* configurePostgresEventStore(options);
+      const base = liftStoreToEffect(store);
+      const interval = options.pollInterval ?? Duration.seconds(1);
+
+      // PubSub for broadcasting new events to subscribers.
+      const pubsub = yield* PubSub.unbounded<readonly StorableEvent[]>();
+
+      // Track the latest timestamp we've seen across ALL scopes.
+      // The poll fiber queries for events newer than this.
+      let cursor: string | undefined;
+
+      // Initialize cursor from the latest event in the store.
+      // If this fails, the layer can't start — die.
+      const initResult = yield* base.fetch({ type: "all" }).pipe(Effect.orDie);
+      if (initResult.length > 0) {
+        cursor = initResult[initResult.length - 1].timestamp;
+      }
+
+      // Background poll fiber: queries for new events and publishes to PubSub.
+      yield* Effect.gen(function* () {
+        const result = yield* base.fetch(
+          cursor
+            ? { type: "since", timestamp: cursor }
+            : { type: "all" },
+        );
+
+        // Filter out events we've already seen (since is >=, not >).
+        // We use eventId dedup via a cursor approach: skip events at
+        // exactly the cursor timestamp that we already delivered.
+        // Simpler: just advance cursor past what we've seen.
+        const newEvents = cursor
+          ? result.filter((e) => e.timestamp > cursor!)
+          : result;
+
+        if (newEvents.length > 0) {
+          cursor = newEvents[newEvents.length - 1].timestamp;
+          yield* PubSub.publish(pubsub, newEvents);
+        }
+      }).pipe(
+        Effect.catchAll((err) =>
+          Effect.logWarning("EventStore poll failed", { error: err }),
+        ),
+        Effect.repeat(Schedule.spaced(interval)),
+        Effect.forkScoped,
+      );
+
+      const service: EventStoreService = {
+        fetch: base.fetch,
+
+        append: (events) =>
+          Effect.gen(function* () {
+            yield* base.append(events);
+            // Also publish directly for zero-latency delivery to local
+            // subscribers (the poll fiber will skip these via cursor).
+            if (events.length > 0) {
+              yield* PubSub.publish(pubsub, events);
+              // Advance cursor so poll fiber doesn't re-deliver.
+              const last = events[events.length - 1];
+              if (!cursor || last.timestamp > cursor) {
+                cursor = last.timestamp;
+              }
+            }
+          }),
+
+        subscribe: (scope: Scope, since?: string) =>
+          Stream.unwrapScoped(
+            Effect.gen(function* () {
+              const queue = yield* PubSub.subscribe(pubsub);
+
+              return Stream.fromQueue(queue).pipe(
+                Stream.map((chunk) => {
+                  const filtered = chunk.filter((e) => {
+                    if (e.scope !== scope) return false;
+                    if (since && e.timestamp <= since) return false;
+                    return true;
+                  });
+                  return filtered;
+                }),
+                Stream.filter((chunk) => chunk.length > 0),
+              );
+            }),
+          ),
+      };
+
+      return service;
+    }),
+  );

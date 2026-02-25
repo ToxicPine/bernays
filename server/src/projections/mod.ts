@@ -2,9 +2,8 @@
 // Event projections barrel
 
 export {
-  EventStoreEffect,
-  makeProjection,
-  makeProjectionEffect,
+  makeProjectionLayer,
+  makeProjectionTag,
   type Projection,
 } from "./projection.ts";
 
@@ -13,7 +12,6 @@ export {
   type Injector,
   type InjectorError,
   type InjectorErrorCode,
-  makeInjector,
-  makeInjectorEffect,
+  makeInjectionLayer,
   makeInjectorTag,
 } from "./injector.ts";

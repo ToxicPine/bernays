@@ -1,46 +1,35 @@
 // src/runtime/sockpuppet/platform-runtime.ts
 // Platform service layer for sockpuppets
 
-import { type Context, Layer } from "effect";
+import { type Context, Effect, Layer } from "effect";
 import type { Scope } from "$/core/branded.ts";
-import type { EventStore, StorableEvent } from "$/store/mod.ts";
+import type { StorableEvent } from "$/store/mod.ts";
 import type { BaseInboxView } from "$/views/inbox.ts";
 import type { BaseThreadView } from "$/views/thread.ts";
 import type { BaseAccount, BaseBoundBrowser } from "$/views/browser.ts";
 import type { BaseContact } from "$/views/contact.ts";
-import { BrowserPool, type BrowserPoolService } from "$/browsers/mod.ts";
+import type { Projection } from "$/projections/projection.ts";
 import {
   type ActionsRecord,
   makePlatformService,
   type PlatformDefinition,
   type PlatformService,
 } from "$/platforms/mod.ts";
-import { makeProjection } from "$/projections/projection.ts";
 
 // =============================================================================
 // Platform Layer Factory
 // =============================================================================
 
 /**
- * Create a Layer that provides a typed Platform service.
+ * Create a Layer that provides a typed Platform service with reactive state.
  *
- * Each platform defines its own tag (e.g., LinkedInPlatform) and this
- * factory creates a layer for that specific tag.
+ * Resolves a Projection from the provided tag, hydrates plugin state via
+ * full-fold, subscribes for reactive updates via a background fiber, and
+ * wires materialization from the Ref.
  *
  * @param tag - The platform-specific context tag (e.g., LinkedInPlatform)
- * @param config - Platform configuration
- *
- * @example
- * ```typescript
- * const actions = makeLinkedInActions(browserPool, account);
- * const layer = makePlatformLayer(LinkedInPlatform, {
- *   platform: linkedInPlatform,
- *   account,
- *   eventStore,
- *   browserPool,
- *   actions,
- * });
- * ```
+ * @param projectionTag - The scope-specific Projection context tag
+ * @param config - Platform configuration (definition, account, actions)
  */
 export function makePlatformLayer<
   TScope extends Scope,
@@ -53,6 +42,7 @@ export function makePlatformLayer<
   TBrowser extends BaseBoundBrowser,
   TContact extends BaseContact<TIdentity>,
   TActions extends ActionsRecord,
+  TPluginState,
   TTag extends Context.Tag<
     any,
     PlatformService<
@@ -67,6 +57,7 @@ export function makePlatformLayer<
   >,
 >(
   tag: TTag,
+  projectionTag: Context.Tag<any, Projection<TEvent>>,
   config: {
     readonly platform: PlatformDefinition<
       TScope,
@@ -77,34 +68,24 @@ export function makePlatformLayer<
       TInbox,
       TAccount,
       TBrowser,
-      TContact
+      TContact,
+      TPluginState
     >;
     readonly account: TAccount;
-    readonly eventStore: EventStore<StorableEvent>;
-    readonly browserPool: BrowserPoolService;
     readonly actions: TActions;
   },
-): Layer.Layer<Context.Tag.Identifier<TTag>> {
-  const { platform, account, eventStore, browserPool, actions } = config;
+) {
+  const { platform, account, actions } = config;
 
-  const projection = makeProjection(
-    platform.scope,
-    platform.eventSchema,
-    eventStore,
-  );
+  const serviceEffect = Effect.gen(function* () {
+    const projection = yield* projectionTag;
+    return yield* makePlatformService(
+      platform,
+      account,
+      projection,
+      actions,
+    );
+  });
 
-  // Create BrowserPool layer from the provided service
-  const browserPoolLayer = Layer.succeed(BrowserPool, browserPool);
-
-  // Create the platform service effect and provide BrowserPool
-  const serviceEffect = makePlatformService(
-    platform,
-    account,
-    projection,
-    actions,
-  );
-
-  return Layer.effect(tag, serviceEffect).pipe(
-    Layer.provide(browserPoolLayer),
-  );
+  return Layer.scoped(tag, serviceEffect);
 }

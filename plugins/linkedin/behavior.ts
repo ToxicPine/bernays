@@ -8,10 +8,13 @@ import {
   type ThreadId,
 } from "@bernays/server/core";
 import {
-  buildThreadGraphs,
+  applyGraphEvent,
   calculateUnreadCount,
+  emptyGraphState,
   extractParticipants,
   type GraphMessage,
+  type GraphState,
+  materializeThreadGraphs,
   type ThreadGraph,
   toMessageViews,
 } from "@bernays/server/views";
@@ -56,6 +59,26 @@ const toLinkedInThread = (
   };
 };
 
+// Plugin State
+
+interface LinkedInPluginState {
+  graph: GraphState;
+  sentInvitations: number;
+  resolvedInvitations: number;
+  weeklyInviteTimestamps: string[];  // timestamps of ConnectionRequestSent events
+  browserStatus: Map<string, {
+    authStatus: LinkedInAuthStatus;
+    rateLimitedUntil?: string;
+  }>;
+  contacts: Map<string, {
+    name?: string;
+    headline?: string;
+    profileUrl?: string;
+    lastInteraction?: string;
+    connectionDegree?: "1st" | "2nd" | "3rd" | "out";
+  }>;
+}
+
 // LinkedIn Behavior
 
 export const linkedInBehavior: PlatformBehavior<
@@ -67,28 +90,169 @@ export const linkedInBehavior: PlatformBehavior<
   LinkedInInbox,
   LinkedInAccount,
   LinkedInBrowser,
-  LinkedInContact
+  LinkedInContact,
+  LinkedInPluginState
 > = {
   scope: LINKEDIN_SCOPE,
   identity: "linkedin",
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Derivation
+  // Incremental state management
   // ─────────────────────────────────────────────────────────────────────────
 
-  deriveInbox: (
-    events: readonly LinkedInEvent[],
+  emptyState: (): LinkedInPluginState => ({
+    graph: emptyGraphState(),
+    sentInvitations: 0,
+    resolvedInvitations: 0,
+    weeklyInviteTimestamps: [],
+    browserStatus: new Map(),
+    contacts: new Map(),
+  }),
+
+  applyEvent: (state: LinkedInPluginState, event: LinkedInEvent): void => {
+    // Always apply to graph state (handles anchor/reply/mutation events)
+    applyGraphEvent(state.graph, event);
+
+    // Invitation tracking
+    if (event.type === "ConnectionRequestSent") {
+      state.sentInvitations++;
+      state.weeklyInviteTimestamps.push(event.timestamp);
+
+      // Update contact: mark as "out" (pending)
+      const connEvent = event as { targetUserId: string };
+      if (connEvent.targetUserId) {
+        const existing = state.contacts.get(connEvent.targetUserId) ?? {};
+        state.contacts.set(connEvent.targetUserId, {
+          ...existing,
+          connectionDegree: "out",
+        });
+      }
+    } else if (
+      event.type === "ConnectionAccepted" ||
+      event.type === "ConnectionRejected" ||
+      event.type === "InvitationWithdrawn"
+    ) {
+      state.resolvedInvitations++;
+
+      // Update contact: mark as "1st" on acceptance
+      if (event.type === "ConnectionAccepted") {
+        const connEvent = event as { userId: string };
+        if (connEvent.userId) {
+          const existing = state.contacts.get(connEvent.userId) ?? {};
+          state.contacts.set(connEvent.userId, {
+            ...existing,
+            connectionDegree: "1st",
+          });
+        }
+      }
+    }
+
+    // Browser auth tracking
+    if (event.type === "AuthObserved") {
+      const authEvent = event as {
+        configId: string;
+        authenticated: boolean;
+      };
+      const { configId } = authEvent;
+      if (configId) {
+        const existing = state.browserStatus.get(configId);
+        state.browserStatus.set(configId, {
+          authStatus: authEvent.authenticated ? "authenticated" : "expired",
+          rateLimitedUntil: existing?.rateLimitedUntil,
+        });
+      }
+    }
+
+    // Browser rate limit tracking
+    if (event.type === "RateLimitObserved") {
+      const rateLimitEvent = event as {
+        configId: string;
+        retryAfter?: string;
+      };
+      const { configId } = rateLimitEvent;
+      if (configId) {
+        const existing = state.browserStatus.get(configId);
+        state.browserStatus.set(configId, {
+          authStatus: existing?.authStatus ?? "unknown",
+          rateLimitedUntil: rateLimitEvent.retryAfter,
+        });
+      }
+    }
+
+    // Contact tracking from search results
+    if (event.type === "SearchResultsRetrieved") {
+      const searchEvent = event as {
+        results: Array<{ userId: string; name?: string; headline?: string }>;
+      };
+      for (const result of searchEvent.results) {
+        const existing = state.contacts.get(result.userId) ?? {};
+        state.contacts.set(result.userId, {
+          ...existing,
+          ...(result.name ? { name: result.name } : {}),
+          ...(result.headline ? { headline: result.headline } : {}),
+        });
+      }
+    }
+
+    // Contact tracking from profile views
+    if (event.type === "ProfileViewed") {
+      const profileEvent = event as {
+        targetUserId: string;
+        profileUrl?: string;
+        viewedAt: string;
+      };
+      if (profileEvent.targetUserId) {
+        const existing = state.contacts.get(profileEvent.targetUserId) ?? {};
+        state.contacts.set(profileEvent.targetUserId, {
+          ...existing,
+          ...(profileEvent.profileUrl
+            ? { profileUrl: profileEvent.profileUrl }
+            : {}),
+          ...(!existing.lastInteraction ||
+          profileEvent.viewedAt > existing.lastInteraction
+            ? { lastInteraction: profileEvent.viewedAt }
+            : {}),
+        });
+      }
+    }
+
+    // Contact tracking from message anchors
+    if (event.type === "AnchorMessageObserved") {
+      const anchorEvent = event as {
+        anchor: { participants: readonly string[] };
+        senderId: string;
+      };
+      for (const pid of anchorEvent.anchor.participants) {
+        const existing = state.contacts.get(pid) ?? {};
+        const updated: typeof existing = { ...existing };
+        if (
+          !existing.lastInteraction ||
+          event.timestamp > existing.lastInteraction
+        ) {
+          updated.lastInteraction = event.timestamp;
+        }
+        // If they're in a DM with us, they're likely 1st degree
+        if (!existing.connectionDegree) {
+          updated.connectionDegree = "1st";
+        }
+        state.contacts.set(pid, updated);
+      }
+    }
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // View materialization
+  // ─────────────────────────────────────────────────────────────────────────
+
+  materializeInbox: (
+    state: LinkedInPluginState,
     participantId: ParticipantIdType<"linkedin">,
   ): LinkedInInbox => {
-    // Events are pre-filtered by scope via the Projection layer
-    const threads = buildThreadGraphs<
+    const threads = materializeThreadGraphs<
       LinkedInScope,
       GraphMessage,
       LinkedInAnchor
-    >(
-      LINKEDIN_SCOPE,
-      events,
-    );
+    >(LINKEDIN_SCOPE, state.graph);
 
     const byThreadId: Record<string, LinkedInIndexMeta> = {};
     for (const thread of threads.values()) {
@@ -101,40 +265,19 @@ export const linkedInBehavior: PlatformBehavior<
       };
     }
 
-    // Calculate pendingInvitations from events
-    // Count sent invitations minus accepted/rejected/withdrawn
-    let sentInvitations = 0;
-    let resolvedInvitations = 0;
-
-    for (const event of events) {
-      if (event.type === "ConnectionRequestSent") {
-        sentInvitations++;
-      } else if (
-        event.type === "ConnectionAccepted" ||
-        event.type === "ConnectionRejected" ||
-        event.type === "InvitationWithdrawn"
-      ) {
-        resolvedInvitations++;
-      }
-    }
-
     const pendingInvitations = Math.max(
       0,
-      sentInvitations - resolvedInvitations,
+      state.sentInvitations - state.resolvedInvitations,
     );
 
-    // Calculate weeklyInvitesRemaining from events
-    // LinkedIn allows ~100 invites per week
+    // Calculate weeklyInvitesRemaining from timestamps
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
     const oneWeekAgoIso = oneWeekAgo.toISOString();
 
     let weeklyInvitesSent = 0;
-    for (const event of events) {
-      if (
-        event.type === "ConnectionRequestSent" &&
-        event.timestamp > oneWeekAgoIso
-      ) {
+    for (const ts of state.weeklyInviteTimestamps) {
+      if (ts > oneWeekAgoIso) {
         weeklyInvitesSent++;
       }
     }
@@ -149,219 +292,94 @@ export const linkedInBehavior: PlatformBehavior<
     };
   },
 
-  deriveThread: (
-    events: readonly LinkedInEvent[],
+  materializeThread: (
+    state: LinkedInPluginState,
     threadId: ThreadId,
   ): LinkedInThread | undefined => {
-    // Events are pre-filtered by scope via the Projection layer
-    const threads = buildThreadGraphs<
+    const threads = materializeThreadGraphs<
       LinkedInScope,
       GraphMessage,
       LinkedInAnchor
-    >(
-      LINKEDIN_SCOPE,
-      events,
-    );
+    >(LINKEDIN_SCOPE, state.graph);
     const thread = threads.get(threadId);
 
     if (!thread) {
       return undefined;
     }
 
-    const authEvent = events.find((e) => e.type === "AuthObserved");
-    const participantId = authEvent
-      ? (authEvent as { participantId: ParticipantIdType<"linkedin"> })
-        .participantId
-      : ParticipantId("linkedin", "");
+    // Since we don't store participantId in state, fall back to empty.
+    // TODO: Consider storing participantId from AuthObserved events in plugin state.
+    const participantId = ParticipantId("linkedin", "");
 
     return toLinkedInThread(thread, participantId);
   },
 
-  deriveBrowsers: (
-    events: readonly LinkedInEvent[],
+  materializeBrowsers: (
+    state: LinkedInPluginState,
     account: LinkedInAccount,
     runningConfigIds: ReadonlySet<BrowserConfigId>,
   ): readonly LinkedInBrowser[] => {
-    // Build browser status from events
-    const browserStatus = new Map<
-      string,
-      {
-        authStatus: LinkedInAuthStatus;
-        rateLimitedUntil?: string;
-        weeklyInvitesSent: number;
-      }
-    >();
-
-    // Calculate weekly invites sent per browser
+    // Calculate weekly invites remaining from timestamps
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
     const oneWeekAgoIso = oneWeekAgo.toISOString();
 
-    // Process events (latest wins for auth, accumulate for rate limits)
-    for (const event of events) {
-      if (event.type === "AuthObserved") {
-        const authEvent = event as {
-          configId: string;
-          authenticated: boolean;
-        };
-        const { configId } = authEvent;
-        if (configId) {
-          const existing = browserStatus.get(configId);
-          browserStatus.set(configId, {
-            authStatus: authEvent.authenticated ? "authenticated" : "expired",
-            rateLimitedUntil: existing?.rateLimitedUntil,
-            weeklyInvitesSent: existing?.weeklyInvitesSent ?? 0,
-          });
-        }
-      } else if (event.type === "RateLimitObserved") {
-        const rateLimitEvent = event as {
-          configId: string;
-          retryAfter?: string;
-        };
-        const { configId } = rateLimitEvent;
-        if (configId) {
-          const existing = browserStatus.get(configId);
-          // Only set rateLimitedUntil if retryAfter is in the future
-          const retryAfter = rateLimitEvent.retryAfter;
-          const isActive = retryAfter && retryAfter > new Date().toISOString();
-          browserStatus.set(configId, {
-            authStatus: existing?.authStatus ?? "unknown",
-            rateLimitedUntil: isActive ? retryAfter : undefined,
-            weeklyInvitesSent: existing?.weeklyInvitesSent ?? 0,
-          });
-        }
-      } else if (
-        event.type === "ConnectionRequestSent" &&
-        event.timestamp > oneWeekAgoIso
-      ) {
-        // Track weekly invites per browser using correlationId to identify browser
-        // For now, we track globally since events don't have configId
-        // In a full implementation, we'd track per-browser
-      }
-    }
-
-    // Count total weekly invites sent (global for now)
     let totalWeeklyInvitesSent = 0;
-    for (const event of events) {
-      if (
-        event.type === "ConnectionRequestSent" &&
-        event.timestamp > oneWeekAgoIso
-      ) {
+    for (const ts of state.weeklyInviteTimestamps) {
+      if (ts > oneWeekAgoIso) {
         totalWeeklyInvitesSent++;
       }
     }
 
     const weeklyInvitesRemaining = Math.max(0, 100 - totalWeeklyInvitesSent);
 
-    // Map account's browser bindings to LinkedInBrowser
     return account.browserBindings.map((binding) => {
-      const status = browserStatus.get(binding.configId) ?? {
-        authStatus: "unknown" as const,
-        weeklyInvitesSent: 0,
-      };
+      const status = state.browserStatus.get(binding.configId);
+
+      // Only apply rateLimitedUntil if it's still in the future
+      const rateLimitedUntil = status?.rateLimitedUntil;
+      const isActive =
+        rateLimitedUntil && rateLimitedUntil > new Date().toISOString();
 
       return {
         configId: binding.configId,
         isRunning: runningConfigIds.has(binding.configId),
         metadata: binding.metadata,
-        authStatus: status.authStatus,
-        rateLimitedUntil: status.rateLimitedUntil,
+        authStatus: status?.authStatus ?? ("unknown" as const),
+        rateLimitedUntil: isActive ? rateLimitedUntil : undefined,
         weeklyInvitesRemaining,
       };
     });
   },
 
-  deriveContact: (
-    events: readonly LinkedInEvent[],
+  materializeContact: (
+    state: LinkedInPluginState,
     participantId: ParticipantIdType<"linkedin">,
   ): LinkedInContact | undefined => {
-    let name: string | undefined;
-    let headline: string | undefined;
-    let profileUrl: string | undefined;
-    let lastInteraction: string | undefined;
-    let connectionDegree: "1st" | "2nd" | "3rd" | "out" | undefined;
+    const contact = state.contacts.get(participantId as string);
 
-    for (const event of events) {
-      // Extract info from search results
-      if (event.type === "SearchResultsRetrieved") {
-        const searchEvent = event as {
-          results: Array<{ userId: string; name?: string; headline?: string }>;
-        };
-        const match = searchEvent.results.find(
-          (r) => r.userId === participantId,
-        );
-        if (match) {
-          if (match.name) name = match.name;
-          if (match.headline) headline = match.headline;
-        }
-      }
-
-      // Extract info from profile views
-      if (event.type === "ProfileViewed") {
-        const profileEvent = event as {
-          targetUserId: string;
-          profileUrl?: string;
-          viewedAt: string;
-        };
-        if (profileEvent.targetUserId === participantId) {
-          if (profileEvent.profileUrl) profileUrl = profileEvent.profileUrl;
-          if (
-            !lastInteraction ||
-            profileEvent.viewedAt > lastInteraction
-          ) {
-            lastInteraction = profileEvent.viewedAt;
-          }
-        }
-      }
-
-      // Track connection status
-      if (event.type === "ConnectionRequestSent") {
-        const connEvent = event as { targetUserId: string };
-        if (connEvent.targetUserId === participantId) {
-          connectionDegree = "out"; // pending
-        }
-      }
-
-      if (event.type === "ConnectionAccepted") {
-        const connEvent = event as { userId: string };
-        if (connEvent.userId === participantId) {
-          connectionDegree = "1st";
-        }
-      }
-
-      // Extract names from message anchor participants
-      if (event.type === "AnchorMessageObserved") {
-        const anchorEvent = event as {
-          anchor: { participants: readonly string[] };
-          senderId: string;
-        };
-        if (anchorEvent.anchor.participants.includes(participantId as string)) {
-          if (
-            !lastInteraction ||
-            event.timestamp > lastInteraction
-          ) {
-            lastInteraction = event.timestamp;
-          }
-          // If they're in a DM with us, they're likely 1st degree
-          if (!connectionDegree) {
-            connectionDegree = "1st";
-          }
-        }
-      }
+    if (!contact) {
+      return undefined;
     }
 
     // Only return contact if we found any info
-    if (!name && !headline && !profileUrl && !lastInteraction) {
+    if (
+      !contact.name &&
+      !contact.headline &&
+      !contact.profileUrl &&
+      !contact.lastInteraction
+    ) {
       return undefined;
     }
 
     return {
       id: participantId,
-      name,
-      headline,
-      profileUrl,
-      connectionDegree,
-      lastInteraction,
+      name: contact.name,
+      headline: contact.headline,
+      profileUrl: contact.profileUrl,
+      connectionDegree: contact.connectionDegree,
+      lastInteraction: contact.lastInteraction,
     };
   },
+
 };

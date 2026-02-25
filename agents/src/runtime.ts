@@ -10,21 +10,29 @@ import {
 } from "@bernays/server/browsers";
 import {
   Briefing,
+  BriefingInjectionLive,
+  BriefingProjectionLive,
   type Journal,
+  JournalInjectionLive,
+  JournalProjectionLive,
   makeBriefingLayer,
   makeJournalLayer,
   makePlatformLayer,
 } from "@bernays/server/runtime";
 import {
   type LinkedInAccount,
+  LinkedInInjectionLive,
   LinkedInPlatform,
+  LinkedInProjection,
+  LinkedInProjectionLive,
   linkedInPlatform,
   makeLinkedInActions,
 } from "@bernays/plugins/linkedin";
-import type {
-  ConfigStoreService,
-  EventStore,
-  StorableEvent,
+import {
+  type ConfigStoreService,
+  EventStoreLive,
+  type EventStore,
+  type StorableEvent,
 } from "@bernays/server/store";
 import { config } from "./config.ts";
 
@@ -49,26 +57,46 @@ const createSockpuppetLayer = (
   // Create typed actions for this account
   const actions = makeLinkedInActions(browserPool, account);
 
-  // Create platform layer with typed tag
-  const platformLayer = makePlatformLayer(LinkedInPlatform, {
+  // EventStore Effect layer from the plain instance
+  const eventStoreLayer = EventStoreLive(eventStore);
+
+  // Platform layer — depends on LinkedInProjection + BrowserPool
+  const platformLayer = makePlatformLayer(LinkedInPlatform, LinkedInProjection, {
     platform: linkedInPlatform,
     account,
-    eventStore,
-    browserPool,
     actions,
   });
 
-  const journalLayer = makeJournalLayer({
-    participantId: account.id,
-    eventStore,
-  });
+  // Journal layer — depends on JournalInjection + JournalProjection
+  const journalLayer = makeJournalLayer(account.id);
 
-  const briefingLayer = makeBriefingLayer({
-    self: config.agentId,
-    eventStore,
-  });
+  // Briefing layer — depends on BriefingInjection + BriefingProjection
+  const briefingLayer = makeBriefingLayer(config.agentId);
 
-  return Layer.merge(Layer.merge(platformLayer, journalLayer), briefingLayer);
+  // BrowserPool layer
+  const browserPoolLayer = Layer.succeed(BrowserPool, browserPool);
+
+  // Compose: all Injection/Projection layers depend on EventStoreTag
+  const injectionProjectionLayers = Layer.mergeAll(
+    LinkedInInjectionLive,
+    LinkedInProjectionLive,
+    JournalInjectionLive,
+    JournalProjectionLive,
+    BriefingInjectionLive,
+    BriefingProjectionLive,
+  ).pipe(Layer.provide(eventStoreLayer));
+
+  // Services depend on their Injection/Projection + BrowserPool
+  const serviceLayer = Layer.mergeAll(
+    platformLayer,
+    journalLayer,
+    briefingLayer,
+  ).pipe(
+    Layer.provide(injectionProjectionLayers),
+    Layer.provide(browserPoolLayer),
+  );
+
+  return serviceLayer;
 };
 
 // ============================================================================

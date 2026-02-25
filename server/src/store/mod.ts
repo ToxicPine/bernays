@@ -1,6 +1,7 @@
 // src/store/mod.ts
 // Event store interfaces for persistence
 
+import { Context, Effect, Layer, PubSub, Stream } from "effect";
 import { z } from "@zod/zod";
 import type { Result } from "$/core/result.ts";
 import { type Scope, Scope as makeScope } from "$/core/branded.ts";
@@ -84,13 +85,144 @@ export interface EventStore<TEvent extends StorableEvent = StorableEvent> {
   ) => Promise<Result<readonly TEvent[], EventStoreError>>;
 }
 
-export { createInMemoryEventStore } from "./memory.ts";
+// =============================================================================
+// Effect Service
+// =============================================================================
+
+/**
+ * Effect-native EventStore service interface.
+ *
+ * This is the idiomatic way to depend on the EventStore in Effect-TS code.
+ * Injection and Projection resolve this from context rather than accepting
+ * a raw EventStore as a parameter.
+ *
+ * The `subscribe` method exposes a reactive stream of new events. How the
+ * stream is produced is an implementation detail: in-memory stores push on
+ * append via PubSub, Postgres stores poll internally on a short interval.
+ */
+export interface EventStoreService {
+  /** Append events atomically (deduplicated by eventId). */
+  readonly append: (
+    events: readonly StorableEvent[],
+  ) => Effect.Effect<void, EventStoreError>;
+
+  /** One-shot query (for startup hydration and API reads). */
+  readonly fetch: (
+    query?: EventStoreQuery,
+  ) => Effect.Effect<readonly StorableEvent[], EventStoreError>;
+
+  /**
+   * Scope-filtered stream of new events.
+   *
+   * Each element in the stream is a chunk of one or more events that arrived
+   * since the last emission. The `since` parameter sets the starting point;
+   * events at or before that timestamp are excluded.
+   *
+   * Implementation decides how the stream is produced:
+   * - In-memory: push on append via PubSub (zero latency)
+   * - Postgres: internal poll on a short interval
+   */
+  readonly subscribe: (
+    scope: Scope,
+    since?: string,
+  ) => Stream.Stream<readonly StorableEvent[], EventStoreError>;
+}
+
+/** Context tag for the EventStore Effect service. */
+export class EventStoreTag extends Context.Tag("EventStore")<
+  EventStoreTag,
+  EventStoreService
+>() {}
+
+/**
+ * Lift append/fetch from a plain Promise-based EventStore into Effect operations.
+ * Used internally by implementation-specific Layer factories. Does NOT provide
+ * `subscribe` — each implementation must add that natively.
+ */
+export const liftStoreToEffect = (
+  store: EventStore<StorableEvent>,
+): Pick<EventStoreService, "append" | "fetch"> => ({
+  append: (events) =>
+    Effect.gen(function* () {
+      const result = yield* Effect.promise(() => store.append(events));
+      if (!result.ok) {
+        return yield* Effect.fail(result.error);
+      }
+    }),
+  fetch: (query) =>
+    Effect.gen(function* () {
+      const result = yield* Effect.promise(() => store.fetch(query));
+      if (!result.ok) {
+        return yield* Effect.fail(result.error);
+      }
+      return result.value;
+    }),
+});
+
+// =============================================================================
+// Generic EventStore → Layer lift
+// =============================================================================
+
+/**
+ * Wrap a raw `EventStore` into a `Layer<EventStoreTag>` with local-only
+ * PubSub-based subscribe.
+ *
+ * Use this when you already hold a Promise-based EventStore instance and
+ * need to inject it into the Effect layer stack. The resulting service
+ * publishes events to subscribers only when `append` is called locally;
+ * there is NO poll for external writers. If you need to react to external
+ * Postgres writes, use `EventStorePostgres` instead.
+ */
+export const EventStoreLive = (
+  store: EventStore<StorableEvent>,
+): Layer.Layer<EventStoreTag> =>
+  Layer.scoped(
+    EventStoreTag,
+    Effect.gen(function* () {
+      const base = liftStoreToEffect(store);
+      const pubsub = yield* PubSub.unbounded<readonly StorableEvent[]>();
+
+      const service: EventStoreService = {
+        fetch: base.fetch,
+
+        append: (events) =>
+          Effect.gen(function* () {
+            yield* base.append(events);
+            if (events.length > 0) {
+              yield* PubSub.publish(pubsub, events);
+            }
+          }),
+
+        subscribe: (scope: Scope, since?: string) =>
+          Stream.unwrapScoped(
+            Effect.gen(function* () {
+              const queue = yield* PubSub.subscribe(pubsub);
+              return Stream.fromQueue(queue).pipe(
+                Stream.map((chunk) =>
+                  chunk.filter((e) => {
+                    if (e.scope !== scope) return false;
+                    if (since && e.timestamp <= since) return false;
+                    return true;
+                  })
+                ),
+                Stream.filter((chunk) => chunk.length > 0),
+              );
+            }),
+          ),
+      };
+
+      return service;
+    }),
+  );
+
+export { createInMemoryEventStore, EventStoreInMemory } from "./memory.ts";
 
 export { createFileEventStore, type FileEventStoreOptions } from "./file.ts";
 
 export {
   configurePostgresEventStore,
   createPostgresEventStore,
+  EventStorePostgres,
   type PostgresEventStoreOptions,
 } from "./postgres.ts";
 
