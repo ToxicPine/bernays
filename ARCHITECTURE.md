@@ -896,7 +896,6 @@ graph TB
     end
 
     subgraph "Layer 4: Platform"
-        REF["Ref (Plugin State)"]
         PL[Platform Service]
         JN[Journal]
         BR[Briefing]
@@ -913,8 +912,7 @@ graph TB
     PL -->|"actions emit events"| INJ
     INJ --> ES
     PR --> ES
-    PR -->|"events"| REF
-    PL -->|"Ref.get + materialize"| REF
+    PL -->|"query events"| PR
     PL --> BP
     JN --> INJ
     JN --> PR
