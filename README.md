@@ -1,5 +1,10 @@
 # Bernays, or: Claude Code for Bots
 
+[![CI](https://github.com/ToxicPine/bernays/actions/workflows/ci.yml/badge.svg)](https://github.com/ToxicPine/bernays/actions/workflows/ci.yml)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![stability-wip](https://img.shields.io/badge/stability-wip-lightgrey.svg)](https://github.com/mkenney/software-guides/blob/master/STABILITY-BADGES.md)
+[![built with nix](https://builtwithnix.org/badge.svg)](https://builtwithnix.org)
+
 **WARNING: THIS IS PRE-ALPHA SOFTWARE, IT'S YET TO BE FULLY TESTED.**
 
 Vibecoding bot swarms to shill your products just got a lot easier! With
