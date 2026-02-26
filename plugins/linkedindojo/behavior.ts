@@ -4,16 +4,19 @@
 import {
   type BrowserConfigId,
   ParticipantId,
+  ParticipantIdFromString,
   type ParticipantId as ParticipantIdType,
   type ThreadId,
 } from "@bernays/server/core";
 import {
-  buildThreadGraphs,
+  applyGraphEvent,
   calculateUnreadCount,
-  extractParticipants,
+  emptyGraphState,
   type GraphMessage,
+  type GraphState,
+  graphNodesToMessages,
+  materializeThreadGraphs,
   type ThreadGraph,
-  toMessageViews,
 } from "@bernays/server/views";
 import type { PlatformBehavior } from "@bernays/server/platforms";
 import { makeInjectorTag } from "@bernays/server/projections";
@@ -40,6 +43,18 @@ import {
 const LINKEDIN_IDENTITY = "linkedin" as const;
 type LinkedInIdentity = typeof LINKEDIN_IDENTITY;
 
+export interface LinkedInDojoPluginState {
+  graph: GraphState;
+  browserStatus: Map<string, {
+    authStatus: LinkedInAuthStatus;
+    rateLimitedUntil?: string;
+  }>;
+  contacts: Map<string, {
+    lastInteraction?: string;
+  }>;
+  authParticipantId?: ParticipantIdType<LinkedInIdentity>;
+}
+
 export const LinkedInDojoInjector = makeInjectorTag<LinkedInDojoEvent>(
   "LinkedInDojoInjector",
 );
@@ -48,13 +63,18 @@ const toLinkedInThread = (
   graph: ThreadGraph<LinkedInDojoScope, GraphMessage, LinkedInAnchor>,
   participantId: ParticipantIdType<LinkedInIdentity>,
 ): LinkedInThread => {
-  const messages = toMessageViews<LinkedInIdentity>(graph);
+  const messages = graphNodesToMessages(graph.nodes).map((m) => ({
+    id: m.canonicalId,
+    senderId: ParticipantIdFromString<LinkedInIdentity>(m.senderId),
+    content: m.content,
+    timestamp: m.timestamp,
+  }));
   const unreadCount = calculateUnreadCount(messages, participantId);
 
   return {
     threadId: graph.id,
     messages,
-    participants: extractParticipants<LinkedInIdentity>(graph.anchor),
+    participants: graph.anchor.participants.map((id) => ({ id })),
     anchor: graph.anchor,
     unreadCount,
     isSponsored: false,
@@ -71,28 +91,102 @@ export const linkedInDojoBehavior: PlatformBehavior<
   LinkedInInbox,
   LinkedInAccount,
   LinkedInBrowser,
-  LinkedInContact
+  LinkedInContact,
+  LinkedInDojoPluginState
 > = {
   scope: LINKEDIN_DOJO_SCOPE,
   identity: LINKEDIN_IDENTITY,
 
-  deriveInbox: (
-    events: readonly LinkedInDojoEvent[],
+  // ─────────────────────────────────────────────────────────────────────────
+  // Incremental state management
+  // ─────────────────────────────────────────────────────────────────────────
+
+  emptyState: (): LinkedInDojoPluginState => ({
+    graph: emptyGraphState(),
+    browserStatus: new Map(),
+    contacts: new Map(),
+  }),
+
+  applyEvent: (state: LinkedInDojoPluginState, event: LinkedInDojoEvent): void => {
+    applyGraphEvent(state.graph, event);
+
+    if (event.type === "AuthObserved") {
+      const authEvent = event as {
+        configId: string;
+        authenticated: boolean;
+        participantId: ParticipantIdType<LinkedInIdentity>;
+      };
+      const configId = authEvent.configId;
+      if (configId) {
+        const existing = state.browserStatus.get(configId);
+        state.browserStatus.set(configId, {
+          authStatus: authEvent.authenticated ? "authenticated" : "expired",
+          rateLimitedUntil: existing?.rateLimitedUntil,
+        });
+      }
+      state.authParticipantId = authEvent.participantId;
+    } else if (event.type === "RateLimitObserved") {
+      const rateLimitEvent = event as {
+        configId: string;
+        retryAfter?: string;
+      };
+      const configId = rateLimitEvent.configId;
+      if (configId) {
+        const existing = state.browserStatus.get(configId);
+        const retryAfter = rateLimitEvent.retryAfter;
+        const isActive = retryAfter && retryAfter > new Date().toISOString();
+        state.browserStatus.set(configId, {
+          authStatus: existing?.authStatus ?? "unknown",
+          rateLimitedUntil: isActive ? retryAfter : undefined,
+        });
+      }
+    } else if (event.type === "AnchorMessageObserved") {
+      const anchorEvent = event as {
+        anchor: { participants: readonly string[] };
+        timestamp: string;
+      };
+      for (const pid of anchorEvent.anchor.participants) {
+        const existing = state.contacts.get(pid);
+        if (!existing?.lastInteraction || event.timestamp > existing.lastInteraction) {
+          state.contacts.set(pid, { lastInteraction: event.timestamp });
+        }
+      }
+    } else if (event.type === "MessageObserved" || event.type === "MessageSent") {
+      const msgEvent = event as { senderId: string; timestamp: string };
+      if (msgEvent.senderId) {
+        const existing = state.contacts.get(msgEvent.senderId);
+        if (!existing?.lastInteraction || event.timestamp > existing.lastInteraction) {
+          state.contacts.set(msgEvent.senderId, { lastInteraction: event.timestamp });
+        }
+      }
+    }
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // View materialization — pure projections from accumulated state
+  // ─────────────────────────────────────────────────────────────────────────
+
+  materializeInbox: (
+    state: LinkedInDojoPluginState,
     participantId: ParticipantIdType<LinkedInIdentity>,
   ): LinkedInInbox => {
-    // Events are pre-filtered by scope via the Projection layer
-    const threads = buildThreadGraphs<
+    const threads = materializeThreadGraphs<
       LinkedInDojoScope,
       GraphMessage,
       LinkedInAnchor
     >(
       LINKEDIN_DOJO_SCOPE,
-      events,
+      state.graph,
     );
 
     const byThreadId: Record<string, LinkedInIndexMeta> = {};
     for (const thread of threads.values()) {
-      const messages = toMessageViews<LinkedInIdentity>(thread);
+      const messages = graphNodesToMessages(thread.nodes).map((m) => ({
+        id: m.canonicalId,
+        senderId: ParticipantIdFromString<LinkedInIdentity>(m.senderId),
+        content: m.content,
+        timestamp: m.timestamp,
+      }));
       const unreadCount = calculateUnreadCount(messages, participantId);
       byThreadId[thread.id] = {
         lastActivity: thread.lastActivity,
@@ -113,18 +207,17 @@ export const linkedInDojoBehavior: PlatformBehavior<
     };
   },
 
-  deriveThread: (
-    events: readonly LinkedInDojoEvent[],
+  materializeThread: (
+    state: LinkedInDojoPluginState,
     threadId: ThreadId,
   ): LinkedInThread | undefined => {
-    // Events are pre-filtered by scope via the Projection layer
-    const threads = buildThreadGraphs<
+    const threads = materializeThreadGraphs<
       LinkedInDojoScope,
       GraphMessage,
       LinkedInAnchor
     >(
       LINKEDIN_DOJO_SCOPE,
-      events,
+      state.graph,
     );
     const thread = threads.get(threadId);
 
@@ -132,62 +225,16 @@ export const linkedInDojoBehavior: PlatformBehavior<
       return undefined;
     }
 
-    // Find participantId from auth event
-    const authEvent = events.find((e) => e.type === "AuthObserved");
-    const participantId = authEvent
-      ? (authEvent as { participantId: ParticipantIdType<LinkedInIdentity> })
-        .participantId
-      : ParticipantId(LINKEDIN_IDENTITY, "");
+    const participantId = state.authParticipantId ?? ParticipantId(LINKEDIN_IDENTITY, "");
 
     return toLinkedInThread(thread, participantId);
   },
 
-  deriveBrowsers: (
-    events: readonly LinkedInDojoEvent[],
+  materializeBrowsers: (
+    state: LinkedInDojoPluginState,
     account: LinkedInAccount,
     runningConfigIds: ReadonlySet<BrowserConfigId>,
   ): readonly LinkedInBrowser[] => {
-    // Build browser status from events
-    const browserStatus = new Map<
-      string,
-      {
-        authStatus: LinkedInAuthStatus;
-        rateLimitedUntil?: string;
-      }
-    >();
-
-    for (const event of events) {
-      if (event.type === "AuthObserved") {
-        const authEvent = event as {
-          configId: string;
-          authenticated: boolean;
-        };
-        const configId = authEvent.configId;
-        if (configId) {
-          const existing = browserStatus.get(configId);
-          browserStatus.set(configId, {
-            authStatus: authEvent.authenticated ? "authenticated" : "expired",
-            rateLimitedUntil: existing?.rateLimitedUntil,
-          });
-        }
-      } else if (event.type === "RateLimitObserved") {
-        const rateLimitEvent = event as {
-          configId: string;
-          retryAfter?: string;
-        };
-        const configId = rateLimitEvent.configId;
-        if (configId) {
-          const existing = browserStatus.get(configId);
-          const retryAfter = rateLimitEvent.retryAfter;
-          const isActive = retryAfter && retryAfter > new Date().toISOString();
-          browserStatus.set(configId, {
-            authStatus: existing?.authStatus ?? "unknown",
-            rateLimitedUntil: isActive ? retryAfter : undefined,
-          });
-        }
-      }
-    }
-
     // For dojo, all bound browsers are considered "running" (phantom browsers)
     // Use the provided runningConfigIds OR treat all as running if empty
     const effectiveRunningIds = runningConfigIds.size > 0
@@ -195,7 +242,7 @@ export const linkedInDojoBehavior: PlatformBehavior<
       : new Set(account.browserBindings.map((b) => b.configId));
 
     return account.browserBindings.map((binding) => {
-      const status = browserStatus.get(binding.configId) ?? {
+      const status = state.browserStatus.get(binding.configId) ?? {
         authStatus: "unknown" as const,
       };
 
@@ -210,48 +257,19 @@ export const linkedInDojoBehavior: PlatformBehavior<
     });
   },
 
-  deriveContact: (
-    events: readonly LinkedInDojoEvent[],
+  materializeContact: (
+    state: LinkedInDojoPluginState,
     participantId: ParticipantIdType<LinkedInIdentity>,
   ): LinkedInContact | undefined => {
-    let lastInteraction: string | undefined;
-
-    // In dojo, names are managed by the TUI via initialParticipants.
-    // deriveContact tracks interaction times from events.
-    for (const event of events) {
-      // Track anchor participation
-      if (event.type === "AnchorMessageObserved") {
-        const anchorEvent = event as {
-          anchor: { participants: readonly string[] };
-          timestamp: string;
-        };
-
-        if (anchorEvent.anchor.participants.includes(participantId as string)) {
-          if (!lastInteraction || event.timestamp > lastInteraction) {
-            lastInteraction = event.timestamp;
-          }
-        }
-      }
-
-      // Track message interactions
-      if (
-        event.type === "MessageObserved" ||
-        event.type === "MessageSent"
-      ) {
-        const msgEvent = event as { senderId: string; timestamp: string };
-        if (msgEvent.senderId === participantId) {
-          if (!lastInteraction || event.timestamp > lastInteraction) {
-            lastInteraction = event.timestamp;
-          }
-        }
-      }
+    const contact = state.contacts.get(participantId as string);
+    if (!contact) {
+      return undefined;
     }
 
     return {
       id: participantId,
-      lastInteraction,
+      lastInteraction: contact.lastInteraction,
     };
   },
-  // Note: Actions (sendMessage, etc.) are now handled via the service layer
-  // using the LinkedInDojoInjector tag for event injection.
+
 };

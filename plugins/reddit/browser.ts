@@ -24,7 +24,7 @@ export type RedditAuthStatus =
  * Reddit-specific browser view.
  * Extends BaseBoundBrowser with Reddit-specific status fields.
  *
- * The behavior's `deriveBrowsers` function produces these from events:
+ * The behavior's `materializeBrowsers` function produces these from state:
  * - Auth events determine authStatus
  * - Ban events determine isBanned
  * - Rate limit events determine rateLimitedUntil

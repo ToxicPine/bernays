@@ -33,11 +33,11 @@ export const sockpuppet = Effect.gen(function* () {
 async function main() {
   tty.info("BERNAYS\n");
 
-  const { configStore, eventStore, account } = await initializeStores();
+  const { configStore, eventStoreLayer, account } = await initializeStores();
   const browserLayer = createBrowserLayer(configStore);
 
   if (config.runSockpuppet) {
-    const program = runWithSockpuppet(sockpuppet, account, eventStore);
+    const program = runWithSockpuppet(sockpuppet, account, eventStoreLayer);
     await Effect.runPromise(Effect.provide(program, browserLayer));
   }
 

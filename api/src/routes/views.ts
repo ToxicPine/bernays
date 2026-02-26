@@ -262,7 +262,10 @@ export const viewsRoutes = (ctx: ServerContext) => {
     }
     const participantId = makeParticipantId(platform, id);
     const events = await Effect.runPromise(resolved.projection.query(since));
-    const inbox = resolved.def.behavior.deriveInbox(events, participantId);
+    const { behavior } = resolved.def;
+    const state = behavior.emptyState();
+    for (const event of events) behavior.applyEvent(state, event);
+    const inbox = behavior.materializeInbox(state, participantId);
     return c.json(
       InboxResponseSchema.parse({ inbox }),
       200,
@@ -279,7 +282,10 @@ export const viewsRoutes = (ctx: ServerContext) => {
     }
     const threadId = ThreadId(rawThreadId);
     const events = await Effect.runPromise(resolved.projection.query(since));
-    const thread = resolved.def.behavior.deriveThread(events, threadId);
+    const { behavior } = resolved.def;
+    const state = behavior.emptyState();
+    for (const event of events) behavior.applyEvent(state, event);
+    const thread = behavior.materializeThread(state, threadId);
     if (!thread) {
       return c.json({ error: "Thread Not Found" }, 404);
     }
@@ -305,10 +311,13 @@ export const viewsRoutes = (ctx: ServerContext) => {
     }
     const account = accountOpt.value;
     const events = await Effect.runPromise(resolved.projection.query());
+    const { behavior } = resolved.def;
+    const state = behavior.emptyState();
+    for (const event of events) behavior.applyEvent(state, event);
     // TODO: wire in BrowserPool for live running status
     const runningConfigIds = new Set<ReturnType<typeof BrowserConfigId>>();
-    const browsers = resolved.def.behavior.deriveBrowsers(
-      events,
+    const browsers = behavior.materializeBrowsers(
+      state,
       account,
       runningConfigIds,
     );
@@ -325,7 +334,8 @@ export const viewsRoutes = (ctx: ServerContext) => {
     if (!resolved?.projection) {
       return c.json({ error: "Unknown Platform Or No Projection" }, 404);
     }
-    if (!resolved.def.behavior.deriveContact) {
+    const { behavior } = resolved.def;
+    if (!behavior.materializeContact) {
       return c.json(
         { error: "Platform Does Not Support Contact Derivation" },
         404,
@@ -333,7 +343,9 @@ export const viewsRoutes = (ctx: ServerContext) => {
     }
     const contactId = makeParticipantId(platform, rawParticipantId);
     const events = await Effect.runPromise(resolved.projection.query());
-    const contact = resolved.def.behavior.deriveContact(events, contactId);
+    const state = behavior.emptyState();
+    for (const event of events) behavior.applyEvent(state, event);
+    const contact = behavior.materializeContact(state, contactId);
     if (!contact) {
       return c.json({ error: "Contact Not Found" }, 404);
     }

@@ -22,7 +22,7 @@ import type { XBrowser } from "./browser.ts";
 import type { XContact } from "./contact.ts";
 
 // Behavior
-import { xBehavior } from "./behavior.ts";
+import { xBehavior, type XPluginState } from "./behavior.ts";
 
 export const xPlatform: PlatformDefinition<
   XScope,
@@ -33,7 +33,8 @@ export const xPlatform: PlatformDefinition<
   XInbox,
   XAccount,
   XBrowser,
-  XContact
+  XContact,
+  XPluginState
 > = {
   scope: X_SCOPE,
   identity: "x",
@@ -98,4 +99,4 @@ export {
 } from "./account.ts";
 
 // Behavior
-export { xBehavior } from "./behavior.ts";
+export { xBehavior, type XPluginState } from "./behavior.ts";

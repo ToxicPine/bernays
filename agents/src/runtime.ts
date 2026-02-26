@@ -17,22 +17,20 @@ import {
 } from "@bernays/server/runtime";
 import {
   type LinkedInAccount,
+  LinkedInInjection,
   LinkedInPlatform,
+  LinkedInProjection,
   linkedInPlatform,
   makeLinkedInActions,
 } from "@bernays/plugins/linkedin";
-import type {
-  ConfigStoreService,
-  EventStore,
-  StorableEvent,
-} from "@bernays/server/store";
+import { type EventStoreTag } from "@bernays/server/store";
 import { config } from "./config.ts";
 
 // ============================================================================
 // Browser Layer
 // ============================================================================
 
-export const createBrowserLayer = (configStore: ConfigStoreService) => {
+export const createBrowserLayer = (configStore: import("@bernays/server/store").ConfigStoreService) => {
   const pool = makeBrowserbaseBackend(config.browserbaseApiKey, configStore);
   return BrowserPoolLive(pool);
 };
@@ -43,32 +41,38 @@ export const createBrowserLayer = (configStore: ConfigStoreService) => {
 
 const createSockpuppetLayer = (
   account: LinkedInAccount,
-  eventStore: EventStore<StorableEvent>,
+  eventStoreLayer: Layer.Layer<EventStoreTag>,
   browserPool: BrowserPoolService,
 ) => {
-  // Create typed actions for this account
   const actions = makeLinkedInActions(browserPool, account);
 
-  // Create platform layer with typed tag
-  const platformLayer = makePlatformLayer(LinkedInPlatform, {
-    platform: linkedInPlatform,
-    account,
-    eventStore,
-    browserPool,
-    actions,
-  });
+  // platformLayer creates LinkedIn injection/projection internally and exports them
+  const platformLayer = makePlatformLayer(
+    LinkedInPlatform,
+    LinkedInInjection,
+    LinkedInProjection,
+    {
+      platform: linkedInPlatform,
+      account,
+      actions,
+    },
+  );
 
-  const journalLayer = makeJournalLayer({
-    participantId: account.id,
-    eventStore,
-  });
+  // All layers create their own injection/projection internally - only need EventStoreTag
+  const journalLayer = makeJournalLayer(account.id);
+  const briefingLayer = makeBriefingLayer(config.agentId);
+  const browserPoolLayer = Layer.succeed(BrowserPool, browserPool);
 
-  const briefingLayer = makeBriefingLayer({
-    self: config.agentId,
-    eventStore,
-  });
+  const serviceLayer = Layer.mergeAll(
+    platformLayer,
+    journalLayer,
+    briefingLayer,
+  ).pipe(
+    Layer.provide(eventStoreLayer),
+    Layer.provide(browserPoolLayer),
+  );
 
-  return Layer.merge(Layer.merge(platformLayer, journalLayer), briefingLayer);
+  return serviceLayer;
 };
 
 // ============================================================================
@@ -78,10 +82,10 @@ const createSockpuppetLayer = (
 export const runWithSockpuppet = <A, E>(
   sockpuppet: Effect.Effect<A, E, LinkedInPlatform | Journal | Briefing>,
   account: LinkedInAccount,
-  eventStore: EventStore<StorableEvent>,
+  eventStoreLayer: Layer.Layer<EventStoreTag>,
 ) =>
   Effect.gen(function* () {
     const pool = yield* BrowserPool;
-    const layer = createSockpuppetLayer(account, eventStore, pool);
+    const layer = createSockpuppetLayer(account, eventStoreLayer, pool);
     yield* Effect.provide(sockpuppet, layer);
   });

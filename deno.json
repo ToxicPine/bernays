@@ -1,5 +1,6 @@
 {
   "nodeModulesDir": "auto",
+  "exclude": ["secret-sauce/"],
   "workspace": [
     "./server",
     "./plugins",
@@ -11,7 +12,7 @@
   "tasks": {
     "dev": "deno run --allow-all agents/src/main.ts",
     "dev:api": "deno run --allow-all api/src/main.ts",
-    "test": "deno test --allow-all",
+    "test": "deno test --allow-all tests/",
     "check": "deno check server/**/*.ts plugins/**/*.ts agents/**/*.ts api/**/*.ts tests/**/*.ts",
     "test:e2e:all": "deno test --allow-all tests/e2e/"
   }

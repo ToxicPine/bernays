@@ -24,7 +24,6 @@ export type LinkedInTestConfig = z.infer<typeof LinkedInTestConfigSchema>;
 export const LocalTestConfigSchema = z.object({
   headless: z.boolean().default(false),
   userDataDir: z.string().optional(),
-  slowMo: z.number().optional(),
 });
 
 export type LocalTestConfig = z.infer<typeof LocalTestConfigSchema>;
@@ -70,7 +69,6 @@ const ENV_VAR_NAMES: Record<string, string> = {
   linkedinTestThreadId: "LINKEDIN_TEST_THREAD_ID",
   headless: "HEADLESS",
   userDataDir: "USER_DATA_DIR",
-  slowMo: "SLOW_MO",
 };
 
 const loadEnvAndParse = async () => {
@@ -171,9 +169,6 @@ export const loadLocalTestConfig = async (): Promise<LocalTestConfig> => {
   const result = LocalTestConfigSchema.safeParse({
     headless: Deno.env.get("HEADLESS") === "true",
     userDataDir: Deno.env.get("USER_DATA_DIR") || undefined,
-    slowMo: Deno.env.get("SLOW_MO")
-      ? parseInt(Deno.env.get("SLOW_MO")!, 10)
-      : undefined,
   });
 
   if (result.success) {

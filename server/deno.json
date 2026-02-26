@@ -2,19 +2,19 @@
   "name": "@bernays/server",
   "version": "0.1.0",
   "exports": {
-    "./core": "./src/core/mod.ts",
-    "./events": "./src/events/mod.ts",
-    "./intents": "./src/intents/mod.ts",
-    "./store": "./src/store/mod.ts",
-    "./browsers": "./src/browsers/mod.ts",
-    "./platforms": "./src/platforms/mod.ts",
-    "./views": "./src/views/mod.ts",
-    "./projections": "./src/projections/mod.ts",
-    "./runtime": "./src/runtime/mod.ts",
-    "./briefing": "./src/briefing/mod.ts"
+    "./core": "./core/mod.ts",
+    "./events": "./events/mod.ts",
+    "./intents": "./intents/mod.ts",
+    "./store": "./store/mod.ts",
+    "./browsers": "./browsers/mod.ts",
+    "./platforms": "./platforms/mod.ts",
+    "./views": "./views/mod.ts",
+    "./projections": "./projections/mod.ts",
+    "./runtime": "./runtime/mod.ts",
+    "./briefing": "./briefing/mod.ts"
   },
   "imports": {
-    "$/": "./src/",
+    "$/": "./",
     "@std/async": "jsr:@std/async@^1.0.16",
     "@std/encoding": "jsr:@std/encoding@^1.0.10",
     "@zod/zod": "jsr:@zod/zod@^4.3.5",
@@ -33,7 +33,7 @@
     "noUnusedParameters": true,
     "skipLibCheck": true,
     "paths": {
-      "$/*": ["./src/*"]
+      "$/*": ["./*"]
     }
   }
 }

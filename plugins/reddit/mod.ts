@@ -22,7 +22,7 @@ import type { RedditBrowser } from "./browser.ts";
 import type { RedditContact } from "./contact.ts";
 
 // Behavior
-import { redditBehavior } from "./behavior.ts";
+import { redditBehavior, type RedditPluginState } from "./behavior.ts";
 
 export const redditPlatform: PlatformDefinition<
   RedditScope,
@@ -33,7 +33,8 @@ export const redditPlatform: PlatformDefinition<
   RedditInbox,
   RedditAccount,
   RedditBrowser,
-  RedditContact
+  RedditContact,
+  RedditPluginState
 > = {
   scope: REDDIT_SCOPE,
   identity: "reddit",
@@ -88,4 +89,4 @@ export {
 } from "./account.ts";
 
 // Behavior
-export { redditBehavior } from "./behavior.ts";
+export { redditBehavior, type RedditPluginState } from "./behavior.ts";

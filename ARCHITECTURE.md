@@ -103,11 +103,15 @@ Everything complex is hidden behind these three interfaces.
 Events flow through one path:
 
 ```
-Source → Injection → EventStore → Projection → Platform → Sockpuppet
+Source → Injection → EventStore → Projection (subscribe) → Plugin State (Ref) → Sockpuppet
 ```
 
 Auth events, message events, rate limit events—all platform-scoped, all the same
-pipe. No separate loops for different event types.
+pipe. No separate loops for different event types. Injection validates and
+persists to the EventStore. The EventStore pushes new events to subscribers.
+Projection wraps the store's subscribe stream with Zod validation. A background
+fiber folds events from the Projection stream into plugin-wide state held in a
+`Ref`. Sockpuppets read from the state via pure materialization.
 
 Events enter the system from two sources:
 
@@ -120,13 +124,22 @@ Events enter the system from two sources:
 ### 3. Derive Everything
 
 Inbox, threads, auth state, rate limits, contacts—all derived from the event
-stream by pure functions. Nothing is stored except the append-only event log.
+stream by folding events into plugin-wide state. Sockpuppets read from this
+state via pure materialization functions.
+
+The EventStore is reactive: it exposes a `subscribe` stream that delivers new
+events as they arrive. Projection wraps this stream with Zod validation.
+How the stream is produced is an implementation detail inside the EventStore —
+in-memory stores push directly on append; Postgres stores poll internally.
+Nothing above the Projection knows or cares.
 
 This enables:
 
-- **Restartability**: Rebuild state by replaying events
+- **Restartability**: Rebuild state by replaying events from the store
 - **Auditability**: Complete history of everything that happened
 - **Consistency**: Single source of truth, no sync issues
+- **Swappable backend**: The EventStore boundary hides whether the stream is
+  backed by a PubSub, a poll loop, or a native change stream
 
 ### 4. Scope-Based Event Routing
 
@@ -199,15 +212,17 @@ graph LR
     ACT[Platform Actions] --> INJ[Injection]
     API[HTTP API] --> INJ
     INJ --> ES[(EventStore)]
-    ES --> PR[Projection]
-    PR --> PL[Platform]
-    PL --> SP[Sockpuppet]
+    ES -->|"subscribe stream"| PR[Projection]
+    PR -->|"background fiber folds"| PL[Platform Service]
+    PL -->|"Ref.get + materialize"| SP[Sockpuppet]
 ```
 
-All events flow through injection into the append-only event store, regardless
-of source. Platform actions automate browsers via CDP and emit events; the HTTP
-API accepts external event submission. Projection provides typed access; the
-platform service derives everything from that.
+All events flow through Injection, which validates via Zod and persists to the
+append-only event store. The EventStore pushes new events to subscribers via a
+scoped stream. Projection wraps this stream with Zod validation. A background
+fiber folds events from the stream into plugin-wide state held in a `Ref`
+(internal to the platform layer). The platform service materializes views from
+this state via pure functions on read.
 
 ---
 
@@ -476,7 +491,33 @@ Thread identity = walking `predecessorId` back to a root.
 
 ### Thread Graph Building
 
-The `buildThreadGraphs` utility processes events into typed thread graphs:
+The thread graph is built from three primitives that support both full-fold and
+incremental usage:
+
+```typescript
+interface GraphState {
+  readonly nodes: Map<string, NodeState>;
+  readonly children: Map<string, string[]>;
+}
+
+// Initialize empty state
+const emptyGraphState = (): GraphState;
+
+// Apply a single event to the graph state (incremental)
+const applyGraphEvent = (state: GraphState, event: StorableEvent): void;
+
+// Materialize thread graphs from accumulated state
+const materializeThreads = <TScope, TMessage, TAnchor>(
+  scope: TScope,
+  state: GraphState,
+): Map<ThreadId, ThreadGraph<TScope, TMessage, TAnchor>>;
+
+// Convenience: full-fold from events (init + fold + materialize)
+function buildThreadGraphs<TScope, TMessage, TAnchor>(
+  scope: TScope,
+  events: readonly StorableEvent[],
+): Map<ThreadId, ThreadGraph<TScope, TMessage, TAnchor>>;
+```
 
 ```typescript
 interface ThreadGraph<
@@ -485,34 +526,16 @@ interface ThreadGraph<
   TAnchor = unknown,
 > {
   readonly id: ThreadId;
-  readonly scope: TScope; // Typed to the platform scope
+  readonly scope: TScope;
   readonly anchor: TAnchor;
   readonly nodes: readonly GraphNode<TMessage>[];
   readonly lastActivity: string;
 }
-
-function buildThreadGraphs<TScope, TMessage, TAnchor>(
-  scope: TScope,
-  events: readonly StorableEvent[],
-): Map<ThreadId, ThreadGraph<TScope, TMessage, TAnchor>>;
 ```
 
-**Usage in behaviors:**
-
-```typescript
-// Events are pre-filtered by scope via Projection layer
-deriveInbox: ((events: readonly LinkedInEvent[]): LinkedInInbox => {
-  const threads = buildThreadGraphs<"linkedin", GraphMessage, LinkedInAnchor>(
-    "linkedin", // Scope types the returned ThreadGraph
-    events,
-  );
-
-  // No filtering needed—events are already scope-filtered
-  for (const thread of threads.values()) {
-    // thread.scope is typed as "linkedin"
-  }
-});
-```
+Plugin behaviors include `GraphState` in their plugin-wide state and call
+`applyGraphEvent` from their `applyEvent` reducer. Materialization calls
+`materializeThreads` on the accumulated graph state—no re-fold needed.
 
 The scope parameter ensures returned `ThreadGraph` instances are typed with the
 correct scope, providing compile-time safety.
@@ -675,9 +698,10 @@ interface LinkedInActions extends ActionsRecord {
 TypeScript enforces that all properties in `LinkedInActions` are valid
 `PlatformMethod` types.
 
-### PlatformBehavior: Pure Derivation
+### PlatformBehavior: Incremental State + Pure Materialization
 
-Pure derivation functions over event streams. Two scope parameters:
+Platform behaviors define how events fold into state and how state materializes
+into views. Two scope parameters:
 
 - **TScope**: The `scope` field on events (e.g., `"linkedin"` or
   `"linkedindojo"`)
@@ -696,31 +720,74 @@ interface PlatformBehavior<
   TAccount extends BaseAccount<TIdentity>,
   TBrowser extends BaseBoundBrowser,
   TContact extends BaseContact<TIdentity>,
+  TPluginState,
 > {
   readonly scope: TScope;
   readonly identity: TIdentity;
 
-  readonly deriveInbox: (
-    events: readonly TEvent[],
+  // ── State management ──────────────────────────────────────────────────
+  /** Create an empty plugin-wide state. */
+  readonly emptyState: () => TPluginState;
+
+  /** Apply a single event to the plugin state. Mutates in place. */
+  readonly applyEvent: (state: TPluginState, event: TEvent) => void;
+
+  // ── View materialization (pure projections from accumulated state) ────
+  readonly materializeInbox: (
+    state: TPluginState,
     participantId: ParticipantId<TIdentity>,
   ) => TInbox;
 
-  readonly deriveThread: (
-    events: readonly TEvent[],
+  readonly materializeThread: (
+    state: TPluginState,
     threadId: ThreadId,
   ) => TThread | undefined;
 
-  readonly deriveBrowsers: (
-    events: readonly TEvent[],
+  readonly materializeBrowsers: (
+    state: TPluginState,
     account: TAccount,
     runningConfigIds: ReadonlySet<BrowserConfigId>,
   ) => readonly TBrowser[];
 
-  readonly deriveContact?: (
-    events: readonly TEvent[],
+  readonly materializeContact?: (
+    state: TPluginState,
     participantId: ParticipantId<TIdentity>,
   ) => TContact | undefined;
 }
+```
+
+**`TPluginState` is fully opaque to the framework.** The runtime wires
+`emptyState`, `applyEvent`, and `materialize*` through the PubSub/Ref machinery
+but never inspects or constrains what `TPluginState` contains. Each plugin
+decides its own state schema, its own reducer logic, and its own materialization
+strategy. LinkedIn can track invitation counters and connection degrees; Reddit
+can track ban status and karma; X can track suspension and read/write
+capabilities. The only shared piece is `GraphState` from `graph.ts`, which
+plugins can include in their state for thread graph tracking — but even this is
+optional.
+
+**Plugin state is plugin-wide, not per-account.** The thread graph, contact
+info, browser statuses, and all counters are accumulated across all events for
+the scope. Account-specific views (inbox, thread) are projected from the shared
+state by passing a `participantId` to the materialize function.
+
+**`applyEvent` is the existing derivation logic, factored out.** Each platform's
+`for (const event of events)` loops from the old `deriveInbox`, `deriveBrowsers`,
+`deriveContact` are merged into a single reducer. The `materialize*` functions
+are the post-loop formatting code, reading from accumulated state instead of
+re-folding events.
+
+**Full-fold derivation for one-off use** (API layer, tests) is a utility:
+
+```typescript
+const deriveFromEvents = <TPluginState, TEvent>(
+  behavior: { emptyState: () => TPluginState; applyEvent: (s: TPluginState, e: TEvent) => void },
+  events: readonly TEvent[],
+): TPluginState => {
+  const state = behavior.emptyState();
+  for (const event of events) behavior.applyEvent(state, event);
+  return state;
+};
 ```
 
 **Usage:**
@@ -746,6 +813,7 @@ interface PlatformDefinition<
   TAccount extends BaseAccount<TIdentity>,
   TBrowser extends BaseBoundBrowser,
   TContact extends BaseContact<TIdentity>,
+  TPluginState,
 > {
   readonly scope: TScope;
   readonly identity: TIdentity;
@@ -760,7 +828,8 @@ interface PlatformDefinition<
     TInbox,
     TAccount,
     TBrowser,
-    TContact
+    TContact,
+    TPluginState
   >;
 }
 ```
@@ -819,9 +888,9 @@ graph TB
         API[Hono API]
     end
 
-    subgraph "Layer 3: Projections"
-        PR[Projection]
+    subgraph "Layer 3: Event Flow"
         INJ[Injection]
+        PR[Projection]
     end
 
     subgraph "Layer 4: Platform"
@@ -840,11 +909,13 @@ graph TB
     API --> INJ
     PL -->|"actions emit events"| INJ
     INJ --> ES
-    PR --> ES
-    PL --> PR
+    ES -->|"subscribe stream"| PR
+    PL -->|"subscribe + fold into Ref"| PR
     PL --> BP
     JN --> INJ
+    JN --> PR
     BR --> INJ
+    BR --> PR
     SP --> PL
     SP --> JN
     SP --> BR
@@ -875,7 +946,8 @@ class Database extends Context.Tag("Database")<Database, DatabaseService>() {}
 
 ### EventStore
 
-Append-only log, validates base shape only:
+Append-only log with reactive subscriptions, validates base shape only. Provided
+as an Effect service via `Context.Tag`:
 
 ```typescript
 type EventQuery =
@@ -884,17 +956,39 @@ type EventQuery =
   | { readonly tag: "byCorrelation"; readonly correlationId: CorrelationId };
 
 interface EventStoreService {
+  /** Append events atomically (deduplicated by eventId). */
   readonly append: (
     events: readonly StorableEvent[],
   ) => Effect.Effect<void, EventStoreError>;
-  readonly query: (
-    q: EventQuery,
+
+  /** One-shot query (for startup hydration and API reads). */
+  readonly fetch: (
+    query?: EventQuery,
   ) => Effect.Effect<readonly StorableEvent[], EventStoreError>;
+
+  /** Scope-filtered stream of new events. How the stream is produced is
+   *  an implementation detail: in-memory stores push on append via PubSub,
+   *  Postgres stores poll internally on a short interval. */
+  readonly subscribe: (
+    scope: Scope,
+    since?: string,
+  ) => Stream.Stream<readonly StorableEvent[], EventStoreError>;
 }
 
-class EventStore
-  extends Context.Tag("EventStore")<EventStore, EventStoreService>() {}
+class EventStoreTag
+  extends Context.Tag("EventStore")<EventStoreTag, EventStoreService>() {}
 ```
+
+Implementations (Postgres, in-memory) provide `EventStoreService` via
+`Layer.succeed(EventStoreTag, ...)` or `Layer.effect(EventStoreTag, ...)`.
+Consumers declare `EventStoreTag` as a dependency rather than accepting a raw
+EventStore as a config field.
+
+| Backend | `subscribe` strategy |
+|---------|----------------------|
+| In-memory | `append` pushes to an internal `PubSub`. `subscribe` reads with scope filter. Zero latency. |
+| Postgres | Background fiber polls `WHERE scope = $1 AND ts > $2` on a short interval. Yields chunks via `Stream.async`. |
+| Future reactive DB | Native change stream, wrapped as `Stream`. |
 
 ### ConfigStore
 
@@ -993,42 +1087,21 @@ derivation functions.
 
 ---
 
-## Layer 3: Projection and Injection
+## Layer 3: Event Flow
 
-Symmetric, type-safe access to the event store.
+Type-safe event ingestion, persistence, broadcast, and hydration.
 
 ```mermaid
 flowchart LR
-    subgraph EventStore
-        PR[Projection]
-        INJ[Injection]
-    end
-    PR -->|"validate → TEvent[]"| READ[Readers]
-    WRITE[Writers] -->|"validate → append"| INJ
+    WRITE[Writers] -->|"validate → append"| INJ[Injection]
+    INJ --> ES[(EventStore)]
+    ES -->|"validate → read"| PR[Projection]
+    PR --> READ[Readers]
 ```
-
-### Projection (validated reads)
-
-Projections filter events by scope at the database level, returning only
-validated, typed events for a specific platform:
-
-```typescript
-interface Projection<TEvent extends StorableEvent> {
-  readonly scope: Scope;
-  readonly query: (since?: string) => Effect.Effect<readonly TEvent[], EventStoreError>;
-}
-
-const makeProjection = <TEvent extends StorableEvent>(
-  scope: Scope,
-  schema: z.ZodType<TEvent>,
-): Effect.Effect<Projection<TEvent>, never, EventStore>;
-```
-
-**IMPORTANT**: Projections guarantee scope-filtered events. Behaviors receive
-`LinkedInEvent[]`, not `StorableEvent[]`. No scope checks are needed inside
-behavior functions—the filtering happens upstream in the projection layer.
 
 ### Injection (validated writes)
+
+The sole write gateway. Validates via Zod and persists to the EventStore:
 
 ```typescript
 interface Injection<TEvent extends StorableEvent> {
@@ -1036,13 +1109,33 @@ interface Injection<TEvent extends StorableEvent> {
   readonly append: (event: TEvent) => Effect.Effect<void, InjectionError>;
   readonly appendBatch: (events: readonly TEvent[]) => Effect.Effect<void, InjectionError>;
 }
-
-const makeInjection = <TEvent extends StorableEvent>(
-  scope: Scope,
-  schema: z.ZodType<TEvent>,
-  store: EventStoreService,
-): Injection<TEvent>;
 ```
+
+### Projection (validated reads + reactive stream)
+
+Scope-filtered, Zod-validated reads from the store:
+
+```typescript
+interface Projection<TEvent extends StorableEvent> {
+  readonly scope: Scope;
+
+  /** One-shot query (for startup hydration and API reads). */
+  readonly query: (since?: string) => Effect.Effect<readonly TEvent[], EventStoreError>;
+
+  /** Reactive stream of validated events (for background state fiber). */
+  readonly subscribe: (since?: string) => Stream.Stream<readonly TEvent[], EventStoreError>;
+}
+```
+
+Projection validates events on read via Zod. Invalid events (from older schema
+versions) are filtered out with warnings, not crashes. This is the **read-time
+Zod boundary** that handles schema evolution, distinct from the write-time
+validation in Injection.
+
+`query()` is a one-shot read for startup hydration and API requests.
+`subscribe()` wraps the EventStore's reactive `subscribe` stream with the same
+Zod validation. The platform layer uses `query()` to hydrate initial state, then
+`subscribe()` in a background fiber to keep the state current.
 
 ---
 
@@ -1118,15 +1211,15 @@ export const makeLinkedInActions = (
 
 ### Platform Layer Factory
 
-The `makePlatformLayer` function is generic over the context tag with a tight
-constraint linking the tag's service type to the exact `PlatformService`
-parameters:
+The `makePlatformLayer` function wires reactive state via a background fiber. It
+is generic over the context tag with a tight constraint linking the tag's service
+type to the exact `PlatformService` parameters:
 
 ```typescript
 // runtime/sockpuppet/platform-runtime.ts
 
 export function makePlatformLayer<
-  TScope extends Scope,  // Branded scope aligns with StorableEvent.scope
+  TScope extends Scope,
   TIdentity extends string,
   // ... other type parameters
   TTag extends Context.Tag<
@@ -1135,28 +1228,94 @@ export function makePlatformLayer<
   >,
 >(
   tag: TTag,
+  injectionTag: Context.Tag<any, Injector<TEvent>>,
+  projectionTag: Context.Tag<any, Projection<TEvent>>,
   config: {
     readonly platform: PlatformDefinition<...>;
     readonly account: TAccount;
-    readonly eventStore: EventStore<StorableEvent>;
-    readonly browserPool: BrowserPoolService;
-    readonly actions: TActions;  // Required, platform-specific
+    readonly actions: TActions;
   },
-): Layer.Layer<Context.Tag.Identifier<TTag>> {
-  const projection = makeProjection(platform.scope, ...);  // scope already branded
-  const serviceEffect = makePlatformService(platform, account, projection, actions);
-  return Layer.effect(tag, serviceEffect).pipe(Layer.provide(browserPoolLayer));
+): Layer.Layer<
+  Context.Tag.Identifier<TTag> | Injector<TEvent> | Projection<TEvent>,
+  EventStoreError,
+  EventStoreTag | BrowserPool
+> {
+  // Create injection/projection layers internally
+  const injectionLayer = makeInjectionLayer(injectionTag, platform.scope, platform.eventSchema);
+  const projectionLayer = makeProjectionLayer(projectionTag, platform.scope, platform.eventSchema);
+
+  const serviceLayer = Layer.scoped(tag, Effect.gen(function* () {
+    const behavior = platform.behavior;
+    const projection = yield* projectionTag;
+
+    // 1. Hydrate: full fold from existing events
+    const events = yield* projection.query();
+    const state = behavior.emptyState();
+    for (const event of events) behavior.applyEvent(state, event);
+    const stateRef = yield* Ref.make(state);
+
+    // 2. Subscribe: background fiber folds new events into state
+    const lastTimestamp = events.length > 0
+      ? events[events.length - 1].timestamp
+      : undefined;
+
+    yield* projection.subscribe(lastTimestamp).pipe(
+      Stream.runForEach((chunk) =>
+        Ref.update(stateRef, (s) => {
+          for (const event of chunk) behavior.applyEvent(s, event);
+          return s;
+        })
+      ),
+      Effect.forkScoped,  // runs for the lifetime of the layer
+    );
+
+    // 3. Service: reads from ref + materializes (pure, no IO)
+    return {
+      scope: platform.scope,
+      identity: platform.identity,
+      participantId: account.id,
+
+      inbox: Effect.map(Ref.get(stateRef), (s) =>
+        behavior.materializeInbox(s, account.id)),
+
+      thread: (threadId) => Effect.map(Ref.get(stateRef), (s) =>
+        Option.fromNullable(behavior.materializeThread(s, threadId))),
+
+      browsers: Effect.gen(function* () {
+        const s = yield* Ref.get(stateRef);
+        const runningIds = yield* getRunningConfigIds;
+        return behavior.materializeBrowsers(s, account, runningIds);
+      }),
+
+      contact: (participantId) => Effect.map(Ref.get(stateRef), (s) =>
+        Option.fromNullable(behavior.materializeContact?.(s, participantId))),
+
+      actions,
+    };
+  }));
+
+  // Use provideMerge to both satisfy internal dependencies AND export the
+  // injection/projection tags for consumers (e.g., actions that need injector)
+  return serviceLayer.pipe(
+    Layer.provideMerge(injectionLayer),
+    Layer.provideMerge(projectionLayer),
+  );
 }
 ```
 
 Key type design:
 
-- `TScope extends Scope` ensures alignment with `StorableEvent.scope` (also
-  `Scope`)
+- `TScope extends Scope` ensures alignment with `StorableEvent.scope`
 - The `TTag` constraint links to exact `PlatformService` type parameters
-- This allows TypeScript to verify types without internal casts
+- Injection and projection layers are created internally using the platform's
+  scope and eventSchema — callers only need to provide `EventStoreTag` and
+  `BrowserPool`
+- `Layer.provideMerge` both satisfies internal dependencies AND exports the
+  injection/projection tags, so actions can access the injector when executed
 - `Context.Tag.Identifier<TTag>` extracts the identifier from
   `typeof LinkedInPlatform`
+- The background fiber is scoped to the layer's lifetime — when the layer is
+  released (sockpuppet exits), the fiber is interrupted automatically
 
 ### Usage in Sockpuppets
 
@@ -1179,32 +1338,43 @@ const linkedInBot = Effect.gen(function* () {
 // When running a sockpuppet
 const actions = makeLinkedInActions(browserPool, account);
 
-const platformLayer = makePlatformLayer(LinkedInPlatform, {
-  platform: linkedInPlatform,
-  account,
-  eventStore,
-  browserPool,
-  actions, // Actions inside config, required
-});
+const platformLayer = makePlatformLayer(
+  LinkedInPlatform,
+  LinkedInInjection,
+  LinkedInProjection,
+  {
+    platform: linkedInPlatform,
+    account,
+    actions,
+  },
+);
 
-const journalLayer = makeJournalLayer({
-  participantId: account.id,
-  eventStore,
-});
-const layer = Layer.merge(platformLayer, journalLayer);
+const journalLayer = makeJournalLayer(account.id);
+const briefingLayer = makeBriefingLayer(config.agentId);
+
+// All layers create their own injection/projection internally.
+// Only EventStoreTag and BrowserPool need to be provided.
+const layer = Layer.mergeAll(platformLayer, journalLayer, briefingLayer).pipe(
+  Layer.provide(eventStoreLayer),
+  Layer.provide(browserPoolLayer),
+);
 
 await Effect.runPromise(Effect.provide(linkedInBot, layer));
 ```
 
 ### Journal
 
-Sockpuppet memory. Uses a single `"journal"` scope:
+Sockpuppet memory. Uses per-participant scopes for efficient queries:
 
 ```typescript
+// Scope is per-participant, e.g., "journal:linkedin:abc123"
+const makeJournalScope = (participantId: string): Scope =>
+  Scope(`journal:${participantId}`);
+
 interface JournalEntry extends StorableEvent {
-  readonly scope: Scope; // always "journal"
+  readonly scope: Scope; // e.g., "journal:linkedin:abc123"
   readonly type: "Entry";
-  readonly participantId: ParticipantId; // globally unique, e.g. "linkedin:abc123"
+  readonly participantId: ParticipantId;
   readonly kind: string;
   readonly [key: string]: unknown;
 }
@@ -1216,14 +1386,25 @@ interface JournalService {
 
 class Journal extends Context.Tag("Journal")<Journal, JournalService>() {}
 
-const makeJournal = (
+// Creates its own Injection/Projection layers internally with per-participant scope
+const makeJournalLayer = (
   participantId: ParticipantId,
-): Effect.Effect<JournalService, never, Injection<JournalEntry>>;
+): Layer.Layer<Journal, never, EventStoreTag>;
 ```
 
-**Why this works:** ParticipantId is globally unique (`"linkedin:abc123"`).
-Journal queries filter by participantId alone—no platform field needed. Entries
-from different platforms never collide.
+The Journal never sees the raw EventStore directly. `makeJournalLayer` creates
+Injection and Projection layers internally with the participant-specific scope.
+This pushes filtering to the EventStore level:
+
+- **Database**: `WHERE scope = 'journal:linkedin:abc123'` (index seek)
+- **Subscribe stream**: Only receives events for this participant
+- **No in-memory filter**: All events returned belong to this participant
+
+**Why per-participant scopes:** With a single `"journal"` scope, every bot
+would fetch all journal events from all bots, then filter in memory. With
+100 bots each having 1000 entries, each bot would fetch 100,000 events to
+get its 1000. Per-participant scopes push the filter to the database where
+indexes make it O(1) instead of O(N).
 
 ---
 
@@ -1418,14 +1599,17 @@ BriefingEnded       { briefingId, endedBy, reason?, summary? }
 
 The `Briefing` service is what sockpuppets `yield*` to participate in briefings
 — both initiating and receiving. It wraps event injection/projection and agent
-identity into a single interface. The service is constructed with just two
-things: the agent's identity and the shared event store.
+identity into a single interface. The service is constructed with the agent's
+identity; Injection and Projection for the briefing scope are created internally.
 
 ```typescript
-interface BriefingRuntimeConfig {
-  readonly self: AgentId;
-  readonly eventStore: EventStore<StorableEvent>;
-}
+const makeBriefingLayer = (
+  self: AgentId,
+): Layer.Layer<
+  Briefing | Injector<BriefingEvent> | Projection<BriefingEvent>,
+  never,
+  EventStoreTag
+>;
 ```
 
 The sockpuppet refers to other agents by name. No URL resolution, no HTTP
@@ -1615,7 +1799,8 @@ plugins/                         # Platform plugins
 ├── linkedin/
 │   ├── mod.ts                   # Platform definition export
 │   ├── schemas.ts               # Event schemas
-│   ├── behavior.ts              # Pure derivation functions
+│   ├── state.ts                 # Plugin state type, emptyState, applyEvent
+│   ├── behavior.ts              # materialize* functions, behavior export
 │   ├── actions.ts               # Platform actions (sendMessage, etc.)
 │   ├── contact.ts               # LinkedInContact type
 │   └── account.ts               # LinkedInAccount, store
@@ -1624,7 +1809,7 @@ plugins/                         # Platform plugins
 └── reddit/
     └── ...                      # Same structure
 
-server/src/
+server/
 ├── core/                        # Branded types, utilities
 ├── events/                      # StorableEvent, CorrelatedEvent, templates, briefing
 ├── views/                       # Base view types (inbox, thread, contact, browser)
@@ -1661,19 +1846,19 @@ brief/
 
 ## Dependency Matrix
 
-| Layer | Service       | Depends On                  | Responsibility                          |
-| ----- | ------------- | --------------------------- | --------------------------------------- |
-| 0     | `Database`    | —                           | Raw SQL access                          |
-| 0     | `EventStore`  | Database                    | Append-only event log                   |
-| 0     | `ConfigStore` | Database                    | Browser configs                         |
-| 1     | `BrowserPool` | ConfigStore                 | Launch browsers, return CDP URLs        |
-| 2     | `API`         | Injection, Projection       | HTTP event bus + control plane          |
-| 3     | `Projection`  | EventStore                  | Type-safe filtered reads                |
-| 3     | `Injection`   | EventStore                  | Type-safe validated writes              |
-| 4     | `Platform`    | Projection, BrowserPool     | Derivation + actions for sockpuppets    |
-| 4     | `Journal`     | Injection                   | Sockpuppet decision log                 |
-| 4     | `Briefing`    | Injection, EventStore       | Agent-to-agent structured conversations |
-| 5     | `Sockpuppet`  | Platform, Journal, Briefing | Human-like agent                        |
+| Layer | Service        | Depends On                     | Responsibility                              |
+| ----- | -------------- | ------------------------------ | ------------------------------------------- |
+| 0     | `Database`     | —                              | Raw SQL access                              |
+| 0     | `EventStore`   | Database                       | Append-only event log (Effect service)      |
+| 0     | `ConfigStore`  | Database                       | Browser configs                             |
+| 1     | `BrowserPool`  | ConfigStore                    | Launch browsers, return CDP URLs            |
+| 2     | `API`          | Injection, Projection          | HTTP event bus + control plane              |
+| 3     | `Injection`    | EventStore                     | Validated writes                            |
+| 3     | `Projection`   | EventStore                     | Validated reads                             |
+| 4     | `Platform`     | EventStore, BrowserPool        | State fold + materialization + actions (creates injection/projection internally) |
+| 4     | `Journal`      | EventStore                     | Sockpuppet decision log (creates injection/projection internally, per-participant scope) |
+| 4     | `Briefing`     | EventStore                     | Agent-to-agent structured conversations (creates injection/projection internally) |
+| 5     | `Sockpuppet`   | Platform, Journal, Briefing    | Human-like agent                            |
 
 ---
 
@@ -1701,10 +1886,13 @@ An account can be logged into multiple browsers (mobile, desktop). The
 sockpuppet decides which to use based on its own logic. Browser bindings connect
 accounts to their available browsers.
 
-### Why Behaviors Are Pure Functions
+### Why Behaviors Are Incremental Folds + Pure Materialization
 
-Behaviors have no state, no side effects. They're pure derivation over event
-streams. Testable, predictable, easy to reason about.
+Behaviors define two things: how events fold into state (`applyEvent`) and how
+state materializes into views (`materialize*`). The fold mutates in place for
+efficiency; the materialization is a pure read. Both are testable, predictable,
+and easy to reason about. State is plugin-wide (shared across accounts), and
+account-specific views are pure projections from that state.
 
 ### Why ParticipantId Is Platform-Prefixed
 

@@ -23,7 +23,7 @@ import type { LinkedInBrowser } from "../linkedin/browser.ts";
 import type { LinkedInContact } from "../linkedin/contact.ts";
 
 // Behavior (dojo-specific, pure derivation)
-import { linkedInDojoBehavior } from "./behavior.ts";
+import { linkedInDojoBehavior, type LinkedInDojoPluginState } from "./behavior.ts";
 
 // Identity namespace - dojo uses same identity as production LinkedIn
 const LINKEDIN_IDENTITY = "linkedin" as const;
@@ -40,7 +40,8 @@ export const linkedInDojoPlatform: PlatformDefinition<
   LinkedInInbox,
   LinkedInAccount,
   LinkedInBrowser,
-  LinkedInContact
+  LinkedInContact,
+  LinkedInDojoPluginState
 > = {
   scope: LINKEDIN_DOJO_SCOPE,
   identity: LINKEDIN_IDENTITY,
@@ -80,7 +81,7 @@ export {
 } from "./schemas.ts";
 
 // Behavior & Injector tag (injector used by dojo actions layer)
-export { linkedInDojoBehavior, LinkedInDojoInjector } from "./behavior.ts";
+export { linkedInDojoBehavior, LinkedInDojoInjector, type LinkedInDojoPluginState } from "./behavior.ts";
 
 // Re-export types from LinkedIn plugin for convenience
 export type { LinkedInAnchor } from "./schemas.ts";

@@ -5,12 +5,15 @@
 // by an AgentId. It reads and writes the same Postgres event log as
 // every sockpuppet.
 
-import { Effect } from "effect";
-import { AgentId, type AgentId as AgentIdType } from "@bernays/server/core";
-import { configurePostgresEventStore } from "@bernays/server/store";
+import { Effect, Layer, ManagedRuntime } from "effect";
+import { type AgentId as AgentIdType } from "@bernays/server/core";
+import { EventStorePostgres, EventStoreTag } from "@bernays/server/store";
 import {
   type BriefingService,
-  makeBriefingService,
+  Briefing,
+  BriefingInjectionLive,
+  BriefingProjectionLive,
+  makeBriefingLayer,
 } from "@bernays/server/briefing";
 
 // =============================================================================
@@ -39,14 +42,25 @@ export interface ServerConfig {
 export const createServerContext = async (
   config: ServerConfig,
 ): Promise<ServerContext> => {
-  const eventStore = await Effect.runPromise(
-    configurePostgresEventStore({ databaseUrl: config.databaseUrl }),
+  const eventStoreRuntime = ManagedRuntime.make(
+    EventStorePostgres({ databaseUrl: config.databaseUrl }),
+  );
+  const eventStore = await eventStoreRuntime.runPromise(EventStoreTag);
+
+  const eventStoreLayer = Layer.succeed(EventStoreTag, eventStore);
+
+  const injectionProjectionLayer = Layer.mergeAll(
+    BriefingInjectionLive,
+    BriefingProjectionLive,
+  ).pipe(Layer.provide(eventStoreLayer));
+
+  const briefingLayer = makeBriefingLayer(config.self).pipe(
+    Layer.provide(injectionProjectionLayer),
   );
 
-  const briefing = makeBriefingService({
-    self: config.self,
-    eventStore,
-  });
+  const briefing = await Effect.runPromise(
+    Effect.provide(Briefing, briefingLayer),
+  );
 
   return { briefing };
 };

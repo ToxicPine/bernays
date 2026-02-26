@@ -5,7 +5,6 @@ import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { Effect, Option } from "effect";
 import type { ServerContext } from "../context.ts";
 import {
-  BriefingViewSchema,
   ConversationListResponseSchema,
   ConversationResponseSchema,
   CreateConversationBodySchema,
@@ -182,7 +181,6 @@ export const conversationsRoutes = (ctx: ServerContext) => {
     const result = await Effect.runPromiseExit(ctx.briefing.end(id));
 
     if (result._tag === "Failure") {
-      const error = result.cause;
       // Distinguish not-found from invalid-state
       const briefing = await Effect.runPromise(ctx.briefing.get(id));
       if (Option.isNone(briefing)) {

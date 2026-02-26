@@ -1,13 +1,12 @@
 // api/src/context.ts
 // Shared server context — stores, registries, projections
 
-import { Effect, Option } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import {
   type ConfigStoreService,
-  configurePostgresEventStore,
-  createPostgresConfigStore,
-  type EventStore,
-  type StorableEvent,
+  EventStorePostgres,
+  EventStoreTag,
+  type EventStoreService,
 } from "@bernays/server/store";
 import {
   type AnyPlatform,
@@ -15,8 +14,14 @@ import {
   type PlatformDefinition,
   type PlatformRegistry,
 } from "@bernays/server/platforms";
-import { type Injector, makeInjector } from "@bernays/server/projections";
-import { makeProjection, type Projection } from "@bernays/server/projections";
+import {
+  type Injector,
+  makeInjectorTag,
+  makeInjectionLayer,
+  type Projection,
+  makeProjectionTag,
+  makeProjectionLayer,
+} from "@bernays/server/projections";
 import {
   BRIEFING_SCOPE,
   ParticipantIdFromString,
@@ -24,6 +29,7 @@ import {
 } from "@bernays/server/core";
 import { BriefingEventSchema } from "@bernays/server/events";
 import type { BaseAccount } from "@bernays/server/views";
+import type { StorableEvent } from "@bernays/server/store";
 
 // Plugins
 import {
@@ -37,16 +43,15 @@ import {
 
 /**
  * Read-only view of an account store — only the operations the API needs.
- * This avoids variance issues with the full AccountStoreService<TScope, TAccount>
- * (which has contravariant parameters due to .get() accepting ParticipantId<TScope>).
  */
 export interface AccountStoreView {
-  readonly get: (id: string) => Effect.Effect<Option.Option<BaseAccount>>;
+  readonly get: (id: string) => Effect.Effect<import("effect").Option.Option<BaseAccount>>;
   readonly list: () => Effect.Effect<readonly BaseAccount[]>;
 }
 
 export interface ServerContext {
-  readonly eventStore: EventStore<StorableEvent>;
+  /** The event store service — used by the GET /events endpoint for unscoped queries. */
+  readonly eventStore: EventStoreService;
   readonly configStore: ConfigStoreService;
   readonly registry: PlatformRegistry;
   readonly injectors: ReadonlyMap<Scope, Injector<StorableEvent>>;
@@ -58,19 +63,13 @@ export interface ServerContext {
 // Platform Registration
 // =============================================================================
 
-// PlatformDefinition has invariant type parameters (behavior methods are both
-// covariant and contravariant), so TypeScript can't widen specific platforms
-// to AnyPlatform directly. This helper erases platform-specific types for
-// registry consumption. Safe because the API only reads from behaviors.
 // deno-lint-ignore no-explicit-any
 const asPlatform = (
-  p: PlatformDefinition<any, any, any, any, any, any, any, any, any>,
-): AnyPlatform => p;
+  p: PlatformDefinition<any, any, any, any, any, any, any, any, any, any>,
+): AnyPlatform => p as AnyPlatform;
 
 const PLATFORMS: readonly AnyPlatform[] = [
   asPlatform(linkedInPlatform),
-  // asPlatform(xPlatform),
-  // asPlatform(redditPlatform),
 ];
 
 // =============================================================================
@@ -86,10 +85,14 @@ export const createServerContext = async (
 ): Promise<ServerContext> => {
   const { databaseUrl } = config;
 
-  // Initialize stores
-  const eventStore = await Effect.runPromise(
-    configurePostgresEventStore({ databaseUrl }),
+  // Build a managed runtime for the EventStore so the Layer's scope
+  // (SQL connection + poll fiber) stays alive for the server's lifetime.
+  const eventStoreRuntime = ManagedRuntime.make(
+    EventStorePostgres({ databaseUrl }),
   );
+  const eventStore = await eventStoreRuntime.runPromise(EventStoreTag);
+
+  const { createPostgresConfigStore } = await import("@bernays/server/store");
   const configStore = await createPostgresConfigStore({
     connectionString: databaseUrl,
   });
@@ -97,27 +100,54 @@ export const createServerContext = async (
   // Register platforms
   const registry = createPlatformRegistry(PLATFORMS);
 
-  // Create injectors and projections per scope
+  // Provide a Layer.succeed layer for injection/projection layers so they
+  // share the same already-initialised EventStoreService.
+  const eventStoreLayer = Layer.succeed(EventStoreTag, eventStore);
+
   const injectors = new Map<Scope, Injector<StorableEvent>>();
   const projections = new Map<Scope, Projection<StorableEvent>>();
 
   for (const platform of PLATFORMS) {
     const scope = platform.scope;
     const schema = platform.eventSchema;
-    injectors.set(scope, makeInjector(scope, schema, eventStore));
-    projections.set(scope, makeProjection(scope, schema, eventStore));
+
+    const injTag = makeInjectorTag<StorableEvent>(`${scope}/Injection`);
+    const projTag = makeProjectionTag<StorableEvent>(`${scope}/Projection`);
+
+    const injLayer = makeInjectionLayer(injTag, scope, schema).pipe(
+      Layer.provide(eventStoreLayer),
+    );
+    const projLayer = makeProjectionLayer(projTag, scope, schema).pipe(
+      Layer.provide(eventStoreLayer),
+    );
+
+    const inj = await Effect.runPromise(
+      Effect.provide(injTag, injLayer),
+    );
+    const proj = await Effect.runPromise(
+      Effect.provide(projTag, projLayer),
+    );
+
+    injectors.set(scope, inj);
+    projections.set(scope, proj);
   }
 
-  // Register briefing scope for read access (agents write directly via BriefingService)
-  projections.set(
-    BRIEFING_SCOPE,
-    makeProjection(BRIEFING_SCOPE, BriefingEventSchema, eventStore),
+  // Briefing projection for read access
+  const briefingProjTag = makeProjectionTag<StorableEvent>(
+    "briefing/Projection",
   );
+  const briefingProjLayer = makeProjectionLayer(
+    briefingProjTag,
+    BRIEFING_SCOPE,
+    BriefingEventSchema,
+  ).pipe(Layer.provide(eventStoreLayer));
 
-  // Create account stores per platform identity.
-  // Wrap platform-specific stores to satisfy AccountStoreView (which uses plain
-  // string IDs). The wrapper just forwards calls — branded ParticipantId<TScope>
-  // is a string at runtime, so this is safe.
+  const briefingProj = await Effect.runPromise(
+    Effect.provide(briefingProjTag, briefingProjLayer),
+  );
+  projections.set(BRIEFING_SCOPE, briefingProj);
+
+  // Create account stores per platform identity
   const accountStores = new Map<string, AccountStoreView>();
 
   const linkedInAccountStore = await createPostgresLinkedInAccountStore({
