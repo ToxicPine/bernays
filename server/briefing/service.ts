@@ -20,6 +20,7 @@ import {
   makeProjectionTag,
   makeProjectionLayer,
 } from "$/projections/projection.ts";
+import { EventStoreTag } from "$/store/mod.ts";
 import {
   type BriefingView,
   deriveBriefings,
@@ -119,23 +120,6 @@ export const BriefingProjection = makeProjectionTag<BriefingEvent>(
   "briefing/Projection",
 );
 
-// =============================================================================
-// Briefing Injection/Projection Layers
-// =============================================================================
-
-/** Layer providing BriefingInjection. Depends on EventStoreTag. */
-export const BriefingInjectionLive = makeInjectionLayer(
-  BriefingInjection,
-  BRIEFING_SCOPE,
-  BriefingEventSchema,
-);
-
-/** Layer providing BriefingProjection. Depends on EventStoreTag. */
-export const BriefingProjectionLive = makeProjectionLayer(
-  BriefingProjection,
-  BRIEFING_SCOPE,
-  BriefingEventSchema,
-);
 
 // =============================================================================
 // Implementation
@@ -333,10 +317,28 @@ const makeBriefingServiceImpl = (
 
 /**
  * Create a Layer that provides the Briefing service.
- * Depends on BriefingInjection and BriefingProjection.
+ * Creates injection/projection layers internally - caller only needs EventStoreTag.
+ * Also exports BriefingInjection and BriefingProjection for direct access if needed.
  */
-export const makeBriefingLayer = (self: AgentId) =>
-  Layer.effect(
+export const makeBriefingLayer = (
+  self: AgentId,
+): Layer.Layer<
+  Briefing | Injector<BriefingEvent> | Projection<BriefingEvent>,
+  never,
+  EventStoreTag
+> => {
+  const injectionLayer = makeInjectionLayer(
+    BriefingInjection,
+    BRIEFING_SCOPE,
+    BriefingEventSchema,
+  );
+  const projectionLayer = makeProjectionLayer(
+    BriefingProjection,
+    BRIEFING_SCOPE,
+    BriefingEventSchema,
+  );
+
+  const serviceLayer = Layer.effect(
     Briefing,
     Effect.gen(function* () {
       const injector = yield* BriefingInjection;
@@ -344,3 +346,11 @@ export const makeBriefingLayer = (self: AgentId) =>
       return makeBriefingServiceImpl(self, injector, projection);
     }),
   );
+
+  // Use provideMerge to both satisfy internal dependencies AND export the
+  // injection/projection tags for consumers that need direct access.
+  return serviceLayer.pipe(
+    Layer.provideMerge(injectionLayer),
+    Layer.provideMerge(projectionLayer),
+  );
+};

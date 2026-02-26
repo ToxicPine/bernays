@@ -12,10 +12,11 @@ import {
   CorrelationId,
   EventId,
   type ParticipantId,
+  type Scope,
   ThreadId,
 } from "$/core/branded.ts";
+import { makeJournalScope } from "$/core/scope.ts";
 import {
-  JOURNAL_SCOPE,
   type JournalEntry,
   JournalEntrySchema,
 } from "$/events/journal.ts";
@@ -29,6 +30,7 @@ import {
   makeProjectionTag,
   makeProjectionLayer,
 } from "$/projections/projection.ts";
+import { EventStoreTag } from "$/store/types.ts";
 
 
 // =============================================================================
@@ -46,24 +48,6 @@ export const JournalProjection = makeProjectionTag<JournalEntry>(
 );
 
 // =============================================================================
-// Journal Injection/Projection Layers
-// =============================================================================
-
-/** Layer providing JournalInjection. Depends on EventStoreTag. */
-export const JournalInjectionLive = makeInjectionLayer(
-  JournalInjection,
-  JOURNAL_SCOPE,
-  JournalEntrySchema,
-);
-
-/** Layer providing JournalProjection. Depends on EventStoreTag. */
-export const JournalProjectionLive = makeProjectionLayer(
-  JournalProjection,
-  JOURNAL_SCOPE,
-  JournalEntrySchema,
-);
-
-// =============================================================================
 // Journal Service Factory
 // =============================================================================
 
@@ -73,6 +57,7 @@ export const JournalProjectionLive = makeProjectionLayer(
  */
 const makeJournalService = (
   participantId: ParticipantId,
+  scope: Scope,
   injector: Injector<JournalEntry>,
   projection: Projection<JournalEntry>,
   generateCorrelationId?: () => CorrelationId,
@@ -84,7 +69,7 @@ const makeJournalService = (
     record: (input: JournalEntryInput) =>
       Effect.gen(function* () {
         const entry: JournalEntry = {
-          scope: JOURNAL_SCOPE,
+          scope,
           type: "Entry",
           eventId: EventId(crypto.randomUUID()),
           correlationId: genCorrelationId(),
@@ -114,12 +99,13 @@ const makeJournalService = (
           Effect.catchAll(() => Effect.succeed([] as readonly JournalEntry[])),
         );
 
-        // Filter by participantId and sort
-        const filtered = events
-          .filter((e) => e.participantId === participantId)
-          .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+        // No in-memory filter needed — scope is per-participant, so all
+        // events returned belong to this participant. Just sort by timestamp.
+        const sorted = [...events].sort((a, b) =>
+          a.timestamp.localeCompare(b.timestamp)
+        );
 
-        return filtered;
+        return sorted;
       }),
   };
 };
@@ -129,23 +115,48 @@ const makeJournalService = (
 // =============================================================================
 
 /**
- * Create a Layer that provides the Journal service.
- * Depends on JournalInjection and JournalProjection.
+ * Create a Layer that provides the Journal service for a specific participant.
+ *
+ * Uses a per-participant scope (e.g., "journal:messageboard:bot") so that
+ * queries are efficient at the EventStore level — no in-memory filtering
+ * required.
+ *
+ * Depends on EventStoreTag. Creates and provides its own JournalInjection
+ * and JournalProjection layers internally.
  */
 export const makeJournalLayer = (
   participantId: ParticipantId,
   generateCorrelationId?: () => CorrelationId,
-) =>
-  Layer.effect(
+): Layer.Layer<Journal, never, EventStoreTag> => {
+  const scope = makeJournalScope(participantId);
+
+  // Create injection/projection layers with participant-specific scope
+  const injectionLayer = makeInjectionLayer(
+    JournalInjection,
+    scope,
+    JournalEntrySchema,
+  );
+  const projectionLayer = makeProjectionLayer(
+    JournalProjection,
+    scope,
+    JournalEntrySchema,
+  );
+
+  return Layer.effect(
     Journal,
     Effect.gen(function* () {
       const injector = yield* JournalInjection;
       const projection = yield* JournalProjection;
       return makeJournalService(
         participantId,
+        scope,
         injector,
         projection,
         generateCorrelationId,
       );
     }),
+  ).pipe(
+    Layer.provide(injectionLayer),
+    Layer.provide(projectionLayer),
   );
+};

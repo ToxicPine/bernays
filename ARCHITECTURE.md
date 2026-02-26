@@ -1228,15 +1228,25 @@ export function makePlatformLayer<
   >,
 >(
   tag: TTag,
+  injectionTag: Context.Tag<any, Injector<TEvent>>,
+  projectionTag: Context.Tag<any, Projection<TEvent>>,
   config: {
     readonly platform: PlatformDefinition<...>;
     readonly account: TAccount;
     readonly actions: TActions;
   },
-): Layer.Layer<Context.Tag.Identifier<TTag>, never, Projection<TEvent> | BrowserPool> {
-  return Layer.scoped(tag, Effect.gen(function* () {
+): Layer.Layer<
+  Context.Tag.Identifier<TTag> | Injector<TEvent> | Projection<TEvent>,
+  EventStoreError,
+  EventStoreTag | BrowserPool
+> {
+  // Create injection/projection layers internally
+  const injectionLayer = makeInjectionLayer(injectionTag, platform.scope, platform.eventSchema);
+  const projectionLayer = makeProjectionLayer(projectionTag, platform.scope, platform.eventSchema);
+
+  const serviceLayer = Layer.scoped(tag, Effect.gen(function* () {
     const behavior = platform.behavior;
-    const projection = yield* ProjectionTag;
+    const projection = yield* projectionTag;
 
     // 1. Hydrate: full fold from existing events
     const events = yield* projection.query();
@@ -1283,6 +1293,13 @@ export function makePlatformLayer<
       actions,
     };
   }));
+
+  // Use provideMerge to both satisfy internal dependencies AND export the
+  // injection/projection tags for consumers (e.g., actions that need injector)
+  return serviceLayer.pipe(
+    Layer.provideMerge(injectionLayer),
+    Layer.provideMerge(projectionLayer),
+  );
 }
 ```
 
@@ -1290,9 +1307,11 @@ Key type design:
 
 - `TScope extends Scope` ensures alignment with `StorableEvent.scope`
 - The `TTag` constraint links to exact `PlatformService` type parameters
-- `Projection` and `BrowserPool` are Effect service dependencies (via
-  `Context.Tag`), not config fields. The platform layer never sees the raw
-  `EventStore`
+- Injection and projection layers are created internally using the platform's
+  scope and eventSchema — callers only need to provide `EventStoreTag` and
+  `BrowserPool`
+- `Layer.provideMerge` both satisfies internal dependencies AND exports the
+  injection/projection tags, so actions can access the injector when executed
 - `Context.Tag.Identifier<TTag>` extracts the identifier from
   `typeof LinkedInPlatform`
 - The background fiber is scoped to the layer's lifetime — when the layer is
@@ -1317,23 +1336,26 @@ const linkedInBot = Effect.gen(function* () {
 
 ```typescript
 // When running a sockpuppet
-const actions = makeLinkedInActions(account);
+const actions = makeLinkedInActions(browserPool, account);
 
-const platformLayer = makePlatformLayer(LinkedInPlatform, {
-  platform: linkedInPlatform,
-  account,
-  actions,
-});
+const platformLayer = makePlatformLayer(
+  LinkedInPlatform,
+  LinkedInInjection,
+  LinkedInProjection,
+  {
+    platform: linkedInPlatform,
+    account,
+    actions,
+  },
+);
 
 const journalLayer = makeJournalLayer(account.id);
+const briefingLayer = makeBriefingLayer(config.agentId);
 
-// Injection, Projection, and BrowserPool are provided as Effect service deps.
-// Injection and Projection are scoped (one per scope), created from EventStore.
-const layer = Layer.merge(platformLayer, journalLayer).pipe(
-  Layer.provide(linkedInInjectionLayer),   // Injection<LinkedInEvent>
-  Layer.provide(linkedInProjectionLayer),   // Projection<LinkedInEvent>
-  Layer.provide(journalInjectionLayer),     // Injection<JournalEntry>
-  Layer.provide(journalProjectionLayer),    // Projection<JournalEntry>
+// All layers create their own injection/projection internally.
+// Only EventStoreTag and BrowserPool need to be provided.
+const layer = Layer.mergeAll(platformLayer, journalLayer, briefingLayer).pipe(
+  Layer.provide(eventStoreLayer),
   Layer.provide(browserPoolLayer),
 );
 
@@ -1342,13 +1364,17 @@ await Effect.runPromise(Effect.provide(linkedInBot, layer));
 
 ### Journal
 
-Sockpuppet memory. Uses a single `"journal"` scope:
+Sockpuppet memory. Uses per-participant scopes for efficient queries:
 
 ```typescript
+// Scope is per-participant, e.g., "journal:linkedin:abc123"
+const makeJournalScope = (participantId: string): Scope =>
+  Scope(`journal:${participantId}`);
+
 interface JournalEntry extends StorableEvent {
-  readonly scope: Scope; // always "journal"
+  readonly scope: Scope; // e.g., "journal:linkedin:abc123"
   readonly type: "Entry";
-  readonly participantId: ParticipantId; // globally unique, e.g. "linkedin:abc123"
+  readonly participantId: ParticipantId;
   readonly kind: string;
   readonly [key: string]: unknown;
 }
@@ -1360,18 +1386,25 @@ interface JournalService {
 
 class Journal extends Context.Tag("Journal")<Journal, JournalService>() {}
 
+// Creates its own Injection/Projection layers internally with per-participant scope
 const makeJournalLayer = (
   participantId: ParticipantId,
-): Layer.Layer<Journal, never, Injection<JournalEntry> | Projection<JournalEntry>>;
+): Layer.Layer<Journal, never, EventStoreTag>;
 ```
 
-The Journal never sees the raw EventStore. It writes through
-`Injection<JournalEntry>` (Zod-validated) and reads through
-`Projection<JournalEntry>` (Zod-validated, scope-filtered).
+The Journal never sees the raw EventStore directly. `makeJournalLayer` creates
+Injection and Projection layers internally with the participant-specific scope.
+This pushes filtering to the EventStore level:
 
-**Why this works:** ParticipantId is globally unique (`"linkedin:abc123"`).
-Journal queries filter by participantId alone—no platform field needed. Entries
-from different platforms never collide.
+- **Database**: `WHERE scope = 'journal:linkedin:abc123'` (index seek)
+- **Subscribe stream**: Only receives events for this participant
+- **No in-memory filter**: All events returned belong to this participant
+
+**Why per-participant scopes:** With a single `"journal"` scope, every bot
+would fetch all journal events from all bots, then filter in memory. With
+100 bots each having 1000 entries, each bot would fetch 100,000 events to
+get its 1000. Per-participant scopes push the filter to the database where
+indexes make it O(1) instead of O(N).
 
 ---
 
@@ -1567,13 +1600,16 @@ BriefingEnded       { briefingId, endedBy, reason?, summary? }
 The `Briefing` service is what sockpuppets `yield*` to participate in briefings
 — both initiating and receiving. It wraps event injection/projection and agent
 identity into a single interface. The service is constructed with the agent's
-identity; Injection and Projection for the briefing scope are resolved from
-the Effect context.
+identity; Injection and Projection for the briefing scope are created internally.
 
 ```typescript
 const makeBriefingLayer = (
   self: AgentId,
-): Layer.Layer<Briefing, never, Injection<BriefingEvent> | Projection<BriefingEvent>>;
+): Layer.Layer<
+  Briefing | Injector<BriefingEvent> | Projection<BriefingEvent>,
+  never,
+  EventStoreTag
+>;
 ```
 
 The sockpuppet refers to other agents by name. No URL resolution, no HTTP
@@ -1773,7 +1809,7 @@ plugins/                         # Platform plugins
 └── reddit/
     └── ...                      # Same structure
 
-server/src/
+server/
 ├── core/                        # Branded types, utilities
 ├── events/                      # StorableEvent, CorrelatedEvent, templates, briefing
 ├── views/                       # Base view types (inbox, thread, contact, browser)
@@ -1819,9 +1855,9 @@ brief/
 | 2     | `API`          | Injection, Projection          | HTTP event bus + control plane              |
 | 3     | `Injection`    | EventStore                     | Validated writes                            |
 | 3     | `Projection`   | EventStore                     | Validated reads                             |
-| 4     | `Platform`     | Injection, Projection, BrowserPool | State fold + materialization + actions  |
-| 4     | `Journal`      | Injection, Projection          | Sockpuppet decision log                     |
-| 4     | `Briefing`     | Injection, Projection          | Agent-to-agent structured conversations     |
+| 4     | `Platform`     | EventStore, BrowserPool        | State fold + materialization + actions (creates injection/projection internally) |
+| 4     | `Journal`      | EventStore                     | Sockpuppet decision log (creates injection/projection internally, per-participant scope) |
+| 4     | `Briefing`     | EventStore                     | Agent-to-agent structured conversations (creates injection/projection internally) |
 | 5     | `Sockpuppet`   | Platform, Journal, Briefing    | Human-like agent                            |
 
 ---

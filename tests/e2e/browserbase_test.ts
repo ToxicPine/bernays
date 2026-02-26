@@ -21,13 +21,12 @@ import {
 } from "@bernays/server/store";
 import { ManagedRuntime } from "effect";
 import {
+  BrowserPool,
   type BrowserPoolService,
   makeBrowserbaseBackend,
 } from "@bernays/server/browsers";
 import {
   Journal,
-  JournalInjectionLive,
-  JournalProjectionLive,
   makeJournalLayer,
   makePlatformLayer,
 } from "@bernays/server/runtime";
@@ -35,10 +34,10 @@ import {
   createPostgresLinkedInAccountStore,
   type LinkedInAccount,
   type LinkedInAccountStoreService,
+  LinkedInInjection,
   LinkedInPlatform,
   linkedInPlatform,
   LinkedInProjection,
-  LinkedInProjectionLive,
   makeLinkedInActions,
 } from "@bernays/plugins/linkedin";
 import { BrowserConfigId, ParticipantId } from "@bernays/server/core";
@@ -171,18 +170,22 @@ Deno.test({
 
     await t.step("run sockpuppet", async () => {
       const actions = makeLinkedInActions(ctx!.browserPool, ctx!.account);
-      const platformLayer = makePlatformLayer(LinkedInPlatform, LinkedInProjection, {
-        platform: linkedInPlatform,
-        account: ctx!.account,
-        actions,
-      });
+      const platformLayer = makePlatformLayer(
+        LinkedInPlatform,
+        LinkedInInjection,
+        LinkedInProjection,
+        {
+          platform: linkedInPlatform,
+          account: ctx!.account,
+          actions,
+        },
+      );
       const journalLayer = makeJournalLayer(ctx!.account.id);
 
+      // Both platformLayer and journalLayer create their injection/projection layers internally
       const sockpuppetLayer = Layer.merge(platformLayer, journalLayer).pipe(
-        Layer.provide(LinkedInProjectionLive),
-        Layer.provide(JournalInjectionLive),
-        Layer.provide(JournalProjectionLive),
         Layer.provide(Layer.succeed(EventStoreTag, ctx!.eventStore)),
+        Layer.provide(Layer.succeed(BrowserPool, ctx!.browserPool)),
       );
 
       const program = Effect.gen(function* () {

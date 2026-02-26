@@ -16,9 +16,7 @@ export {
   briefingError,
   type BriefingErrorCode,
   BriefingInjection,
-  BriefingInjectionLive,
   BriefingProjection,
-  BriefingProjectionLive,
   type BriefingService,
   makeBriefingLayer,
 } from "./service.ts";

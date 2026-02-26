@@ -26,7 +26,7 @@ export {
 export {
   BRIEFING_SCOPE,
   CORE_SCOPE,
-  JOURNAL_SCOPE,
+  makeJournalScope,
   ScopeSchema,
 } from "./scope.ts";
 

@@ -7,7 +7,7 @@
 //   + Journal for decision memory
 //   + local Playwright browser (CDP) with page.route interception
 
-import { assertEquals, assertGreater } from "@std/assert";
+import { assertEquals, assertGreater, assertExists, assertMatch } from "@std/assert";
 import { chromium } from "playwright";
 import { Effect, Layer, Option } from "effect";
 import {
@@ -15,7 +15,7 @@ import {
   ParticipantId,
   ThreadId,
 } from "@bernays/server/core";
-import { EventStoreInMemory } from "@bernays/server/store";
+import { EventStoreInMemory, EventStoreTag, type StorableEvent } from "@bernays/server/store";
 import {
   BrowserPool,
   BrowserPoolLive,
@@ -24,18 +24,16 @@ import {
 } from "@bernays/server/browsers";
 import {
   Journal,
-  JournalInjectionLive,
-  JournalProjectionLive,
+  type JournalEntry,
   makeJournalLayer,
+  makeJournalScope,
 } from "@bernays/server/runtime";
 import { createBoard } from "../lib/board.ts";
 import {
   makeMessageBoardActions,
   makeMessageBoardPlatformLayer,
-  MessageBoardInjection,
-  MessageBoardInjectionLive,
   MessageBoardPlatform,
-  MessageBoardProjectionLive,
+  MESSAGEBOARD_SCOPE,
 } from "../plugins/messageboard/mod.ts";
 import type { MessageBoardAccount } from "../plugins/messageboard/mod.ts";
 
@@ -63,15 +61,12 @@ const stubPool: BrowserPoolService = {
 };
 
 // Base layer stack shared by both Effect.runPromise calls in this test.
-// The injection/projection layers need EventStoreTag, so we wire EventStoreInMemory
-// in via Layer.provide rather than Layer.mergeAll (which doesn't auto-satisfy deps).
-const baseLayers = Layer.mergeAll(
-  MessageBoardInjectionLive,
-  MessageBoardProjectionLive,
-  JournalInjectionLive,
-  JournalProjectionLive,
-  BrowserPoolLive(stubPool),
-).pipe(Layer.provide(EventStoreInMemory));
+// EventStoreInMemory is provided via Layer.provideMerge (provides AND re-exports EventStoreTag).
+// Note: Platform injection/projection and Journal layers are created internally
+// by makePlatformLayer and makeJournalLayer respectively.
+const baseLayers = BrowserPoolLive(stubPool).pipe(
+  Layer.provideMerge(EventStoreInMemory),
+);
 
 // =============================================================================
 // Test
@@ -109,9 +104,12 @@ Deno.test({
     // ── Step 2: launch browser and wire routes ────────────────────────────
 
     await t.step("launch browser and wire routes", async () => {
-      const server = await chromium.launchServer({ headless: true });
-      const browser = await chromium.connectOverCDP(server.wsEndpoint());
-      const context = browser.contexts()[0] ?? await browser.newContext();
+      const executablePath = Deno.env.get("PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH");
+      const browser = await chromium.launch({
+        headless: true,
+        ...(executablePath && { executablePath }),
+      });
+      const context = await browser.newContext();
       page = await context.newPage();
 
       // Bridge: browser fetch → in-process board handler
@@ -133,7 +131,6 @@ Deno.test({
       browserCleanup = async () => {
         await page?.close().catch(() => {});
         await browser.close().catch(() => {});
-        await server.close().catch(() => {});
       };
     });
 
@@ -142,26 +139,27 @@ Deno.test({
     let sockpuppetResult: {
       initialThreadCount: number;
       updatedThreadCount: number;
-      journalEntries: number;
+      journalEntries: readonly JournalEntry[];
+      messageboardEvents: StorableEvent[];
+      journalEvents: StorableEvent[];
     } | null = null;
 
     await t.step("run sockpuppet", async () => {
       if (!page) throw new Error("page not initialised");
 
-      // We resolve the injector from the layer context so we can wire it into
-      // the actions factory before constructing the platform layer.
+      // Create actions (injector is obtained from Effect context when actions execute)
+      // and platform layer (which creates injection/projection internally).
       const program = Effect.gen(function* () {
-        const injector = yield* MessageBoardInjection;
+        const eventStore = yield* EventStoreTag;
         const actions = makeMessageBoardActions({
           page: page!,
-          injector,
           account: BOT_ACCOUNT,
         });
 
         const platformLayer = makeMessageBoardPlatformLayer(BOT_ACCOUNT, actions);
         const journalLayer = makeJournalLayer(BOT_ACCOUNT.id);
 
-        return yield* Effect.provide(
+        const innerResult = yield* Effect.provide(
           Effect.gen(function* () {
             const platform = yield* MessageBoardPlatform;
             const journal = yield* Journal;
@@ -198,10 +196,26 @@ Deno.test({
 
             const entries = yield* journal.entries();
 
-            return { initialThreadCount, updatedThreadCount, journalEntries: entries.length };
+            return { initialThreadCount, updatedThreadCount, journalEntries: entries };
           }),
           Layer.merge(platformLayer, journalLayer),
         );
+
+        // Query the event store directly to verify events
+        const allEvents = yield* eventStore.fetch({ type: "all" });
+        const messageboardEvents = allEvents.filter(
+          (e) => e.scope === MESSAGEBOARD_SCOPE,
+        );
+        const journalScope = makeJournalScope(BOT_ACCOUNT.id);
+        const journalEvents = allEvents.filter(
+          (e) => e.scope === journalScope,
+        );
+
+        return {
+          ...innerResult,
+          messageboardEvents: [...messageboardEvents],
+          journalEvents: [...journalEvents],
+        };
       });
 
       sockpuppetResult = await Effect.runPromise(
@@ -217,9 +231,68 @@ Deno.test({
       assertGreater(sockpuppetResult.updatedThreadCount, 0);
     });
 
-    await t.step("verify journal recorded decisions", () => {
+    await t.step("verify messageboard events in store", () => {
       if (!sockpuppetResult) throw new Error("sockpuppet did not run");
-      assertGreater(sockpuppetResult.journalEntries, 0);
+      const events = sockpuppetResult.messageboardEvents;
+
+      // Should have AnchorMessageObserved (from readMessages) and MessageSent (from postMessage)
+      assertGreater(events.length, 0, "Should have messageboard events");
+
+      const anchorEvents = events.filter((e) => e.type === "AnchorMessageObserved");
+      const sentEvents = events.filter((e) => e.type === "MessageSent");
+
+      assertGreater(anchorEvents.length, 0, "Should have AnchorMessageObserved events");
+      assertGreater(sentEvents.length, 0, "Should have MessageSent events");
+
+      // Verify event structure
+      for (const event of events) {
+        assertEquals(event.scope, MESSAGEBOARD_SCOPE, "Event scope should be messageboard");
+        assertExists(event.eventId, "Event should have eventId");
+        assertMatch(event.eventId, /^[0-9a-f-]{36}$/, "eventId should be UUID format");
+        assertExists(event.timestamp, "Event should have timestamp");
+        // Timestamp should be ISO 8601 format
+        assertEquals(isNaN(Date.parse(event.timestamp)), false, "timestamp should be valid ISO date");
+      }
+    });
+
+    await t.step("verify journal events in store", () => {
+      if (!sockpuppetResult) throw new Error("sockpuppet did not run");
+      const events = sockpuppetResult.journalEvents;
+
+      assertGreater(events.length, 0, "Should have journal events");
+
+      // Verify journal event structure - scope is per-participant
+      const expectedScope = makeJournalScope(BOT_ACCOUNT.id);
+      for (const event of events) {
+        assertEquals(
+          event.scope,
+          expectedScope,
+          `Journal event scope should be '${expectedScope}'`,
+        );
+        assertExists(event.eventId, "Journal event should have eventId");
+        assertMatch(event.eventId, /^[0-9a-f-]{36}$/, "eventId should be UUID format");
+        assertExists(event.timestamp, "Journal event should have timestamp");
+      }
+    });
+
+    await t.step("verify journal entries have correct structure", () => {
+      if (!sockpuppetResult) throw new Error("sockpuppet did not run");
+      const entries = sockpuppetResult.journalEntries;
+
+      assertGreater(entries.length, 0, "Should have journal entries");
+
+      // Verify journal entry structure (the typed entries returned by journal.entries())
+      for (const entry of entries) {
+        assertExists(entry.kind, "Journal entry should have kind");
+        assertEquals(entry.kind, "replied", "Journal entry kind should be 'replied'");
+        assertExists(entry.threadId, "Journal entry should have threadId");
+        // Verify participantId is set (journals are filtered by this)
+        assertEquals(
+          entry.participantId,
+          BOT_ACCOUNT.id,
+          "Journal entry should belong to the bot's participantId",
+        );
+      }
     });
 
     await t.step("verify bot reply visible on board", async () => {
@@ -255,10 +328,8 @@ Deno.test({
 
       // Fresh layer stack — new in-memory store, reads all messages from board
       const readProgram = Effect.gen(function* () {
-        const injector = yield* MessageBoardInjection;
         const actions = makeMessageBoardActions({
           page: page!,
-          injector,
           account: BOT_ACCOUNT,
         });
         const platformLayer = makeMessageBoardPlatformLayer(BOT_ACCOUNT, actions);

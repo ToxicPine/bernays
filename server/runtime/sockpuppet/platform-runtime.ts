@@ -1,14 +1,22 @@
-// src/runtime/sockpuppet/platform-runtime.ts
+// runtime/sockpuppet/platform-runtime.ts
 // Platform service layer for sockpuppets
 
 import { type Context, Effect, Layer } from "effect";
 import type { Scope } from "$/core/branded.ts";
-import type { StorableEvent } from "$/store/mod.ts";
+import { EventStoreTag, type EventStoreError, type StorableEvent } from "$/store/mod.ts";
 import type { BaseInboxView } from "$/views/inbox.ts";
 import type { BaseThreadView } from "$/views/thread.ts";
 import type { BaseAccount, BaseBoundBrowser } from "$/views/browser.ts";
 import type { BaseContact } from "$/views/contact.ts";
-import type { Projection } from "$/projections/projection.ts";
+import { BrowserPool } from "$/browsers/mod.ts";
+import {
+  type Injector,
+  makeInjectionLayer,
+} from "$/projections/injector.ts";
+import {
+  type Projection,
+  makeProjectionLayer,
+} from "$/projections/projection.ts";
 import {
   type ActionsRecord,
   makePlatformService,
@@ -23,11 +31,12 @@ import {
 /**
  * Create a Layer that provides a typed Platform service with reactive state.
  *
- * Resolves a Projection from the provided tag, hydrates plugin state via
- * full-fold, subscribes for reactive updates via a background fiber, and
- * wires materialization from the Ref.
+ * Creates Injection and Projection layers internally using the platform
+ * definition's scope and eventSchema. This simplifies layer composition -
+ * callers only need to provide EventStoreTag.
  *
  * @param tag - The platform-specific context tag (e.g., LinkedInPlatform)
+ * @param injectionTag - The scope-specific Injection context tag
  * @param projectionTag - The scope-specific Projection context tag
  * @param config - Platform configuration (definition, account, actions)
  */
@@ -57,6 +66,7 @@ export function makePlatformLayer<
   >,
 >(
   tag: TTag,
+  injectionTag: Context.Tag<any, Injector<TEvent>>,
   projectionTag: Context.Tag<any, Projection<TEvent>>,
   config: {
     readonly platform: PlatformDefinition<
@@ -74,8 +84,24 @@ export function makePlatformLayer<
     readonly account: TAccount;
     readonly actions: TActions;
   },
-) {
+): Layer.Layer<
+  Context.Tag.Identifier<TTag> | Injector<TEvent> | Projection<TEvent>,
+  EventStoreError,
+  EventStoreTag | BrowserPool
+> {
   const { platform, account, actions } = config;
+
+  // Create injection/projection layers internally with platform's scope and schema
+  const injectionLayer = makeInjectionLayer(
+    injectionTag,
+    platform.scope,
+    platform.eventSchema,
+  );
+  const projectionLayer = makeProjectionLayer(
+    projectionTag,
+    platform.scope,
+    platform.eventSchema,
+  );
 
   const serviceEffect = Effect.gen(function* () {
     const projection = yield* projectionTag;
@@ -87,5 +113,11 @@ export function makePlatformLayer<
     );
   });
 
-  return Layer.scoped(tag, serviceEffect);
+  // Use provideMerge to both satisfy internal dependencies AND export the
+  // injection/projection tags. This allows action effects (which require
+  // the injector) to run in the same context where the platform is provided.
+  return Layer.scoped(tag, serviceEffect).pipe(
+    Layer.provideMerge(injectionLayer),
+    Layer.provideMerge(projectionLayer),
+  );
 }

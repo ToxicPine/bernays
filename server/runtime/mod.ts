@@ -4,6 +4,7 @@
 // Sockpuppet Services
 export {
   Journal,
+  type JournalEntry,
   type JournalEntryInput,
   type JournalService,
   type PlatformService,
@@ -18,19 +19,18 @@ export { makePlatformService } from "$/platforms/mod.ts";
 // Journal Layer
 export {
   JournalInjection,
-  JournalInjectionLive,
   JournalProjection,
-  JournalProjectionLive,
   makeJournalLayer,
 } from "./sockpuppet/journal-runtime.ts";
+
+// Journal scope helper
+export { makeJournalScope } from "$/core/scope.ts";
 
 // Briefing Layer
 export {
   Briefing,
   BriefingInjection,
-  BriefingInjectionLive,
   BriefingProjection,
-  BriefingProjectionLive,
   makeBriefingLayer,
 } from "./sockpuppet/briefing-runtime.ts";
 

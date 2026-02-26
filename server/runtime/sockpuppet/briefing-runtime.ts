@@ -5,8 +5,6 @@
 export {
   Briefing,
   BriefingInjection,
-  BriefingInjectionLive,
   BriefingProjection,
-  BriefingProjectionLive,
   makeBriefingLayer,
 } from "$/briefing/service.ts";

@@ -4,9 +4,7 @@
 import { Context, Effect, Layer } from "effect";
 import type { Page } from "playwright";
 import {
-  makeInjectionLayer,
   makeInjectorTag,
-  makeProjectionLayer,
   makeProjectionTag,
   type Injector,
 } from "@bernays/server/projections";
@@ -48,18 +46,6 @@ export const MessageBoardProjection = makeProjectionTag<MessageBoardEvent>(
   "messageboard/Projection",
 );
 
-export const MessageBoardInjectionLive = makeInjectionLayer(
-  MessageBoardInjection,
-  MESSAGEBOARD_SCOPE,
-  MessageBoardEventSchema,
-);
-
-export const MessageBoardProjectionLive = makeProjectionLayer(
-  MessageBoardProjection,
-  MESSAGEBOARD_SCOPE,
-  MessageBoardEventSchema,
-);
-
 // =============================================================================
 // Platform definition
 // =============================================================================
@@ -95,18 +81,22 @@ export type MessageBoardActionError =
   | { readonly code: "PostFailed"; readonly message: string };
 
 export interface MessageBoardActions {
-  readonly readMessages: () => () => Effect.Effect<void, MessageBoardActionError>;
+  readonly readMessages: () => () => Effect.Effect<
+    void,
+    MessageBoardActionError,
+    Injector<MessageBoardEvent>
+  >;
   readonly postMessage: () => (
     content: string,
   ) => Effect.Effect<
     { success: true; messageId: string },
-    MessageBoardActionError
+    MessageBoardActionError,
+    Injector<MessageBoardEvent>
   >;
 }
 
 export interface MessageBoardActionDeps {
   readonly page: Page;
-  readonly injector: Injector<MessageBoardEvent>;
   readonly account: MessageBoardAccount;
 }
 
@@ -115,6 +105,8 @@ export const makeMessageBoardActions = (
 ): MessageBoardActions => ({
   readMessages: () => () =>
     Effect.gen(function* () {
+      const injector = yield* MessageBoardInjection;
+
       const messages = yield* Effect.tryPromise({
         try: () =>
           deps.page.evaluate(
@@ -148,7 +140,7 @@ export const makeMessageBoardActions = (
                 CanonicalId,
               )
             );
-            yield* deps.injector.append({
+            yield* injector.append({
               kind: "anchor",
               scope: MESSAGEBOARD_SCOPE,
               type: "AnchorMessageObserved",
@@ -172,6 +164,7 @@ export const makeMessageBoardActions = (
 
   postMessage: () => (content: string) =>
     Effect.gen(function* () {
+      const injector = yield* MessageBoardInjection;
       const authorId = deps.account.id.split(":")[1] ?? deps.account.id;
 
       const result = yield* Effect.tryPromise({
@@ -216,7 +209,7 @@ export const makeMessageBoardActions = (
         )
       );
 
-      yield* deps.injector.append({
+      yield* injector.append({
         scope: MESSAGEBOARD_SCOPE,
         type: "MessageSent",
         eventId: EventId(crypto.randomUUID()),
@@ -256,15 +249,24 @@ export class MessageBoardPlatform extends Context.Tag(
   >
 >() {}
 
+/**
+ * Create a MessageBoard platform layer. Injection/projection layers are
+ * created internally - caller only needs to provide EventStoreTag.
+ */
 export const makeMessageBoardPlatformLayer = (
   account: MessageBoardAccount,
   actions: MessageBoardActions,
 ) =>
-  makePlatformLayer(MessageBoardPlatform, MessageBoardProjection, {
-    platform: messageBoardPlatform,
-    account,
-    actions,
-  });
+  makePlatformLayer(
+    MessageBoardPlatform,
+    MessageBoardInjection,
+    MessageBoardProjection,
+    {
+      platform: messageBoardPlatform,
+      account,
+      actions,
+    },
+  );
 
 // Re-exports
 export {
