@@ -19,8 +19,8 @@ built to make these tests pass.
   - [Actions](#actions)
 - [Phase 1: Auth Acquisition Script](#phase-1-auth-acquisition-script)
 - [Phase 2: Test Harness](#phase-2-test-harness)
-- [Cookie Transport](#cookie-transport)
-- [Environment Variables](#environment-variables)
+- [Cookie & Test Params Transport](#cookie--test-params-transport)
+- [Configuration Files](#configuration-files)
 - [File Layout](#file-layout)
 - [CI Considerations](#ci-considerations)
 
@@ -37,7 +37,10 @@ LinkedIn auth state is two cookies (per
 | Cookie       | Purpose                                                      |
 | ------------ | ------------------------------------------------------------ |
 | `li_at`      | Primary auth token. Presence = logged in.                    |
-| `JSESSIONID` | Session ID. Value (stripped of quotes) = CSRF token.         |
+| `JSESSIONID` | Session ID. Used as CSRF token in Voyager API `csrf-token` header. |
+
+LinkedIn sets `JSESSIONID` with surrounding double-quotes (`"ajax:123456789"`).
+The auth script strips them on extraction — the stored value is the bare token.
 
 These are injected into a fresh browser at the start of every test run. No
 localStorage, IndexedDB, or service worker state is required.
@@ -60,7 +63,7 @@ actions (consequences of intentional acts).
 | Event | Emitted By | Fields | Purpose |
 |-------|-----------|--------|---------|
 | `AuthObserved` | Sync fiber | `configId`, `participantId`, `status` (`authenticated` / `expired` / `challenged` / `unknown`), `challengeType?`, `previousLiAt?` | Periodic auth health check. Sync fiber reads `li_at` cookie and page state. `challenged` means LinkedIn is showing a `/checkpoint/challenge/` page — all API calls are blocked until resolved. If `previousLiAt` differs from current, the account may have switched. |
-| `TwoFactorChallengeObserved` | Auth script / sync fiber | `configId`, `challengeType` (`sms` / `authenticator` / `email` / `phone_call` / `mobile_app` / `captcha` / `unknown`), `deliveryHint?`, `challengeId?` | Detected when LinkedIn redirects to `/checkpoint/challenge/` or `/checkpoint/challengesV2/`. Challenge types from Waalaxy's DOM marker detection: `email` (pin submit button), `phone` (phone verification pin), `mobile_app` (LinkedIn app push), `authenticator` (auth app div), `captcha` (captchaV2Challenge). Note: `captcha` is not 2FA — it's an anti-bot challenge that can appear mid-session, not just during sign-in. |
+| `TwoFactorChallengeObserved` | Auth script / sync fiber | `configId`, `challengeType` (`email` / `phone` / `mobile_app` / `authenticator` / `captcha` / `unknown`), `deliveryHint?`, `challengeId?` | Detected when LinkedIn redirects to `/checkpoint/challenge/` or `/checkpoint/challengesV2/`. Challenge types from Waalaxy's DOM marker detection: `email` (`email-pin-submit-button`), `phone` (`input__phone_verification_pin`), `mobile_app` (`d_checkpoint_ch_linkedInAppChallengeActivityDevice`), `authenticator` (`auth-app-div`), `captcha` (`captchaV2Challenge`). Note: `captcha` is not 2FA — it's an anti-bot challenge that can appear mid-session, not just during sign-in. |
 | `TwoFactorResultObserved` | Auth script | `configId`, `success`, `errorCode?` (`wrong_credentials` / `challenge_failed` / `rate_limited` / `account_restricted` / `captcha_rejected` / `unknown`) | Result of challenge submission. `errorCode` enables programmatic branching (retry on `rate_limited`, abort on `account_restricted`). |
 
 #### Message Events
@@ -225,7 +228,7 @@ type LinkedInBrowser =
     }
   | LinkedInBrowserBase & {
       readonly authStatus: "challenged";
-      readonly challengeType: "sms" | "authenticator" | "email" | "phone_call"
+      readonly challengeType: "email" | "phone" | "mobile_app" | "authenticator"
         | "mobile_app" | "captcha" | "unknown";
     }
   | LinkedInBrowserBase & { readonly authStatus: "expired" }
@@ -775,42 +778,42 @@ expire.
 ### Flow
 
 ```
-1. Read LINKEDIN_TEST_EMAIL / LINKEDIN_TEST_PASSWORD from env (optional)
-2. Launch headed Chromium (fresh profile, no --user-data-dir)
-3. Navigate to https://www.linkedin.com/login
-4. If credentials are in env, pre-fill email and password fields
-5. Human completes login + 2FA challenge
-6. Script polls for li_at cookie (check every 2s, timeout after 5 min)
-7. Once li_at is present:
+1. Launch headed Chromium (fresh profile, no --user-data-dir)
+2. Navigate to https://www.linkedin.com/login
+3. Human types credentials and completes login + 2FA challenge
+4. Script polls for li_at cookie (check every 2s, timeout after 5 min)
+5. Once li_at is present:
    a. Extract li_at and JSESSIONID via context.cookies()
-   b. Navigate to /feed to confirm auth works
-   c. Write cookies to output file
-   d. Print success message with cookie expiry info
-8. Close browser, exit
+   b. Strip surrounding quotes from JSESSIONID value
+   c. Navigate to /feed to confirm auth works
+   d. Write LinkedInCookieFile to output file
+6. Close browser, exit
 ```
 
 ### Output Format
 
-The script writes a JSON file (default: `.linkedin-cookies.json` in project
+The script writes a `LinkedInCookieFile` to `.linkedin-cookies.json` (project
 root, gitignored):
+
+```typescript
+interface LinkedInCookieFile {
+  readonly li_at: string;       // Auth token
+  readonly JSESSIONID: string;  // CSRF token (quotes stripped)
+  readonly extractedAt: string; // ISO timestamp, metadata for humans
+}
+```
 
 ```json
 {
   "li_at": "AQEDAQx...",
   "JSESSIONID": "ajax:123456789",
-  "extracted_at": "2026-02-27T12:00:00.000Z",
-  "email": "test@example.com"
+  "extractedAt": "2026-02-27T12:00:00.000Z"
 }
 ```
 
 ### Running It
 
 ```bash
-# With credentials pre-filled (still requires manual 2FA)
-LINKEDIN_TEST_EMAIL=you@example.com LINKEDIN_TEST_PASSWORD=secret \
-  deno run -A tests/scripts/linkedin-auth.ts
-
-# Without credentials (type everything manually)
 deno run -A tests/scripts/linkedin-auth.ts
 
 # Custom output path
@@ -844,7 +847,7 @@ Deno.test({
   sanitizeOps: false,
   fn: async (t) => {
     // ── Setup ──────────────────────────────────────────────────────
-    // 1. Load cookies from file or env
+    // 1. Load cookies + test params from JSON files
     // 2. Launch headless Chromium (fresh profile)
     // 3. Inject li_at + JSESSIONID cookies
     // 4. Navigate to linkedin.com/feed
@@ -898,7 +901,7 @@ Deno.test({
     // ── Actions: sendMessage ───────────────────────────────────────
 
     await t.step("action: sendMessage emits MessageSent", async () => {
-      // Requires LINKEDIN_TEST_THREAD_ID in env
+      // Requires threadId in .linkedin-test-params.json
       // Call platform.actions.sendMessage()(threadId, "test message")
       // Assert: MessageSent event in store with correct threadId and content
       // Assert: message appears in platform.thread(threadId).messages
@@ -991,7 +994,7 @@ const journalLayer = makeJournalLayer(account.id);
 
 The first test step:
 
-1. Reads cookies (see [Cookie Transport](#cookie-transport) below).
+1. Reads cookies from `.linkedin-cookies.json` via `loadLinkedInTestConfig()`.
 2. Creates a fresh browser context.
 3. Injects cookies:
    ```typescript
@@ -1009,61 +1012,61 @@ The first test step:
 
 ---
 
-## Cookie Transport
+## Cookie & Test Params Transport
 
-Two mechanisms, checked in order. The harness uses whichever is available first.
+All LinkedIn secrets and test parameters live in JSON files in the project
+root. No environment variables.
 
-### 1. Environment Variables (preferred for CI)
+### Cookie File
 
-```bash
-LINKEDIN_LI_AT=AQEDAQx...
-LINKEDIN_JSESSIONID=ajax:123456789
+`.linkedin-cookies.json` — written by `tests/scripts/linkedin-auth.ts`,
+gitignored. Contains `li_at` and `JSESSIONID` (quotes pre-stripped).
+
+### Test Params File
+
+`.linkedin-test-params.json` — hand-written, gitignored. Contains
+account-specific values needed by the e2e test suite:
+
+```json
+{
+  "selfMemberId": "ACoAAD...",
+  "threadId": "2-abc123...",
+  "profileTarget": "some-public-identifier",
+  "connectTarget": "ACoAAE..."
+}
 ```
-
-Direct, no file dependency. Paste into CI secrets.
-
-### 2. Cookie File (preferred for local dev)
-
-```bash
-LINKEDIN_COOKIES_FILE=.linkedin-cookies.json  # default if env vars not set
-```
-
-The harness reads the file, parses the JSON, extracts `li_at` and `JSESSIONID`.
 
 ### Resolution Logic
 
 ```typescript
-function loadLinkedInCookies(): { li_at: string; JSESSIONID: string } {
-  // 1. Check env vars directly
-  const li_at = Deno.env.get("LINKEDIN_LI_AT");
-  const jsessionid = Deno.env.get("LINKEDIN_JSESSIONID");
-  if (li_at && jsessionid) return { li_at, JSESSIONID: jsessionid };
-
-  // 2. Fall back to cookie file
-  const filePath = Deno.env.get("LINKEDIN_COOKIES_FILE") ?? ".linkedin-cookies.json";
-  const content = JSON.parse(Deno.readTextFileSync(filePath));
-  return { li_at: content.li_at, JSESSIONID: content.JSESSIONID };
-}
+const loadLinkedInTestConfig = (): LinkedInTestConfig => {
+  const cookieFile = readJsonFile(".linkedin-cookies.json");
+  const paramsFile = readJsonFile(".linkedin-test-params.json");
+  return LinkedInTestConfigSchema.parse({
+    cookies: cookieFile,
+    params: paramsFile,
+  });
+};
 ```
+
+Both files are validated with Zod at load time. Missing files produce
+actionable error messages (e.g., "Run: deno run -A tests/scripts/linkedin-auth.ts").
 
 ---
 
-## Environment Variables
+## Configuration Files
 
-| Variable                  | Required | Default                    | Used By        |
-| ------------------------- | -------- | -------------------------- | -------------- |
-| `LINKEDIN_LI_AT`         | No*      | —                          | Test harness   |
-| `LINKEDIN_JSESSIONID`    | No*      | —                          | Test harness   |
-| `LINKEDIN_COOKIES_FILE`  | No       | `.linkedin-cookies.json`   | Test harness   |
-| `LINKEDIN_TEST_EMAIL`    | No       | —                          | Auth script    |
-| `LINKEDIN_TEST_PASSWORD` | No       | —                          | Auth script    |
-| `LINKEDIN_TEST_THREAD_ID`| No       | —                          | sendMessage test |
-| `LINKEDIN_TEST_PROFILE_URL` | No    | —                          | viewProfile test |
-| `LINKEDIN_TEST_CONNECT_TARGET` | No | —                          | sendConnectionRequest test |
-| `HEADLESS`               | No       | `true`                     | Test harness   |
+All LinkedIn-specific configuration is file-based. No environment variables
+are used for LinkedIn secrets or test parameters.
 
-\* One of `LINKEDIN_LI_AT`+`LINKEDIN_JSESSIONID` or a valid cookie file must be
-present for the test harness to run.
+| File                          | Created By        | Purpose                                |
+| ----------------------------- | ----------------- | -------------------------------------- |
+| `.linkedin-cookies.json`      | Auth script       | `li_at` + `JSESSIONID` (gitignored)   |
+| `.linkedin-test-params.json`  | Hand-written      | `selfMemberId`, `threadId`, `profileTarget`, `connectTarget` (gitignored) |
+
+The only environment variable relevant to the test harness is
+`PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH`, which is set by the Nix flake
+to point at the correct chromium binary.
 
 ---
 
@@ -1091,10 +1094,11 @@ tests/
 │   ├── browserbase_test.ts  # Existing
 │   └── linkedin_test.ts     # Phase 2: LinkedIn plugin tests
 └── lib/
-    ├── config.ts            # Test config schemas
-    └── linkedin-cookies.ts  # Cookie loading/injection helper
+    ├── config.ts            # Test config schemas (Browserbase, local)
+    └── linkedin-params.ts   # Cookie + test params loading (Zod-validated)
 
 .linkedin-cookies.json       # Auth script output (gitignored)
+.linkedin-test-params.json   # Hand-written test params (gitignored)
 ```
 
 ---
@@ -1107,12 +1111,10 @@ LinkedIn `li_at` tokens typically last weeks to months, but can be invalidated
 by password change, LinkedIn security review, manual sign-out, or extended
 inactivity.
 
-The CI pipeline should:
-
-1. Store `LINKEDIN_LI_AT` and `LINKEDIN_JSESSIONID` as repository secrets.
-2. Run the LinkedIn test suite.
-3. If the auth verification step fails (cookies stale), skip the LinkedIn tests
-   gracefully rather than failing the build.
+For CI, commit the cookie and params JSON files as encrypted secrets or
+inject them as file artifacts before the test run. If the auth verification
+step fails (cookies stale), the suite should skip gracefully rather than
+failing the build.
 
 ### Rate Limiting
 

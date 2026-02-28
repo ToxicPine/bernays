@@ -16,13 +16,13 @@ import {
   ParticipantId,
   ThreadId,
 } from "@bernays/server/core";
-import { linkedInBehavior } from "../../../plugins/linkedin/behavior.ts";
 import {
+  linkedInBehavior,
+  type LinkedInAccount,
   type LinkedInEvent,
   LinkedInEventSchema,
-} from "../../../plugins/linkedin/schemas.ts";
-import type { LinkedInAccount } from "../../../plugins/linkedin/account.ts";
-import type { LinkedInPluginState } from "../../../plugins/linkedin/state.ts";
+  type LinkedInPluginState,
+} from "@bernays/plugins/linkedin";
 
 // =============================================================================
 // Test Helpers
@@ -106,14 +106,14 @@ Deno.test("behavior: AuthObserved with challenged status sets challengeType", ()
     configId: CONFIG_ID,
     participantId: SELF_ID,
     status: "challenged",
-    challengeType: "sms",
+    challengeType: "phone",
   });
 
   const state = foldEvents([event]);
   const bs = state.browserStatus.get(BrowserConfigId(CONFIG_ID));
   assertExists(bs);
   assertEquals(bs.authStatus, "challenged");
-  assertEquals(bs.challengeType, "sms");
+  assertEquals(bs.challengeType, "phone");
 });
 
 Deno.test("behavior: AuthObserved clears challengeType when not challenged", () => {

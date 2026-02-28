@@ -34,11 +34,10 @@ export type LinkedInBrowser =
   | LinkedInBrowserBase & {
       readonly authStatus: "challenged";
       readonly challengeType:
-        | "sms"
-        | "authenticator"
         | "email"
-        | "phone_call"
+        | "phone"
         | "mobile_app"
+        | "authenticator"
         | "captcha"
         | "unknown";
     }
@@ -54,11 +53,10 @@ export type LinkedInAuthStatus =
 
 /** Challenge type string literal union */
 export type LinkedInChallengeType =
-  | "sms"
-  | "authenticator"
   | "email"
-  | "phone_call"
+  | "phone"
   | "mobile_app"
+  | "authenticator"
   | "captcha"
   | "unknown";
 

@@ -1,83 +1,91 @@
 // tests/lib/linkedin-params.ts
-// Test parameters for LinkedIn e2e tests.
+// LinkedIn e2e test configuration — cookies + test params from JSON files.
 //
-// Resolution order:
-//   1. Environment variables (for CI)
-//   2. .linkedin-test-params.json file (for local dev)
+// Cookies: .linkedin-cookies.json (written by tests/scripts/linkedin-auth.ts)
+// Params:  .linkedin-test-params.json (hand-written, account-specific values)
 //
-// All params are required — the test fails with a clear error if missing.
+// Validated with Zod at load time — parse errors surface immediately with
+// clear messages about what's missing.
 
-export interface LinkedInTestParams {
+import { z } from "@zod/zod";
+
+// =============================================================================
+// Schemas
+// =============================================================================
+
+/** Strip surrounding double-quotes that LinkedIn puts on JSESSIONID values. */
+const stripQuotes = (s: string) =>
+  s.startsWith('"') && s.endsWith('"') ? s.slice(1, -1) : s;
+
+export const LinkedInCookiesSchema = z.object({
+  /** LinkedIn session token */
+  li_at: z.string().min(1, "li_at must be a non-empty string"),
+  /** LinkedIn CSRF token (bare value, no surrounding quotes) */
+  JSESSIONID: z.string().min(1, "JSESSIONID must be a non-empty string")
+    .transform(stripQuotes),
+});
+
+export const LinkedInTestParamsSchema = z.object({
   /** LinkedIn member ID of the test account (e.g. "ACoAAD...") */
-  readonly selfMemberId: string;
-
+  selfMemberId: z.string().min(1, "selfMemberId is required"),
   /** Thread/conversation ID to test sendMessage against */
-  readonly threadId: string;
-
+  threadId: z.string().min(1, "threadId is required"),
   /** Public identifier or member ID to test viewProfile against */
-  readonly profileTarget: string;
-
+  profileTarget: z.string().min(1, "profileTarget is required"),
   /** Member ID of a 2nd/3rd-degree connection to test sendConnectionRequest */
-  readonly connectTarget: string;
-}
+  connectTarget: z.string().min(1, "connectTarget is required"),
+});
 
-const PARAM_FILE_DEFAULT = ".linkedin-test-params.json";
+export const LinkedInTestConfigSchema = z.object({
+  cookies: LinkedInCookiesSchema,
+  params: LinkedInTestParamsSchema,
+});
+
+export type LinkedInCookies = z.infer<typeof LinkedInCookiesSchema>;
+export type LinkedInTestParams = z.infer<typeof LinkedInTestParamsSchema>;
+export type LinkedInTestConfig = z.infer<typeof LinkedInTestConfigSchema>;
+
+// =============================================================================
+// File Paths
+// =============================================================================
+
+const COOKIES_FILE = ".linkedin-cookies.json";
+const PARAMS_FILE = ".linkedin-test-params.json";
+
+// =============================================================================
+// Loader
+// =============================================================================
+
+/** Read and parse a JSON file. Throws with a clear message if not found. */
+const readJsonFile = (path: string): Record<string, unknown> => {
+  try {
+    return JSON.parse(Deno.readTextFileSync(path));
+  } catch (err) {
+    if (err instanceof Deno.errors.NotFound) {
+      throw new Error(
+        `Required file not found: ${path}\n` +
+          (path === COOKIES_FILE
+            ? "Run: deno run -A tests/scripts/linkedin-auth.ts"
+            : "Create it with your test account values — see LINKEDIN_TESTING.md"),
+      );
+    }
+    throw err;
+  }
+};
 
 /**
- * Load test params from env vars or JSON file.
- * Throws with a descriptive error if any required param is missing.
+ * Load and validate the full LinkedIn test config from JSON files.
+ *
+ * Reads .linkedin-cookies.json and .linkedin-test-params.json from the
+ * project root. Throws immediately if either file is missing or if Zod
+ * validation fails.
  */
-export const loadLinkedInTestParams = (): LinkedInTestParams => {
-  // 1. Try env vars
-  const selfMemberId = Deno.env.get("LINKEDIN_TEST_MEMBER_ID");
-  const threadId = Deno.env.get("LINKEDIN_TEST_THREAD_ID");
-  const profileTarget = Deno.env.get("LINKEDIN_TEST_PROFILE_TARGET");
-  const connectTarget = Deno.env.get("LINKEDIN_TEST_CONNECT_TARGET");
+export const loadLinkedInTestConfig = (): LinkedInTestConfig => {
+  const cookieFile = readJsonFile(COOKIES_FILE);
+  const paramsFile = readJsonFile(PARAMS_FILE);
 
-  if (selfMemberId && threadId && profileTarget && connectTarget) {
-    return { selfMemberId, threadId, profileTarget, connectTarget };
-  }
-
-  // 2. Try JSON file (fill in any gaps from env)
-  const filePath = Deno.env.get("LINKEDIN_TEST_PARAMS_FILE") ??
-    PARAM_FILE_DEFAULT;
-  let fileParams: Partial<LinkedInTestParams> = {};
-  try {
-    fileParams = JSON.parse(Deno.readTextFileSync(filePath));
-  } catch {
-    // File not found or invalid — that's fine if env vars cover everything
-  }
-
-  const merged: LinkedInTestParams = {
-    selfMemberId: selfMemberId ?? fileParams.selfMemberId ?? "",
-    threadId: threadId ?? fileParams.threadId ?? "",
-    profileTarget: profileTarget ?? fileParams.profileTarget ?? "",
-    connectTarget: connectTarget ?? fileParams.connectTarget ?? "",
-  };
-
-  // Validate
-  const missing: string[] = [];
-  if (!merged.selfMemberId) missing.push("selfMemberId (LINKEDIN_TEST_MEMBER_ID)");
-  if (!merged.threadId) missing.push("threadId (LINKEDIN_TEST_THREAD_ID)");
-  if (!merged.profileTarget) missing.push("profileTarget (LINKEDIN_TEST_PROFILE_TARGET)");
-  if (!merged.connectTarget) missing.push("connectTarget (LINKEDIN_TEST_CONNECT_TARGET)");
-
-  if (missing.length > 0) {
-    throw new Error(
-      `Missing LinkedIn test params: ${missing.join(", ")}.\n` +
-        `Set env vars or create ${PARAM_FILE_DEFAULT} with:\n` +
-        JSON.stringify(
-          {
-            selfMemberId: "ACoAAD...",
-            threadId: "2-...",
-            profileTarget: "john-doe-123",
-            connectTarget: "ACoAAE...",
-          },
-          null,
-          2,
-        ),
-    );
-  }
-
-  return merged;
+  return LinkedInTestConfigSchema.parse({
+    cookies: cookieFile,
+    params: paramsFile,
+  });
 };

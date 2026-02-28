@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "exports": "./lib/mod.ts",
   "imports": {
+    "$/": "./",
     "@bernays/server/core": "../server/core/mod.ts",
     "@bernays/server/events": "../server/events/mod.ts",
     "@bernays/server/intents": "../server/intents/mod.ts",
@@ -25,6 +26,9 @@
     "strict": true,
     "noImplicitAny": true,
     "strictNullChecks": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": {
+      "$/*": ["./*"]
+    }
   }
 }

@@ -67,11 +67,10 @@ export const LinkedInTwoFactorChallengeObservedSchema =
     type: z.literal("TwoFactorChallengeObserved"),
     configId: z.string().transform(BrowserConfigId),
     challengeType: z.enum([
-      "sms",
-      "authenticator",
       "email",
-      "phone_call",
+      "phone",
       "mobile_app",
+      "authenticator",
       "captcha",
       "unknown",
     ]),

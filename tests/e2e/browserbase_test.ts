@@ -11,7 +11,7 @@ import {
   type TestSession,
   validateBrowserbase,
   validateDatabase,
-} from "../lib/mod.ts";
+} from "$/lib/mod.ts";
 import {
   type ConfigStoreService,
   createPostgresConfigStore,

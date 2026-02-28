@@ -28,14 +28,14 @@ import {
   makeJournalLayer,
   makeJournalScope,
 } from "@bernays/server/runtime";
-import { createBoard } from "../lib/board.ts";
+import { createBoard } from "$/lib/board.ts";
 import {
   makeMessageBoardActions,
   makeMessageBoardPlatformLayer,
   MessageBoardPlatform,
   MESSAGEBOARD_SCOPE,
-} from "../plugins/messageboard/mod.ts";
-import type { MessageBoardAccount } from "../plugins/messageboard/mod.ts";
+} from "$/plugins/messageboard/mod.ts";
+import type { MessageBoardAccount } from "$/plugins/messageboard/mod.ts";
 
 // =============================================================================
 // Constants
