@@ -7,7 +7,7 @@
     "@bernays/server": "workspace:*",
     "@zod/zod": "jsr:@zod/zod@^4.3.5",
     "@std/uuid": "jsr:@std/uuid@^1.1.0",
-    "playwright": "npm:playwright@^1.57.0",
+    "playwright": "npm:playwright@1.56.1",
     "effect": "npm:effect@^3.12.7"
   },
   "tasks": {

@@ -17,7 +17,7 @@
     "@std/assert": "jsr:@std/assert@^1.0.0",
     "@zod/zod": "jsr:@zod/zod@^4.3.5",
     "effect": "npm:effect@^3.19.14",
-    "playwright": "npm:playwright@^1.48.0",
+    "playwright": "npm:playwright@1.56.1",
     "@browserbasehq/sdk": "npm:@browserbasehq/sdk@^2.0.0",
     "postgres": "npm:postgres@^3.4.0"
   },

@@ -103,10 +103,6 @@ export const createLocalPool = (
           const server = await chromium.launchServer({
             headless,
             args,
-            // Use "chromium" channel to force the full chromium build instead
-            // of the headless shell. On NixOS the headless shell binary can
-            // crash (SIGILL/SIGTRAP) while the full chromium works fine.
-            channel: "chromium",
             ...(resolvedExecutablePath && { executablePath: resolvedExecutablePath }),
           });
 
