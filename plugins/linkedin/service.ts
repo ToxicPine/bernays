@@ -66,11 +66,6 @@ export interface MessageSentResult {
   readonly success: true;
 }
 
-export interface SyncResult {
-  readonly synced: true;
-  readonly conversationCount: number;
-}
-
 export interface ConnectionRequestResult {
   readonly sent: true;
 }
@@ -107,14 +102,12 @@ export type TwoFactorResult = z.infer<typeof TwoFactorResultSchema>;
 // =============================================================================
 
 export const SendMessageErrorCode = ExecuteErrorCode("linkedin:send_message");
-export const SyncErrorCode = ExecuteErrorCode("linkedin:sync");
 export const ConnectionErrorCode = ExecuteErrorCode("linkedin:connection");
 export const ProfileErrorCode = ExecuteErrorCode("linkedin:profile");
 export const SignInErrorCode = ExecuteErrorCode("linkedin:sign_in");
 export const TwoFactorErrorCode = ExecuteErrorCode("linkedin:two_factor");
 
 export type SendMessageError = ExecuteError;
-export type SyncError = ExecuteError;
 export type ConnectionError = ExecuteError;
 export type ProfileError = ExecuteError;
 export type SignInError = ExecuteError;
@@ -125,8 +118,12 @@ export type TwoFactorError = ExecuteError;
 // =============================================================================
 
 /**
- * LinkedIn-specific actions.
+ * LinkedIn-specific actions — intentional acts the sockpuppet performs.
  * All actions follow the curried PlatformMethod pattern for browser selection.
+ *
+ * Observation logic (inbox sync, auth checks) is NOT here — it lives in the
+ * plugin's background sync fiber, defined inline in the sync effect passed
+ * to makePlatformLayer. See ARCHITECTURE.md § Background Sync.
  *
  * Actions connect to the browser via CDP and perform automation directly.
  * The CDP session is obtained from the BrowserPool.
@@ -136,12 +133,6 @@ export interface LinkedInActions {
     [threadId: ThreadId, content: string],
     MessageSentResult,
     SendMessageError
-  >;
-
-  readonly syncInbox: PlatformMethod<
-    [since?: string],
-    SyncResult,
-    SyncError
   >;
 
   readonly sendConnectionRequest: PlatformMethod<
@@ -181,7 +172,8 @@ export interface LinkedInActions {
 
 /**
  * Create LinkedIn actions for a specific account.
- * Actions obtain a CDP session from the pool and perform automation directly.
+ * Actions are intentional acts (send, connect, view) — not observations.
+ * Observation logic lives in the sync fiber (see plugins/linkedin/sync.ts).
  *
  * @param pool - Browser pool for obtaining CDP sessions
  * @param account - The LinkedIn account to act on behalf of
@@ -223,20 +215,6 @@ export const makeLinkedInActions = (
         Effect.catchAll((cause) =>
           Effect.fail(
             executeError(SendMessageErrorCode, "Failed to send message", cause),
-          )
-        ),
-      ),
-
-    syncInbox: (options) => (since) =>
-      Effect.gen(function* () {
-        yield* getSession(options?.preferConfigId as string | undefined);
-        // TODO: Implement CDP-based inbox sync
-        void since;
-        return { synced: true as const, conversationCount: 0 };
-      }).pipe(
-        Effect.catchAll((cause) =>
-          Effect.fail(
-            executeError(SyncErrorCode, "Failed to sync inbox", cause),
           )
         ),
       ),

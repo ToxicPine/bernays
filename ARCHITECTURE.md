@@ -53,9 +53,13 @@ about browsers, platform APIs, or crash recovery.
    two operations and it will continue safely. Browser sessions persist
    externally. Everything the program "knows" is in an append-only event log.
 
-2. **Human-like polling**: Sockpuppets poll for updates like humans checking
-   their inbox—no real-time subscriptions. We model humans at desktops, not
-   mobile push notifications.
+2. **Human-like interaction**: We model humans who check things on their own
+   schedule — not people who react instantly to push notifications. A
+   sockpuppet wakes up when it decides to, opens its inbox (already
+   populated by the platform layer, just as a web app's frontend populates
+   the page for a human), and decides what to do. The sockpuppet doesn't
+   explicitly fetch or sync data — it just reads views that are kept current
+   in the background. But it controls *when* it looks and *how often*.
 
 3. **One sockpuppet per account**: The intended model is 1:1 (one sockpuppet
    controls one account), though nothing technically prevents multi-account
@@ -113,13 +117,26 @@ Projection wraps the store's subscribe stream with Zod validation. A background
 fiber folds events from the Projection stream into plugin-wide state held in a
 `Ref`. Sockpuppets read from the state via pure materialization.
 
-Events enter the system from two sources:
+Events enter the system from three sources:
 
-- **Platform actions** — sockpuppets call actions (e.g., `sendMessage`), which
-  automate browsers via CDP, observe results, and emit events through injection.
-  This is the primary source of events during normal operation.
+- **Background sync** — each plugin defines a sync fiber that periodically
+  observes the platform via CDP (scrape inbox, check auth status, etc.) and
+  emits events through injection. This is the primary source of observation
+  events. The sync fiber is owned by the plugin and forked by `makePlatformLayer`.
+- **Sockpuppet actions** — sockpuppets call actions (e.g., `sendMessage`), which
+  automate browsers via CDP, observe the results of what they did, and emit
+  events through injection. Actions are intentional acts — like a human sending
+  a message — whose consequences are recorded as events (e.g., `MessageSent`).
+  This is how the effects of deliberate behavior enter the event stream.
 - **HTTP API** — external event submission for manual injection, tooling, or
   integration with outside systems.
+
+For public platforms (message boards, forums, public feeds), an external service
+can push observation events directly to the event store via the HTTP API. This
+keeps the sync fiber trivial — or eliminates it entirely — since the platform's
+public data can be scraped server-side without a browser session. The fiber only
+needs to handle things that require an authenticated browser (e.g., DMs, private
+notifications).
 
 ### 3. Derive Everything
 
@@ -672,7 +689,12 @@ The curried pattern ensures type-level enforcement: every effect must accept
 
 ### ActionsRecord: Constrained Actions
 
-Platform actions are constrained to only contain `PlatformMethod` types:
+Platform actions are constrained to only contain `PlatformMethod` types. Actions
+are **intentional acts** the sockpuppet performs (send a message, request a
+connection) — like a human clicking "Send." Each action observes the result of
+what it did and emits events recording the consequences (e.g., `MessageSent`,
+`ConnectionRequestSent`). Observation logic (sync inbox, check auth) belongs in
+the plugin's background sync fiber, not in the actions interface.
 
 ```typescript
 type ActionsRecord = Record<
@@ -686,7 +708,6 @@ interface LinkedInActions extends ActionsRecord {
     MessageSentResult,
     SendMessageError
   >;
-  readonly syncInbox: PlatformMethod<[since?: string], SyncResult, SyncError>;
   readonly sendConnectionRequest: PlatformMethod<
     [ParticipantId<"linkedin">, string?],
     ConnectionResult,
@@ -1172,7 +1193,8 @@ export class LinkedInPlatform extends Context.Tag("linkedin/Platform")<
 ### Actions Factory
 
 Each platform defines an actions factory that creates curried `PlatformMethod`
-implementations:
+implementations. Actions are things the sockpuppet **does** — intentional acts
+like sending messages or connection requests:
 
 ```typescript
 // plugins/linkedin/service.ts
@@ -1183,7 +1205,11 @@ export interface LinkedInActions {
     MessageSentResult,
     SendMessageError
   >;
-  readonly syncInbox: PlatformMethod<[since?: string], SyncResult, SyncError>;
+  readonly sendConnectionRequest: PlatformMethod<
+    [targetId: string, note?: string],
+    ConnectionRequestResult,
+    ConnectionError
+  >;
 }
 
 export const makeLinkedInActions = (
@@ -1199,21 +1225,26 @@ export const makeLinkedInActions = (
       return { success: true };
     }),
 
-  syncInbox: (options) => (since) =>
+  sendConnectionRequest: (options) => (targetId, note) =>
     Effect.gen(function* () {
       const configId = options?.preferConfigId ?? selectBrowser(account);
       const session = yield* pool.getSession(configId);
-      // Connect to session.cdpUrl and scrape inbox
-      return { synced: true };
+      // Connect to session.cdpUrl and send connection request
+      return { sent: true };
     }),
 });
 ```
 
+Observation logic (inbox sync, auth checks) is not part of the actions
+interface — see [Background Sync](#background-sync).
+
 ### Platform Layer Factory
 
-The `makePlatformLayer` function wires reactive state via a background fiber. It
-is generic over the context tag with a tight constraint linking the tag's service
-type to the exact `PlatformService` parameters:
+The `makePlatformLayer` function wires reactive state via two background fibers:
+a **projection fiber** that folds events into state, and an optional **sync
+fiber** that observes the platform and emits events. It is generic over the
+context tag with a tight constraint linking the tag's service type to the exact
+`PlatformService` parameters:
 
 ```typescript
 // runtime/sockpuppet/platform-runtime.ts
@@ -1234,6 +1265,9 @@ export function makePlatformLayer<
     readonly platform: PlatformDefinition<...>;
     readonly account: TAccount;
     readonly actions: TActions;
+    /** Plugin-defined background sync. Observes the platform via CDP and
+     *  emits events through injection. Optional — test plugins may omit. */
+    readonly sync?: Effect.Effect<never, never, Injector<TEvent> | BrowserPool>;
   },
 ): Layer.Layer<
   Context.Tag.Identifier<TTag> | Injector<TEvent> | Projection<TEvent>,
@@ -1254,7 +1288,7 @@ export function makePlatformLayer<
     for (const event of events) behavior.applyEvent(state, event);
     const stateRef = yield* Ref.make(state);
 
-    // 2. Subscribe: background fiber folds new events into state
+    // 2. Projection fiber: folds new events into state
     const lastTimestamp = events.length > 0
       ? events[events.length - 1].timestamp
       : undefined;
@@ -1266,10 +1300,15 @@ export function makePlatformLayer<
           return s;
         })
       ),
-      Effect.forkScoped,  // runs for the lifetime of the layer
+      Effect.forkScoped,
     );
 
-    // 3. Service: reads from ref + materializes (pure, no IO)
+    // 3. Sync fiber: plugin-defined observation loop (if provided)
+    if (config.sync) {
+      yield* Effect.forkScoped(config.sync);
+    }
+
+    // 4. Service: reads from ref + materializes (pure, no IO)
     return {
       scope: platform.scope,
       identity: platform.identity,
@@ -1314,18 +1353,106 @@ Key type design:
   injection/projection tags, so actions can access the injector when executed
 - `Context.Tag.Identifier<TTag>` extracts the identifier from
   `typeof LinkedInPlatform`
-- The background fiber is scoped to the layer's lifetime — when the layer is
-  released (sockpuppet exits), the fiber is interrupted automatically
+- Both fibers are scoped to the layer's lifetime — when the layer is released
+  (sockpuppet exits), fibers are interrupted automatically
+- `config.sync` is optional — test plugins (e.g., messageboard) can omit it
+
+### Background Sync
+
+Each plugin defines its own sync logic — an `Effect` that periodically observes
+the platform via CDP and emits events through injection. This is how the
+platform layer keeps its state current without the sockpuppet explicitly
+requesting it.
+
+The sync effect is defined inline by the plugin when constructing the
+`makePlatformLayer` config. It is not part of the actions interface — it is
+internal to the platform layer and invisible to the sockpuppet.
+
+```typescript
+// plugins/linkedin/sync.ts
+
+export const makeLinkedInSync = (
+  pool: BrowserPoolService,
+  account: LinkedInAccount,
+) =>
+  Effect.gen(function* () {
+    const injection = yield* LinkedInInjection;
+
+    yield* Effect.repeat(
+      Effect.gen(function* () {
+        // 1. Get a CDP session
+        const configId = account.browserBindings[0]?.configId;
+        if (!configId) return;
+        const session = yield* pool.getSession(configId);
+
+        // 2. Connect to browser, scrape inbox via CDP
+        // ... navigate to messaging, extract conversations ...
+
+        // 3. Emit observation events
+        yield* injection.append(anchorMessageEvent);
+
+        // 4. Check auth status from cookies
+        // ... extract li_at cookie, emit AuthObserved event ...
+      }).pipe(
+        Effect.catchAll((err) =>
+          Effect.log(`Sync failed: ${err}`)),
+      ),
+      Schedule.spaced("2 minutes").pipe(
+        Schedule.jittered,  // ±20% jitter
+      ),
+    );
+  });
+```
+
+The sync effect is passed to `makePlatformLayer`:
+
+```typescript
+const sync = makeLinkedInSync(pool, account);
+
+const platformLayer = makePlatformLayer(
+  LinkedInPlatform,
+  LinkedInInjection,
+  LinkedInProjection,
+  { platform: linkedInPlatform, account, actions, sync },
+);
+```
+
+**Why the plugin owns sync logic:**
+
+- Each platform has different observation needs (LinkedIn scrapes the messaging
+  page; X might poll a timeline API; Reddit might check a modqueue)
+- Schedules differ per platform (LinkedIn rate-limits aggressively; others may
+  allow faster polling)
+- Error handling and backoff are platform-specific
+- The core `makePlatformLayer` stays generic — it just forks whatever the
+  plugin gives it
+
+**The data flow with sync:**
+
+```
+Sync Fiber → CDP → Injection → EventStore
+                                     ↓
+                      Projection Fiber → Ref<PluginState>
+                                              ↓
+                                      Sockpuppet reads views
+```
+
+The sync fiber and the projection fiber are independent. The sync fiber emits
+events; the projection fiber folds them. No cycle — the sync fiber never reads
+from the projection.
 
 ### Usage in Sockpuppets
 
-Sockpuppets use the platform-specific tag for type-safe access:
+Sockpuppets use the platform-specific tag for type-safe access. Views are
+already current — the sockpuppet just reads them:
 
 ```typescript
 const linkedInBot = Effect.gen(function* () {
-  // Type-safe: platform.actions has sendMessage, syncInbox with correct types
   const platform = yield* LinkedInPlatform;
   const journal = yield* Journal;
+
+  // Inbox is already populated by the background sync fiber
+  const inbox = yield* platform.inbox;
 
   // TypeScript knows platform.actions.sendMessage exists and its signature
   yield* platform.actions.sendMessage()(threadId, "Hello!");
@@ -1337,6 +1464,7 @@ const linkedInBot = Effect.gen(function* () {
 ```typescript
 // When running a sockpuppet
 const actions = makeLinkedInActions(browserPool, account);
+const sync = makeLinkedInSync(browserPool, account);
 
 const platformLayer = makePlatformLayer(
   LinkedInPlatform,
@@ -1346,6 +1474,7 @@ const platformLayer = makePlatformLayer(
     platform: linkedInPlatform,
     account,
     actions,
+    sync,  // optional — omit for test plugins
   },
 );
 
@@ -1410,7 +1539,10 @@ indexes make it O(1) instead of O(N).
 
 ## Layer 5: Sockpuppet
 
-The human-like agent. Sees only Platform, Journal, and Briefing.
+The human-like agent. Sees only Platform, Journal, and Briefing. Views are
+already current — the background sync fiber keeps them populated. The sockpuppet
+reads state and acts, like a human looking at their screen and deciding what
+to do.
 
 ```typescript
 const linkedInBot = Effect.gen(function* () {
@@ -1466,7 +1598,7 @@ const linkedInBot = Effect.gen(function* () {
     : (desktop ?? mobile);
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Process inbox
+  // Process inbox — already populated by the background sync fiber
   // ─────────────────────────────────────────────────────────────────────────
   const inbox = yield* platform.inbox;
 

@@ -162,8 +162,6 @@ export {
   SendMessageErrorCode,
   type SignInError,
   SignInErrorCode,
-  SyncErrorCode,
-  type SyncResult,
   type TwoFactorError,
   TwoFactorErrorCode,
   type TwoFactorResult,
