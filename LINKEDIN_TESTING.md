@@ -382,10 +382,10 @@ interface LinkedInCacheSettings {
 }
 
 const defaultCacheSettings: LinkedInCacheSettings = {
-  feedPost:      { ttl: Duration.minutes(5),  watchInterval: Duration.minutes(15) },
-  companyPage:   { ttl: Duration.minutes(30), watchInterval: Duration.hours(2) },
-  groupThread:   { ttl: Duration.minutes(15), watchInterval: Duration.minutes(30) },
-  publicProfile: { ttl: Duration.minutes(60), watchInterval: Duration.hours(6) },
+  feedPost:      { ttl: Duration.hours(1),  watchInterval: Duration.hours(4) },
+  companyPage:   { ttl: Duration.hours(6),  watchInterval: Duration.hours(24) },
+  groupThread:   { ttl: Duration.hours(1),  watchInterval: Duration.hours(4) },
+  publicProfile: { ttl: Duration.hours(12), watchInterval: Duration.hours(48) },
 };
 
 interface LinkedInInfraService {
@@ -452,10 +452,10 @@ const prodInfra = makeLinkedInInfraLayer({
 
 | Resource | Voyager API | Default TTL | Default Watch |
 |----------|-------------|-------------|---------------|
-| Feed posts | `GET /voyager/api/feed/dash/feedDashUpdates` | 5 min | 15 min |
-| Company pages | `GET /voyager/api/organization/companies/<id>` | 30 min | 2 hours |
-| Group threads | `GET /voyager/api/groups/<id>/posts` | 15 min | 30 min |
-| Public profiles | `GET /voyager/api/identity/dash/profiles` | 60 min | 6 hours |
+| Feed posts | `GET /voyager/api/feed/dash/feedDashUpdates` | 1 hour | 4 hours |
+| Company pages | `GET /voyager/api/organization/companies/<id>` | 6 hours | 24 hours |
+| Group threads | `GET /voyager/api/groups/<id>/posts` | 1 hour | 4 hours |
+| Public profiles | `GET /voyager/api/identity/dash/profiles` | 12 hours | 48 hours |
 
 TTL governs `ensureFetched` freshness (demand-driven, only costs a request when
 asked). Watch interval governs autonomous polling (speculative, always longer
