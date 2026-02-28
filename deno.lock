@@ -12,8 +12,7 @@
     "npm:effect@^3.12.7": "3.19.19",
     "npm:effect@^3.19.14": "3.19.19",
     "npm:hono@^4.7.0": "4.12.2",
-    "npm:playwright@^1.48.0": "1.58.2",
-    "npm:playwright@^1.57.0": "1.58.2",
+    "npm:playwright@1.56.1": "1.56.1",
     "npm:postgres@^3.4.0": "3.4.8",
     "npm:postgres@^3.4.8": "3.4.8"
   },
@@ -280,12 +279,12 @@
         "yaml"
       ]
     },
-    "playwright-core@1.58.2": {
-      "integrity": "sha512-yZkEtftgwS8CsfYo7nm0KE8jsvm6i/PTgVtB8DL726wNf6H2IMsDuxCpJj59KDaxCtSnrWan2AeDqM7JBaultg==",
+    "playwright-core@1.56.1": {
+      "integrity": "sha512-hutraynyn31F+Bifme+Ps9Vq59hKuUCz7H1kDOcBs+2oGguKkWTU50bBWrtz34OUWmIwpBTWDxaRPXrIXkgvmQ==",
       "bin": true
     },
-    "playwright@1.58.2": {
-      "integrity": "sha512-vA30H8Nvkq/cPBnNw4Q8TWz1EJyqgpuinBcHET0YVJVFldr8JDNiU9LaWAE1KqSkRYazuaBhTpB5ZzShOezQ6A==",
+    "playwright@1.56.1": {
+      "integrity": "sha512-aFi5B0WovBHTEvpM3DzXTUaeN6eN0qWnTkKx4NQaH4Wvcmc153PdaY2UBdSYKaGYw+UyWXSVyxDUg5DoPEttjw==",
       "dependencies": [
         "playwright-core"
       ],
@@ -337,7 +336,7 @@
           "jsr:@std/uuid@^1.1.0",
           "jsr:@zod/zod@^4.3.5",
           "npm:effect@^3.12.7",
-          "npm:playwright@^1.57.0"
+          "npm:playwright@1.56.1"
         ]
       },
       "api": {
@@ -374,7 +373,7 @@
           "jsr:@zod/zod@^4.3.5",
           "npm:@browserbasehq/sdk@^2.6.0",
           "npm:effect@^3.19.14",
-          "npm:playwright@^1.57.0",
+          "npm:playwright@1.56.1",
           "npm:postgres@^3.4.8"
         ]
       },
@@ -384,7 +383,7 @@
           "jsr:@zod/zod@^4.3.5",
           "npm:@browserbasehq/sdk@2",
           "npm:effect@^3.19.14",
-          "npm:playwright@^1.48.0",
+          "npm:playwright@1.56.1",
           "npm:postgres@^3.4.0"
         ]
       }
