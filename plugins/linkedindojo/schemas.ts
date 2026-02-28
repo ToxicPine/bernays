@@ -1,10 +1,11 @@
 // plugins/linkedindojo/schemas.ts
-// LinkedIn Dojo schemas - same event/intent shapes as LinkedIn, different scope
+// LinkedIn Dojo schemas — same event shapes as LinkedIn, different scope.
+// Dojo is a browser-free testing environment that shares LinkedIn identity.
 
 import { z } from "@zod/zod";
 import {
+  BrowserConfigId,
   CanonicalId,
-  IntentId,
   participantIdSchema,
   Scope,
   ThreadId,
@@ -14,17 +15,15 @@ import {
   AnchorMessageObservedBase,
   MessageObservedBase,
 } from "@bernays/server/events";
-import {
-  SendMessageBase,
-  SyncConversationsBase,
-} from "@bernays/server/intents";
 
-// Re-export anchor from LinkedIn plugin (same structure for both)
+// Re-export anchor from LinkedIn plugin (same structure)
 import { LinkedInAnchorSchema } from "../linkedin/schemas.ts";
 export type { LinkedInAnchor } from "../linkedin/schemas.ts";
 export { LinkedInAnchorSchema };
 
-// Dojo Scope
+// =============================================================================
+// Scope
+// =============================================================================
 
 export const LINKEDIN_DOJO_SCOPE = Scope("linkedindojo");
 export type LinkedInDojoScope = typeof LINKEDIN_DOJO_SCOPE;
@@ -33,25 +32,28 @@ const linkedInDojoScopeSchema = z.literal("linkedindojo").transform(() =>
   LINKEDIN_DOJO_SCOPE
 );
 
-// Event Schemas (same shape as LinkedIn, different scope)
-
-// Identity schema - dojo uses linkedin identity namespace
+// Identity — dojo uses LinkedIn identity namespace
 const linkedInParticipantIdSchema = participantIdSchema("linkedin");
+
+// =============================================================================
+// Event Schemas (subset of LinkedIn events, different scope)
+// =============================================================================
 
 export const LinkedInDojoAuthObservedSchema = CorrelationMetadataSchema.extend({
   scope: linkedInDojoScopeSchema,
   type: z.literal("AuthObserved"),
   participantId: linkedInParticipantIdSchema,
-  configId: z.string(),
-  authenticated: z.boolean(),
+  configId: z.string().transform(BrowserConfigId),
+  status: z.enum(["authenticated", "expired", "challenged", "unknown"]),
+  challengeType: z.string().optional(),
 });
 
 export type LinkedInDojoAuthObserved = z.infer<
   typeof LinkedInDojoAuthObservedSchema
 >;
 
-export const LinkedInDojoAnchorMessageObservedSchema = AnchorMessageObservedBase
-  .extend({
+export const LinkedInDojoAnchorMessageObservedSchema =
+  AnchorMessageObservedBase.extend({
     scope: linkedInDojoScopeSchema,
     type: z.literal("AnchorMessageObserved"),
     anchor: LinkedInAnchorSchema,
@@ -62,12 +64,11 @@ export type LinkedInDojoAnchorMessageObserved = z.infer<
   typeof LinkedInDojoAnchorMessageObservedSchema
 >;
 
-export const LinkedInDojoMessageObservedSchema = MessageObservedBase
-  .extend({
-    scope: linkedInDojoScopeSchema,
-    type: z.literal("MessageObserved"),
-    threadId: z.string().transform(ThreadId),
-  });
+export const LinkedInDojoMessageObservedSchema = MessageObservedBase.extend({
+  scope: linkedInDojoScopeSchema,
+  type: z.literal("MessageObserved"),
+  threadId: z.string().transform(ThreadId),
+});
 
 export type LinkedInDojoMessageObserved = z.infer<
   typeof LinkedInDojoMessageObservedSchema
@@ -86,64 +87,42 @@ export type LinkedInDojoMessageSent = z.infer<
   typeof LinkedInDojoMessageSentSchema
 >;
 
-export const LinkedInDojoRateLimitObservedSchema = CorrelationMetadataSchema
-  .extend({
+export const LinkedInDojoRestrictionObservedSchema =
+  CorrelationMetadataSchema.extend({
     scope: linkedInDojoScopeSchema,
-    type: z.literal("RateLimitObserved"),
-    configId: z.string(),
-    participantId: linkedInParticipantIdSchema,
-    retryAfter: z.iso.datetime().optional(),
-    limitType: z.enum(["weekly_invites", "daily_messages", "searches"]),
+    type: z.literal("RestrictionObserved"),
+    configId: z.string().transform(BrowserConfigId),
+    restrictionType: z.string(),
+    retryAfter: z.string().optional(),
   });
 
-export type LinkedInDojoRateLimitObserved = z.infer<
-  typeof LinkedInDojoRateLimitObservedSchema
+export type LinkedInDojoRestrictionObserved = z.infer<
+  typeof LinkedInDojoRestrictionObservedSchema
 >;
 
+export const LinkedInDojoRestrictionClearedSchema =
+  CorrelationMetadataSchema.extend({
+    scope: linkedInDojoScopeSchema,
+    type: z.literal("RestrictionCleared"),
+    configId: z.string().transform(BrowserConfigId),
+    restrictionType: z.string(),
+  });
+
+export type LinkedInDojoRestrictionCleared = z.infer<
+  typeof LinkedInDojoRestrictionClearedSchema
+>;
+
+// =============================================================================
 // Event Union
+// =============================================================================
+
 export const LinkedInDojoEventSchema = z.discriminatedUnion("type", [
   LinkedInDojoAuthObservedSchema,
   LinkedInDojoAnchorMessageObservedSchema,
   LinkedInDojoMessageObservedSchema,
   LinkedInDojoMessageSentSchema,
-  LinkedInDojoRateLimitObservedSchema,
+  LinkedInDojoRestrictionObservedSchema,
+  LinkedInDojoRestrictionClearedSchema,
 ]);
 
 export type LinkedInDojoEvent = z.infer<typeof LinkedInDojoEventSchema>;
-
-// Intent Schemas
-
-const LinkedInDojoIntentBase = z.object({
-  scope: linkedInDojoScopeSchema,
-  intentId: z.uuid().transform(IntentId),
-  timestamp: z.iso.datetime(),
-});
-
-export const LinkedInDojoSendMessageSchema = LinkedInDojoIntentBase.extend(
-  SendMessageBase.shape,
-).extend({
-  type: z.literal("SendMessage"),
-});
-
-export type LinkedInDojoSendMessage = z.infer<
-  typeof LinkedInDojoSendMessageSchema
->;
-
-export const LinkedInDojoSyncConversationsSchema = LinkedInDojoIntentBase
-  .extend(
-    SyncConversationsBase.shape,
-  ).extend({
-    type: z.literal("SyncConversations"),
-  });
-
-export type LinkedInDojoSyncConversations = z.infer<
-  typeof LinkedInDojoSyncConversationsSchema
->;
-
-// Intent Union
-export const LinkedInDojoIntentSchema = z.discriminatedUnion("type", [
-  LinkedInDojoSendMessageSchema,
-  LinkedInDojoSyncConversationsSchema,
-]);
-
-export type LinkedInDojoIntent = z.infer<typeof LinkedInDojoIntentSchema>;

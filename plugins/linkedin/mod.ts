@@ -1,9 +1,10 @@
-// src/platforms/linkedin/mod.ts
-// LinkedIn platform definition
+// plugins/linkedin/mod.ts
+// LinkedIn platform definition and barrel exports
 
 import type { PlatformDefinition } from "@bernays/server/platforms";
+import { makeInjectorTag, makeInjectionLayer } from "@bernays/server/projections";
+import { makeProjectionTag, makeProjectionLayer } from "@bernays/server/projections";
 
-// Schemas
 import {
   LINKEDIN_SCOPE,
   type LinkedInAnchor,
@@ -12,21 +13,15 @@ import {
   LinkedInEventSchema,
   type LinkedInScope,
 } from "./schemas.ts";
-
-// Injection/Projection
-import { makeInjectorTag, makeInjectionLayer } from "@bernays/server/projections";
-import { makeProjectionTag, makeProjectionLayer } from "@bernays/server/projections";
-
-// Views
 import type { LinkedInInbox, LinkedInThread } from "./views.ts";
-
-// Account & Browser
 import type { LinkedInAccount } from "./account.ts";
 import type { LinkedInBrowser } from "./browser.ts";
 import type { LinkedInContact } from "./contact.ts";
-
-// Behavior
 import { linkedInBehavior, type LinkedInPluginState } from "./behavior.ts";
+
+// =============================================================================
+// Platform Definition
+// =============================================================================
 
 export const linkedInPlatform: PlatformDefinition<
   LinkedInScope,
@@ -48,42 +43,42 @@ export const linkedInPlatform: PlatformDefinition<
 };
 
 // =============================================================================
-// LinkedIn Injection/Projection Tags & Layers
+// Injection / Projection Tags & Layers
 // =============================================================================
 
-/** Injector tag for LinkedIn events. */
 export const LinkedInInjection = makeInjectorTag<LinkedInEvent>(
   "linkedin/Injection",
 );
 
-/** Projection tag for LinkedIn events. */
 export const LinkedInProjection = makeProjectionTag<LinkedInEvent>(
   "linkedin/Projection",
 );
 
-/** Layer providing LinkedInInjection. Depends on EventStoreTag. */
 export const LinkedInInjectionLive = makeInjectionLayer(
   LinkedInInjection,
   LINKEDIN_SCOPE,
   LinkedInEventSchema,
 );
 
-/** Layer providing LinkedInProjection. Depends on EventStoreTag. */
 export const LinkedInProjectionLive = makeProjectionLayer(
   LinkedInProjection,
   LINKEDIN_SCOPE,
   LinkedInEventSchema,
 );
 
+// =============================================================================
+// Re-exports
+// =============================================================================
+
 // Scope
-export { LINKEDIN_SCOPE } from "./schemas.ts";
+export { LINKEDIN_SCOPE, type LinkedInScope } from "./schemas.ts";
 
 // Schemas (events)
 export {
   type LinkedInAnchor,
+  LinkedInAnchorSchema,
   type LinkedInAnchorMessageObserved,
   LinkedInAnchorMessageObservedSchema,
-  LinkedInAnchorSchema,
   type LinkedInAuthObserved,
   LinkedInAuthObservedSchema,
   type LinkedInConnectionAccepted,
@@ -92,6 +87,8 @@ export {
   LinkedInConnectionRejectedSchema,
   type LinkedInConnectionRequestSent,
   LinkedInConnectionRequestSentSchema,
+  type LinkedInConnectionStatusUnknown,
+  LinkedInConnectionStatusUnknownSchema,
   type LinkedInConversationsSynced,
   LinkedInConversationsSyncedSchema,
   type LinkedInEvent,
@@ -102,31 +99,37 @@ export {
   LinkedInMessageMutatedSchema,
   type LinkedInMessageObserved,
   LinkedInMessageObservedSchema,
+  type LinkedInMessageRequestSent,
+  LinkedInMessageRequestSentSchema,
   type LinkedInMessageSent,
   LinkedInMessageSentSchema,
   type LinkedInProfileViewed,
   LinkedInProfileViewedSchema,
-  type LinkedInRateLimitObserved,
-  LinkedInRateLimitObservedSchema,
-  type LinkedInSearchResultsRetrieved,
-  LinkedInSearchResultsRetrievedSchema,
-  type LinkedInTwoFactorChallenge,
-  LinkedInTwoFactorChallengeSchema,
-  type LinkedInTwoFactorResult,
-  LinkedInTwoFactorResultSchema,
+  type LinkedInRestrictionCleared,
+  LinkedInRestrictionClearedSchema,
+  type LinkedInRestrictionObserved,
+  LinkedInRestrictionObservedSchema,
+  type LinkedInRestrictionType,
+  LinkedInRestrictionTypeSchema,
+  type LinkedInTwoFactorChallengeObserved,
+  LinkedInTwoFactorChallengeObservedSchema,
+  type LinkedInTwoFactorResultObserved,
+  LinkedInTwoFactorResultObservedSchema,
   type LinkedInUserFollowed,
   LinkedInUserFollowedSchema,
 } from "./schemas.ts";
 
 // Views
-export type {
-  LinkedInInbox,
-  LinkedInIndexMeta,
-  LinkedInThread,
-} from "./views.ts";
+export type { LinkedInInbox, LinkedInIndexMeta, LinkedInThread } from "./views.ts";
 
 // Browser
-export type { LinkedInBrowser } from "./browser.ts";
+export type {
+  LinkedInAuthStatus,
+  LinkedInBrowser,
+  LinkedInBrowserBase,
+  LinkedInChallengeType,
+  LinkedInProfileViewingMode,
+} from "./browser.ts";
 
 // Contact
 export type { LinkedInContact } from "./contact.ts";
@@ -141,29 +144,54 @@ export {
   type PostgresLinkedInAccountStoreOptions,
 } from "./account.ts";
 
+// State
+export { emptyLinkedInState, type LinkedInPluginState } from "./state.ts";
+export type {
+  BrowserStatusState,
+  ContactState,
+  InvitationState,
+} from "./state.ts";
+
 // Behavior
-export { linkedInBehavior, type LinkedInPluginState } from "./behavior.ts";
+export { linkedInBehavior } from "./behavior.ts";
 
 // Service (Platform Tag & Actions)
 export {
-  // Result schemas and types
   type BeginSignInResult,
-  BeginSignInResultSchema,
   ConnectionErrorCode,
   type ConnectionRequestResult,
+  type FollowUserResult,
+  FollowErrorCode,
   type InvitationWithdrawnResult,
   type LinkedInActions,
   LinkedInPlatform,
   type LinkedInService,
   makeLinkedInActions,
+  MessageRequestErrorCode,
+  type MessageRequestSentResult,
   type MessageSentResult,
   ProfileErrorCode,
   type ProfileViewedResult,
+  RestrictionErrorCode,
   SendMessageErrorCode,
-  type SignInError,
+  type SendMessageError,
   SignInErrorCode,
-  type TwoFactorError,
+  type SignInError,
   TwoFactorErrorCode,
   type TwoFactorResult,
-  TwoFactorResultSchema,
 } from "./service.ts";
+
+// Sync
+export { makeLinkedInSync } from "./sync.ts";
+
+// Infra (optional, for multi-account)
+export {
+  type CacheResourceSettings,
+  defaultCacheSettings,
+  type EnsureTarget,
+  type LinkedInCacheSettings,
+  LinkedInInfra,
+  type LinkedInInfraService,
+  type LinkedInPublicState,
+  type WatchTopic,
+} from "./infra.ts";

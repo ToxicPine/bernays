@@ -19,6 +19,7 @@ import {
 export interface LocalPoolOptions {
   readonly headless?: boolean;
   readonly userDataDir?: string;
+  readonly executablePath?: string;
 }
 
 // =============================================================================
@@ -46,7 +47,7 @@ export const createLocalPool = (
   configStore: ConfigStoreService,
   options: LocalPoolOptions = {},
 ): BrowserPoolService => {
-  const { headless = true, userDataDir } = options;
+  const { headless = true, userDataDir, executablePath } = options;
 
   const instances = new Map<string, BrowserInstance>();
 
@@ -87,9 +88,16 @@ export const createLocalPool = (
             args.push(`--user-data-dir=${effectiveUserDataDir}`);
           }
 
+          // Resolve executable path: explicit option > env var > Playwright default
+          const resolvedExecutablePath = executablePath ??
+            (typeof Deno !== "undefined"
+              ? Deno.env.get("PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH")
+              : undefined);
+
           const server = await chromium.launchServer({
             headless,
             args,
+            ...(resolvedExecutablePath && { executablePath: resolvedExecutablePath }),
           });
 
           // Extract the CDP WebSocket endpoint

@@ -17,7 +17,7 @@ import {
  * (e.g., `linkedin:AnchorMessageObserved`) and define their own `anchor` shape.
  */
 export const AnchorMessageObservedBase = z.object({
-  kind: z.literal("anchor"),
+  kind: z.literal("anchor").default("anchor"),
   eventId: z.uuid().transform(EventId),
   correlationId: z.uuid().transform(CorrelationId),
   timestamp: z.iso.datetime(),

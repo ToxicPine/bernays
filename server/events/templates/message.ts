@@ -16,7 +16,7 @@ import {
  * Platforms extend this and override `type` with their scoped version.
  */
 export const MessageObservedBase = z.object({
-  kind: z.literal("reply"),
+  kind: z.literal("reply").default("reply"),
   eventId: z.uuid().transform(EventId),
   correlationId: z.uuid().transform(CorrelationId),
   timestamp: z.iso.datetime(),

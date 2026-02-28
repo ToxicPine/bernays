@@ -1,10 +1,10 @@
-// src/platforms/linkedin/schemas.ts
-// LinkedIn platform schemas - events and intents
+// plugins/linkedin/schemas.ts
+// LinkedIn platform event schemas — the complete event catalog per LINKEDIN_TESTING.md
 
 import { z } from "@zod/zod";
 import {
+  BrowserConfigId,
   CanonicalId,
-  IntentId,
   participantIdSchema,
   Scope,
   ThreadId,
@@ -12,16 +12,12 @@ import {
 import { CorrelationMetadataSchema } from "@bernays/server/events";
 import {
   AnchorMessageObservedBase,
-  authObservedBase,
   MessageObservedBase,
-  rateLimitObservedBase,
 } from "@bernays/server/events";
-import {
-  SendMessageBase,
-  SyncConversationsBase,
-} from "@bernays/server/intents";
 
+// =============================================================================
 // Scope
+// =============================================================================
 
 export const LINKEDIN_SCOPE = Scope("linkedin");
 export type LinkedInScope = typeof LINKEDIN_SCOPE;
@@ -30,7 +26,9 @@ const linkedInScopeSchema = z.literal("linkedin").transform(() =>
   LINKEDIN_SCOPE
 );
 
-// LinkedIn Anchor
+// =============================================================================
+// Anchor
+// =============================================================================
 
 export const LinkedInAnchorSchema = z.object({
   conversationId: z.string(),
@@ -39,62 +37,86 @@ export const LinkedInAnchorSchema = z.object({
 
 export type LinkedInAnchor = z.infer<typeof LinkedInAnchorSchema>;
 
-// Event Schemas
+// =============================================================================
+// Auth Events
+// =============================================================================
 
-export const LinkedInAuthObservedSchema = authObservedBase("linkedin").extend({
+/**
+ * Periodic auth health check. Sync fiber reads `li_at` cookie and page state.
+ * `challenged` means LinkedIn is showing a checkpoint page — all API calls blocked.
+ */
+export const LinkedInAuthObservedSchema = CorrelationMetadataSchema.extend({
   scope: linkedInScopeSchema,
   type: z.literal("AuthObserved"),
-  tabId: z.string(),
-  authenticated: z.boolean(),
-  canRead: z.boolean(),
-  canWrite: z.boolean(),
-  /** Present when auth requires additional verification */
-  twoFactorRequired: z.boolean().optional(),
+  configId: z.string().transform(BrowserConfigId),
+  participantId: participantIdSchema("linkedin"),
+  status: z.enum(["authenticated", "expired", "challenged", "unknown"]),
+  challengeType: z.string().optional(),
+  previousLiAt: z.string().optional(),
 });
 
 export type LinkedInAuthObserved = z.infer<typeof LinkedInAuthObservedSchema>;
 
 /**
- * Emitted when a 2FA challenge is detected during sign-in.
- * The extension should emit this when redirected to the 2FA page.
+ * Detected when LinkedIn redirects to /checkpoint/challenge/.
+ * Challenge types from Waalaxy's DOM marker detection.
  */
-export const LinkedInTwoFactorChallengeSchema = CorrelationMetadataSchema
-  .extend({
+export const LinkedInTwoFactorChallengeObservedSchema =
+  CorrelationMetadataSchema.extend({
     scope: linkedInScopeSchema,
     type: z.literal("TwoFactorChallengeObserved"),
-    configId: z.string(),
-    tabId: z.string(),
-    /** Type of 2FA challenge (sms, authenticator, email, phone_call) */
-    challengeType: z.enum(["sms", "authenticator", "email", "phone_call"]),
-    /** Hint about where the code was sent (e.g., "***-***-1234") */
+    configId: z.string().transform(BrowserConfigId),
+    challengeType: z.enum([
+      "sms",
+      "authenticator",
+      "email",
+      "phone_call",
+      "mobile_app",
+      "captcha",
+      "unknown",
+    ]),
     deliveryHint: z.string().optional(),
-    /** Challenge ID for submission (from form data) */
     challengeId: z.string().optional(),
   });
 
-export type LinkedInTwoFactorChallenge = z.infer<
-  typeof LinkedInTwoFactorChallengeSchema
+export type LinkedInTwoFactorChallengeObserved = z.infer<
+  typeof LinkedInTwoFactorChallengeObservedSchema
 >;
 
 /**
- * Emitted when 2FA verification succeeds or fails.
+ * Result of challenge submission.
  */
-export const LinkedInTwoFactorResultSchema = CorrelationMetadataSchema.extend({
-  scope: linkedInScopeSchema,
-  type: z.literal("TwoFactorResultObserved"),
-  configId: z.string(),
-  tabId: z.string(),
-  success: z.boolean(),
-  /** Error message if verification failed */
-  error: z.string().optional(),
-});
+export const LinkedInTwoFactorResultObservedSchema =
+  CorrelationMetadataSchema.extend({
+    scope: linkedInScopeSchema,
+    type: z.literal("TwoFactorResultObserved"),
+    configId: z.string().transform(BrowserConfigId),
+    success: z.boolean(),
+    errorCode: z
+      .enum([
+        "wrong_credentials",
+        "challenge_failed",
+        "rate_limited",
+        "account_restricted",
+        "captcha_rejected",
+        "unknown",
+      ])
+      .optional(),
+  });
 
-export type LinkedInTwoFactorResult = z.infer<
-  typeof LinkedInTwoFactorResultSchema
+export type LinkedInTwoFactorResultObserved = z.infer<
+  typeof LinkedInTwoFactorResultObservedSchema
 >;
 
-export const LinkedInAnchorMessageObservedSchema = AnchorMessageObservedBase
-  .extend({
+// =============================================================================
+// Message Events
+// =============================================================================
+
+/**
+ * First message observed in a conversation. Establishes the thread anchor.
+ */
+export const LinkedInAnchorMessageObservedSchema =
+  AnchorMessageObservedBase.extend({
     scope: linkedInScopeSchema,
     type: z.literal("AnchorMessageObserved"),
     anchor: LinkedInAnchorSchema,
@@ -105,6 +127,9 @@ export type LinkedInAnchorMessageObserved = z.infer<
   typeof LinkedInAnchorMessageObservedSchema
 >;
 
+/**
+ * Subsequent message in an existing thread.
+ */
 export const LinkedInMessageObservedSchema = MessageObservedBase.extend({
   scope: linkedInScopeSchema,
   type: z.literal("MessageObserved"),
@@ -115,19 +140,9 @@ export type LinkedInMessageObserved = z.infer<
   typeof LinkedInMessageObservedSchema
 >;
 
-export const LinkedInMessageMutatedSchema = CorrelationMetadataSchema.extend({
-  scope: linkedInScopeSchema,
-  type: z.literal("MessageMutated"),
-  canonicalId: z.string().transform(CanonicalId),
-  threadId: z.string().transform(ThreadId),
-  mutation: z.enum(["deleted", "edited"]),
-  editedContent: z.string().optional(),
-});
-
-export type LinkedInMessageMutated = z.infer<
-  typeof LinkedInMessageMutatedSchema
->;
-
+/**
+ * Consequence of the sockpuppet sending a message.
+ */
 export const LinkedInMessageSentSchema = CorrelationMetadataSchema.extend({
   scope: linkedInScopeSchema,
   type: z.literal("MessageSent"),
@@ -138,21 +153,33 @@ export const LinkedInMessageSentSchema = CorrelationMetadataSchema.extend({
 
 export type LinkedInMessageSent = z.infer<typeof LinkedInMessageSentSchema>;
 
-export const LinkedInConversationsSyncedSchema = CorrelationMetadataSchema
-  .extend({
-    scope: linkedInScopeSchema,
-    type: z.literal("ConversationsSynced"),
-    participantId: participantIdSchema("linkedin"),
-    threadCount: z.number(),
-    syncedAt: z.iso.datetime(),
-  });
+/**
+ * Detected when a message changes or disappears.
+ * Includes `kind: "mutation"` for graph engine processing.
+ */
+export const LinkedInMessageMutatedSchema = CorrelationMetadataSchema.extend({
+  scope: linkedInScopeSchema,
+  type: z.literal("MessageMutated"),
+  kind: z.literal("mutation").default("mutation"),
+  canonicalId: z.string().transform(CanonicalId),
+  threadId: z.string().transform(ThreadId),
+  mutation: z.enum(["deleted", "edited"]),
+  editedContent: z.string().optional(),
+});
 
-export type LinkedInConversationsSynced = z.infer<
-  typeof LinkedInConversationsSyncedSchema
+export type LinkedInMessageMutated = z.infer<
+  typeof LinkedInMessageMutatedSchema
 >;
 
-export const LinkedInConnectionRequestSentSchema = CorrelationMetadataSchema
-  .extend({
+// =============================================================================
+// Connection Events
+// =============================================================================
+
+/**
+ * Consequence of sending an invitation.
+ */
+export const LinkedInConnectionRequestSentSchema =
+  CorrelationMetadataSchema.extend({
     scope: linkedInScopeSchema,
     type: z.literal("ConnectionRequestSent"),
     targetUserId: z.string(),
@@ -163,77 +190,11 @@ export type LinkedInConnectionRequestSent = z.infer<
   typeof LinkedInConnectionRequestSentSchema
 >;
 
-export const LinkedInUserFollowedSchema = CorrelationMetadataSchema.extend({
-  scope: linkedInScopeSchema,
-  type: z.literal("UserFollowed"),
-  targetUserId: z.string(),
-});
-
-export type LinkedInUserFollowed = z.infer<typeof LinkedInUserFollowedSchema>;
-
-export const LinkedInSearchResultsRetrievedSchema = CorrelationMetadataSchema
-  .extend({
-    scope: linkedInScopeSchema,
-    type: z.literal("SearchResultsRetrieved"),
-    query: z.string(),
-    resultCount: z.number(),
-    results: z.array(z.object({
-      userId: z.string(),
-      name: z.string().optional(),
-      headline: z.string().optional(),
-    })),
-  });
-
-export type LinkedInSearchResultsRetrieved = z.infer<
-  typeof LinkedInSearchResultsRetrievedSchema
->;
-
-export const LinkedInActionAttemptedSchema = CorrelationMetadataSchema.extend({
-  scope: linkedInScopeSchema,
-  type: z.literal("ActionAttempted"),
-  actionType: z.string(),
-  targetId: z.string().optional(),
-});
-
-export type LinkedInActionAttempted = z.infer<
-  typeof LinkedInActionAttemptedSchema
->;
-
-export const LinkedInActionConfirmedSchema = CorrelationMetadataSchema.extend({
-  scope: linkedInScopeSchema,
-  type: z.literal("ActionConfirmed"),
-  actionType: z.string(),
-  targetId: z.string().optional(),
-  confirmedAt: z.iso.datetime(),
-});
-
-export type LinkedInActionConfirmed = z.infer<
-  typeof LinkedInActionConfirmedSchema
->;
-
-export const LinkedInRateLimitObservedSchema = rateLimitObservedBase("linkedin")
-  .extend({
-    scope: linkedInScopeSchema,
-    type: z.literal("RateLimitObserved"),
-    limitType: z.enum(["weekly_invites", "daily_messages", "searches"]),
-  });
-
-export type LinkedInRateLimitObserved = z.infer<
-  typeof LinkedInRateLimitObservedSchema
->;
-
-export const LinkedInProfileViewedSchema = CorrelationMetadataSchema.extend({
-  scope: linkedInScopeSchema,
-  type: z.literal("ProfileViewed"),
-  targetUserId: z.string(),
-  profileUrl: z.string().optional(),
-  viewedAt: z.iso.datetime(),
-});
-
-export type LinkedInProfileViewed = z.infer<typeof LinkedInProfileViewedSchema>;
-
-export const LinkedInInvitationWithdrawnSchema = CorrelationMetadataSchema
-  .extend({
+/**
+ * Consequence of withdrawing an invitation.
+ */
+export const LinkedInInvitationWithdrawnSchema =
+  CorrelationMetadataSchema.extend({
     scope: linkedInScopeSchema,
     type: z.literal("InvitationWithdrawn"),
     invitationId: z.string(),
@@ -244,8 +205,11 @@ export type LinkedInInvitationWithdrawn = z.infer<
   typeof LinkedInInvitationWithdrawnSchema
 >;
 
-export const LinkedInConnectionAcceptedSchema = CorrelationMetadataSchema
-  .extend({
+/**
+ * Detected when a pending invitation is accepted.
+ */
+export const LinkedInConnectionAcceptedSchema =
+  CorrelationMetadataSchema.extend({
     scope: linkedInScopeSchema,
     type: z.literal("ConnectionAccepted"),
     invitationId: z.string(),
@@ -256,8 +220,11 @@ export type LinkedInConnectionAccepted = z.infer<
   typeof LinkedInConnectionAcceptedSchema
 >;
 
-export const LinkedInConnectionRejectedSchema = CorrelationMetadataSchema
-  .extend({
+/**
+ * Detected when a pending invitation is rejected / expires.
+ */
+export const LinkedInConnectionRejectedSchema =
+  CorrelationMetadataSchema.extend({
     scope: linkedInScopeSchema,
     type: z.literal("ConnectionRejected"),
     invitationId: z.string(),
@@ -268,149 +235,171 @@ export type LinkedInConnectionRejected = z.infer<
   typeof LinkedInConnectionRejectedSchema
 >;
 
+/**
+ * Invitation can't be resolved after repeated checks.
+ */
+export const LinkedInConnectionStatusUnknownSchema =
+  CorrelationMetadataSchema.extend({
+    scope: linkedInScopeSchema,
+    type: z.literal("ConnectionStatusUnknown"),
+    invitationId: z.string(),
+    userId: z.string(),
+    sentAt: z.string(),
+  });
+
+export type LinkedInConnectionStatusUnknown = z.infer<
+  typeof LinkedInConnectionStatusUnknownSchema
+>;
+
+// =============================================================================
+// Profile Events
+// =============================================================================
+
+/**
+ * Consequence of viewing a profile.
+ */
+export const LinkedInProfileViewedSchema = CorrelationMetadataSchema.extend({
+  scope: linkedInScopeSchema,
+  type: z.literal("ProfileViewed"),
+  targetUserId: z.string(),
+  profileUrl: z.string().optional(),
+  viewedAt: z.string(),
+  viewerPrivacySetting: z.enum(["full", "anonymous", "hidden"]),
+});
+
+export type LinkedInProfileViewed = z.infer<typeof LinkedInProfileViewedSchema>;
+
+/**
+ * Consequence of following a profile without connecting.
+ */
+export const LinkedInUserFollowedSchema = CorrelationMetadataSchema.extend({
+  scope: linkedInScopeSchema,
+  type: z.literal("UserFollowed"),
+  targetUserId: z.string(),
+});
+
+export type LinkedInUserFollowed = z.infer<typeof LinkedInUserFollowedSchema>;
+
+// =============================================================================
+// Message Request Events
+// =============================================================================
+
+/**
+ * Consequence of sending a message to a non-connection using shared context.
+ */
+export const LinkedInMessageRequestSentSchema =
+  CorrelationMetadataSchema.extend({
+    scope: linkedInScopeSchema,
+    type: z.literal("MessageRequestSent"),
+    targetUserId: z.string(),
+    content: z.string(),
+    contextUrn: z.string(),
+  });
+
+export type LinkedInMessageRequestSent = z.infer<
+  typeof LinkedInMessageRequestSentSchema
+>;
+
+// =============================================================================
+// Restriction Events
+// =============================================================================
+
+/** Restriction type enum — from Waalaxy's error handling */
+export const LinkedInRestrictionTypeSchema = z.enum([
+  "desktop_connect_restricted",
+  "weekly_invites_exhausted",
+  "connect_note_restricted",
+  "message_request_restricted",
+  "daily_messages_exhausted",
+  "searches_exhausted",
+  "account_blocked",
+]);
+
+export type LinkedInRestrictionType = z.infer<
+  typeof LinkedInRestrictionTypeSchema
+>;
+
+/**
+ * Detected from HTTP 429, known error codes, or restriction patterns.
+ */
+export const LinkedInRestrictionObservedSchema =
+  CorrelationMetadataSchema.extend({
+    scope: linkedInScopeSchema,
+    type: z.literal("RestrictionObserved"),
+    configId: z.string().transform(BrowserConfigId),
+    restrictionType: LinkedInRestrictionTypeSchema,
+    retryAfter: z.string().optional(),
+  });
+
+export type LinkedInRestrictionObserved = z.infer<
+  typeof LinkedInRestrictionObservedSchema
+>;
+
+/**
+ * Detected when a previously-observed restriction is no longer active.
+ */
+export const LinkedInRestrictionClearedSchema =
+  CorrelationMetadataSchema.extend({
+    scope: linkedInScopeSchema,
+    type: z.literal("RestrictionCleared"),
+    configId: z.string().transform(BrowserConfigId),
+    restrictionType: LinkedInRestrictionTypeSchema,
+  });
+
+export type LinkedInRestrictionCleared = z.infer<
+  typeof LinkedInRestrictionClearedSchema
+>;
+
+// =============================================================================
+// Conversation Sync Events
+// =============================================================================
+
+/**
+ * Emitted after a full inbox scrape completes.
+ */
+export const LinkedInConversationsSyncedSchema =
+  CorrelationMetadataSchema.extend({
+    scope: linkedInScopeSchema,
+    type: z.literal("ConversationsSynced"),
+    participantId: participantIdSchema("linkedin"),
+    threadCount: z.number(),
+    syncedAt: z.string(),
+  });
+
+export type LinkedInConversationsSynced = z.infer<
+  typeof LinkedInConversationsSyncedSchema
+>;
+
+// =============================================================================
 // Event Union
+// =============================================================================
+
 export const LinkedInEventSchema = z.discriminatedUnion("type", [
+  // Auth
   LinkedInAuthObservedSchema,
-  LinkedInTwoFactorChallengeSchema,
-  LinkedInTwoFactorResultSchema,
+  LinkedInTwoFactorChallengeObservedSchema,
+  LinkedInTwoFactorResultObservedSchema,
+  // Messages
   LinkedInAnchorMessageObservedSchema,
   LinkedInMessageObservedSchema,
-  LinkedInMessageMutatedSchema,
   LinkedInMessageSentSchema,
-  LinkedInConversationsSyncedSchema,
+  LinkedInMessageMutatedSchema,
+  // Connections
   LinkedInConnectionRequestSentSchema,
-  LinkedInUserFollowedSchema,
-  LinkedInSearchResultsRetrievedSchema,
-  LinkedInActionAttemptedSchema,
-  LinkedInActionConfirmedSchema,
-  LinkedInRateLimitObservedSchema,
-  LinkedInProfileViewedSchema,
   LinkedInInvitationWithdrawnSchema,
   LinkedInConnectionAcceptedSchema,
   LinkedInConnectionRejectedSchema,
+  LinkedInConnectionStatusUnknownSchema,
+  // Profile
+  LinkedInProfileViewedSchema,
+  LinkedInUserFollowedSchema,
+  // Message requests
+  LinkedInMessageRequestSentSchema,
+  // Restrictions
+  LinkedInRestrictionObservedSchema,
+  LinkedInRestrictionClearedSchema,
+  // Sync
+  LinkedInConversationsSyncedSchema,
 ]);
 
 export type LinkedInEvent = z.infer<typeof LinkedInEventSchema>;
-
-// Intent Schemas
-
-const LinkedInIntentBase = z.object({
-  scope: linkedInScopeSchema,
-  intentId: z.uuid().transform(IntentId),
-  timestamp: z.iso.datetime(),
-});
-
-export const LinkedInSendMessageSchema = LinkedInIntentBase.extend(
-  SendMessageBase.shape,
-).extend({
-  type: z.literal("SendMessage"),
-});
-
-export type LinkedInSendMessage = z.infer<typeof LinkedInSendMessageSchema>;
-
-export const LinkedInSyncConversationsSchema = LinkedInIntentBase.extend(
-  SyncConversationsBase.shape,
-).extend({
-  type: z.literal("SyncConversations"),
-});
-
-export type LinkedInSyncConversations = z.infer<
-  typeof LinkedInSyncConversationsSchema
->;
-
-export const LinkedInConnectSchema = LinkedInIntentBase.extend({
-  type: z.literal("Connect"),
-  targetUserId: z.string(),
-  note: z.string().max(300).optional(),
-});
-
-export type LinkedInConnect = z.infer<typeof LinkedInConnectSchema>;
-
-export const LinkedInFollowSchema = LinkedInIntentBase.extend({
-  type: z.literal("Follow"),
-  targetUserId: z.string(),
-});
-
-export type LinkedInFollow = z.infer<typeof LinkedInFollowSchema>;
-
-export const LinkedInPeopleSearchSchema = LinkedInIntentBase.extend({
-  type: z.literal("PeopleSearch"),
-  query: z.string(),
-  limit: z.number().positive().optional(),
-});
-
-export type LinkedInPeopleSearch = z.infer<typeof LinkedInPeopleSearchSchema>;
-
-export const LinkedInRecallMessageSchema = LinkedInIntentBase.extend({
-  type: z.literal("RecallMessage"),
-  messageId: z.string(),
-  threadId: z.string().transform(ThreadId),
-});
-
-export type LinkedInRecallMessage = z.infer<typeof LinkedInRecallMessageSchema>;
-
-export const LinkedInWithdrawInvitationSchema = LinkedInIntentBase.extend({
-  type: z.literal("WithdrawInvitation"),
-  invitationId: z.string(),
-  targetUserId: z.string(),
-});
-
-export type LinkedInWithdrawInvitation = z.infer<
-  typeof LinkedInWithdrawInvitationSchema
->;
-
-export const LinkedInViewProfileSchema = LinkedInIntentBase.extend({
-  type: z.literal("ViewProfile"),
-  targetUserId: z.string(),
-  profileUrl: z.string().optional(),
-  fetchData: z.boolean().optional(),
-});
-
-export type LinkedInViewProfile = z.infer<typeof LinkedInViewProfileSchema>;
-
-export const LinkedInAcceptInvitationSchema = LinkedInIntentBase.extend({
-  type: z.literal("AcceptInvitation"),
-  invitationId: z.string(),
-  userId: z.string(),
-});
-
-export type LinkedInAcceptInvitation = z.infer<
-  typeof LinkedInAcceptInvitationSchema
->;
-
-export const LinkedInRejectInvitationSchema = LinkedInIntentBase.extend({
-  type: z.literal("RejectInvitation"),
-  invitationId: z.string(),
-  userId: z.string(),
-});
-
-export type LinkedInRejectInvitation = z.infer<
-  typeof LinkedInRejectInvitationSchema
->;
-
-export const LinkedInSearchCompaniesSchema = LinkedInIntentBase.extend({
-  type: z.literal("SearchCompanies"),
-  query: z.string(),
-  limit: z.number().positive().optional(),
-});
-
-export type LinkedInSearchCompanies = z.infer<
-  typeof LinkedInSearchCompaniesSchema
->;
-
-// Intent Union
-export const LinkedInIntentSchema = z.discriminatedUnion("type", [
-  LinkedInSendMessageSchema,
-  LinkedInSyncConversationsSchema,
-  LinkedInConnectSchema,
-  LinkedInFollowSchema,
-  LinkedInPeopleSearchSchema,
-  LinkedInRecallMessageSchema,
-  LinkedInWithdrawInvitationSchema,
-  LinkedInViewProfileSchema,
-  LinkedInAcceptInvitationSchema,
-  LinkedInRejectInvitationSchema,
-  LinkedInSearchCompaniesSchema,
-]);
-
-export type LinkedInIntent = z.infer<typeof LinkedInIntentSchema>;

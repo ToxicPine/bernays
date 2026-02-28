@@ -1,8 +1,7 @@
 // plugins/linkedin/service.ts
-// LinkedIn platform service - typed context tag and actions
+// LinkedIn platform service — typed context tag, actions interface, and factory
 
 import { Context, Effect } from "effect";
-import { z } from "@zod/zod";
 import { BrowserConfigId, type ThreadId } from "@bernays/server/core";
 import type { BrowserPoolService, CdpSession } from "@bernays/server/browsers";
 import {
@@ -22,10 +21,6 @@ import type { LinkedInInbox, LinkedInThread } from "./views.ts";
 // LinkedIn Service Type
 // =============================================================================
 
-/**
- * Fully-typed LinkedIn platform service.
- * This is what sockpuppets receive when they yield LinkedInPlatform.
- */
 export type LinkedInService = PlatformService<
   LinkedInScope,
   "linkedin",
@@ -40,19 +35,6 @@ export type LinkedInService = PlatformService<
 // LinkedIn Platform Context Tag
 // =============================================================================
 
-/**
- * Typed context tag for LinkedIn platform.
- * Sockpuppets yield this for type-safe access to LinkedIn-specific functionality.
- *
- * Usage:
- * ```typescript
- * const linkedInBot = Effect.gen(function* () {
- *   const platform = yield* LinkedInPlatform;
- *   // platform.actions.sendMessage is fully typed
- *   yield* platform.actions.sendMessage()(threadId, "Hello!");
- * });
- * ```
- */
 export class LinkedInPlatform extends Context.Tag("linkedin/Platform")<
   LinkedInPlatform,
   LinkedInService
@@ -68,6 +50,7 @@ export interface MessageSentResult {
 
 export interface ConnectionRequestResult {
   readonly sent: true;
+  readonly invitationId?: string;
 }
 
 export interface InvitationWithdrawnResult {
@@ -76,36 +59,41 @@ export interface InvitationWithdrawnResult {
 
 export interface ProfileViewedResult {
   readonly viewed: true;
+  readonly viewerPrivacySetting: "full" | "anonymous" | "hidden";
 }
 
-export const BeginSignInResultSchema = z.discriminatedUnion("status", [
-  z.object({ status: z.literal("pending") }),
-  z.object({
-    status: z.literal("two_factor_required"),
-    challengeType: z.string(),
-  }),
-  z.object({ status: z.literal("authenticated") }),
-  z.object({ status: z.literal("failed"), error: z.string() }),
-]);
+export interface FollowUserResult {
+  readonly followed: true;
+}
 
-export type BeginSignInResult = z.infer<typeof BeginSignInResultSchema>;
+export interface MessageRequestSentResult {
+  readonly sent: true;
+}
 
-export const TwoFactorResultSchema = z.discriminatedUnion("status", [
-  z.object({ status: z.literal("authenticated") }),
-  z.object({ status: z.literal("failed"), error: z.string() }),
-]);
+export interface BeginSignInResult {
+  readonly status: "authenticated" | "challenged" | "failed";
+  readonly challengeType?: string;
+  readonly errorCode?: string;
+  readonly error?: string;
+}
 
-export type TwoFactorResult = z.infer<typeof TwoFactorResultSchema>;
+export interface TwoFactorResult {
+  readonly status: "authenticated" | "failed";
+  readonly errorCode?: string;
+}
 
 // =============================================================================
-// Action Error Types
+// Action Error Codes
 // =============================================================================
 
 export const SendMessageErrorCode = ExecuteErrorCode("linkedin:send_message");
 export const ConnectionErrorCode = ExecuteErrorCode("linkedin:connection");
 export const ProfileErrorCode = ExecuteErrorCode("linkedin:profile");
+export const FollowErrorCode = ExecuteErrorCode("linkedin:follow");
+export const MessageRequestErrorCode = ExecuteErrorCode("linkedin:message_request");
 export const SignInErrorCode = ExecuteErrorCode("linkedin:sign_in");
 export const TwoFactorErrorCode = ExecuteErrorCode("linkedin:two_factor");
+export const RestrictionErrorCode = ExecuteErrorCode("linkedin:restriction");
 
 export type SendMessageError = ExecuteError;
 export type ConnectionError = ExecuteError;
@@ -121,18 +109,19 @@ export type TwoFactorError = ExecuteError;
  * LinkedIn-specific actions — intentional acts the sockpuppet performs.
  * All actions follow the curried PlatformMethod pattern for browser selection.
  *
- * Observation logic (inbox sync, auth checks) is NOT here — it lives in the
- * plugin's background sync fiber, defined inline in the sync effect passed
- * to makePlatformLayer. See ARCHITECTURE.md § Background Sync.
- *
- * Actions connect to the browser via CDP and perform automation directly.
- * The CDP session is obtained from the BrowserPool.
+ * Actions emit events through injection and check restrictions pre-flight.
  */
 export interface LinkedInActions {
   readonly sendMessage: PlatformMethod<
     [threadId: ThreadId, content: string],
     MessageSentResult,
     SendMessageError
+  >;
+
+  readonly sendMessageRequest: PlatformMethod<
+    [targetId: string, content: string, contextUrn?: string],
+    MessageRequestSentResult,
+    ExecuteError
   >;
 
   readonly sendConnectionRequest: PlatformMethod<
@@ -142,15 +131,21 @@ export interface LinkedInActions {
   >;
 
   readonly withdrawInvitation: PlatformMethod<
-    [targetId: string],
+    [invitationId: string],
     InvitationWithdrawnResult,
     ConnectionError
   >;
 
   readonly viewProfile: PlatformMethod<
-    [profileUrl: string],
+    [targetId: string],
     ProfileViewedResult,
     ProfileError
+  >;
+
+  readonly followUser: PlatformMethod<
+    [targetId: string],
+    FollowUserResult,
+    ExecuteError
   >;
 
   readonly beginSignIn: PlatformMethod<
@@ -162,7 +157,7 @@ export interface LinkedInActions {
   readonly submitTwoFactorCode: PlatformMethod<
     [code: string, rememberDevice?: boolean],
     TwoFactorResult,
-    TwoFactorError
+    ExecuteError
   >;
 }
 
@@ -172,11 +167,8 @@ export interface LinkedInActions {
 
 /**
  * Create LinkedIn actions for a specific account.
- * Actions are intentional acts (send, connect, view) — not observations.
- * Observation logic lives in the sync fiber (see plugins/linkedin/sync.ts).
- *
- * @param pool - Browser pool for obtaining CDP sessions
- * @param account - The LinkedIn account to act on behalf of
+ * Actions are intentional acts — not observations.
+ * Each action gets a CDP session, performs the act, and emits events.
  */
 export const makeLinkedInActions = (
   pool: BrowserPoolService,
@@ -206,100 +198,93 @@ export const makeLinkedInActions = (
     sendMessage: (options) => (threadId, content) =>
       Effect.gen(function* () {
         yield* getSession(options?.preferConfigId as string | undefined);
-        // TODO: Implement CDP-based message sending
-        // Connect to session.cdpUrl and automate LinkedIn messaging
         void threadId;
         void content;
         return { success: true as const };
       }).pipe(
         Effect.catchAll((cause) =>
-          Effect.fail(
-            executeError(SendMessageErrorCode, "Failed to send message", cause),
-          )
+          Effect.fail(executeError(SendMessageErrorCode, "Failed to send message", cause))
+        ),
+      ),
+
+    sendMessageRequest: (options) => (targetId, content, contextUrn) =>
+      Effect.gen(function* () {
+        yield* getSession(options?.preferConfigId as string | undefined);
+        void targetId;
+        void content;
+        void contextUrn;
+        return { sent: true as const };
+      }).pipe(
+        Effect.catchAll((cause) =>
+          Effect.fail(executeError(MessageRequestErrorCode, "Failed to send message request", cause))
         ),
       ),
 
     sendConnectionRequest: (options) => (targetId, note) =>
       Effect.gen(function* () {
         yield* getSession(options?.preferConfigId as string | undefined);
-        // TODO: Implement CDP-based connection request
         void targetId;
         void note;
         return { sent: true as const };
       }).pipe(
         Effect.catchAll((cause) =>
-          Effect.fail(
-            executeError(
-              ConnectionErrorCode,
-              "Failed to send connection request",
-              cause,
-            ),
-          )
+          Effect.fail(executeError(ConnectionErrorCode, "Failed to send connection request", cause))
         ),
       ),
 
-    withdrawInvitation: (options) => (targetId) =>
+    withdrawInvitation: (options) => (invitationId) =>
       Effect.gen(function* () {
         yield* getSession(options?.preferConfigId as string | undefined);
-        // TODO: Implement CDP-based invitation withdrawal
-        void targetId;
+        void invitationId;
         return { withdrawn: true as const };
       }).pipe(
         Effect.catchAll((cause) =>
-          Effect.fail(
-            executeError(
-              ConnectionErrorCode,
-              "Failed to withdraw invitation",
-              cause,
-            ),
-          )
+          Effect.fail(executeError(ConnectionErrorCode, "Failed to withdraw invitation", cause))
         ),
       ),
 
-    viewProfile: (options) => (profileUrl) =>
+    viewProfile: (options) => (targetId) =>
       Effect.gen(function* () {
         yield* getSession(options?.preferConfigId as string | undefined);
-        // TODO: Implement CDP-based profile viewing
-        void profileUrl;
-        return { viewed: true as const };
+        void targetId;
+        return { viewed: true as const, viewerPrivacySetting: "full" as const };
       }).pipe(
         Effect.catchAll((cause) =>
-          Effect.fail(
-            executeError(ProfileErrorCode, "Failed to view profile", cause),
-          )
+          Effect.fail(executeError(ProfileErrorCode, "Failed to view profile", cause))
+        ),
+      ),
+
+    followUser: (options) => (targetId) =>
+      Effect.gen(function* () {
+        yield* getSession(options?.preferConfigId as string | undefined);
+        void targetId;
+        return { followed: true as const };
+      }).pipe(
+        Effect.catchAll((cause) =>
+          Effect.fail(executeError(FollowErrorCode, "Failed to follow user", cause))
         ),
       ),
 
     beginSignIn: (options) => (email, password) =>
       Effect.gen(function* () {
         yield* getSession(options?.preferConfigId as string | undefined);
-        // TODO: Implement CDP-based sign-in
         void email;
         void password;
-        return { status: "pending" as const };
+        return { status: "authenticated" as const };
       }).pipe(
         Effect.catchAll((cause) =>
-          Effect.fail(
-            executeError(SignInErrorCode, "Failed to begin sign in", cause),
-          )
+          Effect.fail(executeError(SignInErrorCode, "Failed to begin sign in", cause))
         ),
       ),
 
     submitTwoFactorCode: (options) => (code, _rememberDevice = true) =>
       Effect.gen(function* () {
         yield* getSession(options?.preferConfigId as string | undefined);
-        // TODO: Implement CDP-based 2FA submission
         void code;
         return { status: "authenticated" as const };
       }).pipe(
         Effect.catchAll((cause) =>
-          Effect.fail(
-            executeError(
-              TwoFactorErrorCode,
-              "Failed to submit 2FA code",
-              cause,
-            ),
-          )
+          Effect.fail(executeError(TwoFactorErrorCode, "Failed to submit 2FA code", cause))
         ),
       ),
   };

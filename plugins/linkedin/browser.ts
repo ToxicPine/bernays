@@ -1,31 +1,66 @@
-// src/platforms/linkedin/browser.ts
-// LinkedIn-specific browser view
+// plugins/linkedin/browser.ts
+// LinkedIn browser view — discriminated union on authStatus per LINKEDIN_TESTING.md
 
 import type { BaseBoundBrowser } from "@bernays/server/views";
 
-// LinkedIn Auth Status
+// =============================================================================
+// LinkedIn Browser — Discriminated Union
+// =============================================================================
 
 /**
- * LinkedIn-specific authentication status.
- * - "authenticated": Valid LinkedIn session
- * - "expired": Session cookie expired or invalidated
- * - "unknown": Initial state before auth check
+ * Base fields shared across all auth states.
+ * Restrictions are independent axes, not a single "rate limited" flag.
  */
-export type LinkedInAuthStatus = "authenticated" | "expired" | "unknown";
-
-// LinkedIn Browser
-
-/**
- * LinkedIn-specific browser view.
- * Extends BaseBoundBrowser with LinkedIn-specific status fields.
- *
- * The behavior's `materializeBrowsers` function produces these from state:
- * - Auth events determine authStatus
- * - Rate limit events determine rateLimitedUntil
- * - Invite tracking events determine weeklyInvitesRemaining
- */
-export interface LinkedInBrowser extends BaseBoundBrowser {
-  readonly authStatus: LinkedInAuthStatus;
-  readonly rateLimitedUntil: string | undefined;
+export interface LinkedInBrowserBase extends BaseBoundBrowser {
+  /** Active restrictions: restrictionType → retryAfter ISO timestamp */
+  readonly restrictions: Readonly<Record<string, string>>;
+  /** Weekly invites remaining (rolling 7-day window) */
   readonly weeklyInvitesRemaining: number | undefined;
 }
+
+/**
+ * Discriminated union on `authStatus`.
+ *
+ * - `authenticated`: Valid session. `profileViewingMode` available.
+ * - `challenged`: LinkedIn showing checkpoint page. `challengeType` available.
+ * - `expired`: Session cookie absent.
+ * - `unknown`: Initial state before auth check.
+ */
+export type LinkedInBrowser =
+  | LinkedInBrowserBase & {
+      readonly authStatus: "authenticated";
+      readonly profileViewingMode: "full" | "anonymous" | "hidden";
+    }
+  | LinkedInBrowserBase & {
+      readonly authStatus: "challenged";
+      readonly challengeType:
+        | "sms"
+        | "authenticator"
+        | "email"
+        | "phone_call"
+        | "mobile_app"
+        | "captcha"
+        | "unknown";
+    }
+  | LinkedInBrowserBase & { readonly authStatus: "expired" }
+  | LinkedInBrowserBase & { readonly authStatus: "unknown" };
+
+/** Auth status string literal union */
+export type LinkedInAuthStatus =
+  | "authenticated"
+  | "expired"
+  | "challenged"
+  | "unknown";
+
+/** Challenge type string literal union */
+export type LinkedInChallengeType =
+  | "sms"
+  | "authenticator"
+  | "email"
+  | "phone_call"
+  | "mobile_app"
+  | "captcha"
+  | "unknown";
+
+/** Profile viewing mode string literal union */
+export type LinkedInProfileViewingMode = "full" | "anonymous" | "hidden";
