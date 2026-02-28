@@ -148,7 +148,8 @@ export const EventStorePostgres = (
               err,
             ),
         }).pipe(Effect.orDie),
-        (client) => Effect.promise(() => client.end({ timeout: 5 }).catch(() => {})),
+        (client) =>
+          Effect.promise(() => client.end({ timeout: 5 }).catch(() => {})),
       );
 
       const fetch = (

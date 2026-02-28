@@ -7,20 +7,25 @@
 //   + Journal for decision memory
 //   + local Playwright browser (CDP) with page.route interception
 
-import { assertEquals, assertGreater, assertExists, assertMatch } from "@std/assert";
+import {
+  assertEquals,
+  assertExists,
+  assertGreater,
+  assertMatch,
+} from "@std/assert";
 import { chromium } from "playwright";
 import { Effect, Layer, Option } from "effect";
+import { BrowserConfigId, ParticipantId, ThreadId } from "@bernays/server/core";
 import {
-  BrowserConfigId,
-  ParticipantId,
-  ThreadId,
-} from "@bernays/server/core";
-import { EventStoreInMemory, EventStoreTag, type StorableEvent } from "@bernays/server/store";
+  EventStoreInMemory,
+  EventStoreTag,
+  type StorableEvent,
+} from "@bernays/server/store";
 import {
+  browserError,
   BrowserPool,
   BrowserPoolLive,
   type BrowserPoolService,
-  browserError,
 } from "@bernays/server/browsers";
 import {
   Journal,
@@ -32,8 +37,8 @@ import { createBoard } from "$/lib/board.ts";
 import {
   makeMessageBoardActions,
   makeMessageBoardPlatformLayer,
-  MessageBoardPlatform,
   MESSAGEBOARD_SCOPE,
+  MessageBoardPlatform,
 } from "$/plugins/messageboard/mod.ts";
 import type { MessageBoardAccount } from "$/plugins/messageboard/mod.ts";
 
@@ -104,7 +109,9 @@ Deno.test({
     // ── Step 2: launch browser and wire routes ────────────────────────────
 
     await t.step("launch browser and wire routes", async () => {
-      const executablePath = Deno.env.get("PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH");
+      const executablePath = Deno.env.get(
+        "PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH",
+      );
       const browser = await chromium.launch({
         headless: true,
         ...(executablePath && { executablePath }),
@@ -156,7 +163,10 @@ Deno.test({
           account: BOT_ACCOUNT,
         });
 
-        const platformLayer = makeMessageBoardPlatformLayer(BOT_ACCOUNT, actions);
+        const platformLayer = makeMessageBoardPlatformLayer(
+          BOT_ACCOUNT,
+          actions,
+        );
         const journalLayer = makeJournalLayer(BOT_ACCOUNT.id);
 
         const innerResult = yield* Effect.provide(
@@ -166,7 +176,8 @@ Deno.test({
 
             // Initial inbox — empty, no events in the store yet
             const initialInbox = yield* platform.inbox;
-            const initialThreadCount = Object.keys(initialInbox.byThreadId).length;
+            const initialThreadCount =
+              Object.keys(initialInbox.byThreadId).length;
 
             // Read from board via CDP + route interception →
             // injects AnchorMessageObserved events into the store
@@ -177,10 +188,13 @@ Deno.test({
 
             // Inbox should now reflect the injected events
             const updatedInbox = yield* platform.inbox;
-            const updatedThreadCount = Object.keys(updatedInbox.byThreadId).length;
+            const updatedThreadCount =
+              Object.keys(updatedInbox.byThreadId).length;
 
             // Reply to each thread the bot hasn't sent to
-            for (const [threadId, _meta] of Object.entries(updatedInbox.byThreadId)) {
+            for (
+              const [threadId, _meta] of Object.entries(updatedInbox.byThreadId)
+            ) {
               const thread = yield* platform.thread(ThreadId(threadId));
               if (Option.isNone(thread)) continue;
 
@@ -196,7 +210,11 @@ Deno.test({
 
             const entries = yield* journal.entries();
 
-            return { initialThreadCount, updatedThreadCount, journalEntries: entries };
+            return {
+              initialThreadCount,
+              updatedThreadCount,
+              journalEntries: entries,
+            };
           }),
           Layer.merge(platformLayer, journalLayer),
         );
@@ -238,20 +256,38 @@ Deno.test({
       // Should have AnchorMessageObserved (from readMessages) and MessageSent (from postMessage)
       assertGreater(events.length, 0, "Should have messageboard events");
 
-      const anchorEvents = events.filter((e) => e.type === "AnchorMessageObserved");
+      const anchorEvents = events.filter((e) =>
+        e.type === "AnchorMessageObserved"
+      );
       const sentEvents = events.filter((e) => e.type === "MessageSent");
 
-      assertGreater(anchorEvents.length, 0, "Should have AnchorMessageObserved events");
+      assertGreater(
+        anchorEvents.length,
+        0,
+        "Should have AnchorMessageObserved events",
+      );
       assertGreater(sentEvents.length, 0, "Should have MessageSent events");
 
       // Verify event structure
       for (const event of events) {
-        assertEquals(event.scope, MESSAGEBOARD_SCOPE, "Event scope should be messageboard");
+        assertEquals(
+          event.scope,
+          MESSAGEBOARD_SCOPE,
+          "Event scope should be messageboard",
+        );
         assertExists(event.eventId, "Event should have eventId");
-        assertMatch(event.eventId, /^[0-9a-f-]{36}$/, "eventId should be UUID format");
+        assertMatch(
+          event.eventId,
+          /^[0-9a-f-]{36}$/,
+          "eventId should be UUID format",
+        );
         assertExists(event.timestamp, "Event should have timestamp");
         // Timestamp should be ISO 8601 format
-        assertEquals(isNaN(Date.parse(event.timestamp)), false, "timestamp should be valid ISO date");
+        assertEquals(
+          isNaN(Date.parse(event.timestamp)),
+          false,
+          "timestamp should be valid ISO date",
+        );
       }
     });
 
@@ -270,7 +306,11 @@ Deno.test({
           `Journal event scope should be '${expectedScope}'`,
         );
         assertExists(event.eventId, "Journal event should have eventId");
-        assertMatch(event.eventId, /^[0-9a-f-]{36}$/, "eventId should be UUID format");
+        assertMatch(
+          event.eventId,
+          /^[0-9a-f-]{36}$/,
+          "eventId should be UUID format",
+        );
         assertExists(event.timestamp, "Journal event should have timestamp");
       }
     });
@@ -284,7 +324,11 @@ Deno.test({
       // Verify journal entry structure (the typed entries returned by journal.entries())
       for (const entry of entries) {
         assertExists(entry.kind, "Journal entry should have kind");
-        assertEquals(entry.kind, "replied", "Journal entry kind should be 'replied'");
+        assertEquals(
+          entry.kind,
+          "replied",
+          "Journal entry kind should be 'replied'",
+        );
         assertExists(entry.threadId, "Journal entry should have threadId");
         // Verify participantId is set (journals are filtered by this)
         assertEquals(
@@ -332,7 +376,10 @@ Deno.test({
           page: page!,
           account: BOT_ACCOUNT,
         });
-        const platformLayer = makeMessageBoardPlatformLayer(BOT_ACCOUNT, actions);
+        const platformLayer = makeMessageBoardPlatformLayer(
+          BOT_ACCOUNT,
+          actions,
+        );
 
         return yield* Effect.provide(
           Effect.gen(function* () {

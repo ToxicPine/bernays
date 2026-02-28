@@ -28,19 +28,19 @@ export interface LinkedInBrowserBase extends BaseBoundBrowser {
  */
 export type LinkedInBrowser =
   | LinkedInBrowserBase & {
-      readonly authStatus: "authenticated";
-      readonly profileViewingMode: "full" | "anonymous" | "hidden";
-    }
+    readonly authStatus: "authenticated";
+    readonly profileViewingMode: "full" | "anonymous" | "hidden";
+  }
   | LinkedInBrowserBase & {
-      readonly authStatus: "challenged";
-      readonly challengeType:
-        | "email"
-        | "phone"
-        | "mobile_app"
-        | "authenticator"
-        | "captcha"
-        | "unknown";
-    }
+    readonly authStatus: "challenged";
+    readonly challengeType:
+      | "email"
+      | "phone"
+      | "mobile_app"
+      | "authenticator"
+      | "captcha"
+      | "unknown";
+  }
   | LinkedInBrowserBase & { readonly authStatus: "expired" }
   | LinkedInBrowserBase & { readonly authStatus: "unknown" };
 

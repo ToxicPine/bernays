@@ -4,8 +4,8 @@
 import {
   type BrowserConfigId,
   ParticipantId,
-  ParticipantIdFromString,
   type ParticipantId as ParticipantIdType,
+  ParticipantIdFromString,
   type ThreadId,
 } from "@bernays/server/core";
 import {
@@ -13,8 +13,8 @@ import {
   calculateUnreadCount,
   emptyGraphState,
   type GraphMessage,
-  type GraphState,
   graphNodesToMessages,
+  type GraphState,
   materializeThreadGraphs,
   type ThreadGraph,
 } from "@bernays/server/views";
@@ -29,7 +29,10 @@ import type {
 } from "../linkedin/views.ts";
 import type { LinkedInAccount } from "../linkedin/account.ts";
 import type { LinkedInBrowser } from "../linkedin/browser.ts";
-import type { LinkedInAuthStatus, LinkedInChallengeType } from "../linkedin/browser.ts";
+import type {
+  LinkedInAuthStatus,
+  LinkedInChallengeType,
+} from "../linkedin/browser.ts";
 import type { LinkedInContact } from "../linkedin/contact.ts";
 
 import {
@@ -120,7 +123,10 @@ export const linkedInDojoBehavior: PlatformBehavior<
     contacts: new Map(),
   }),
 
-  applyEvent: (state: LinkedInDojoPluginState, event: LinkedInDojoEvent): void => {
+  applyEvent: (
+    state: LinkedInDojoPluginState,
+    event: LinkedInDojoEvent,
+  ): void => {
     applyGraphEvent(state.graph, event);
 
     switch (event.type) {
@@ -144,7 +150,10 @@ export const linkedInDojoBehavior: PlatformBehavior<
       case "AnchorMessageObserved": {
         for (const pid of event.anchor.participants) {
           const existing = state.contacts.get(pid);
-          if (!existing?.lastInteraction || event.timestamp > existing.lastInteraction) {
+          if (
+            !existing?.lastInteraction ||
+            event.timestamp > existing.lastInteraction
+          ) {
             state.contacts.set(pid, {
               ...existing,
               lastInteraction: event.timestamp,
@@ -155,23 +164,24 @@ export const linkedInDojoBehavior: PlatformBehavior<
       }
 
       case "MessageObserved": {
-        const senderId = (event as unknown as { senderId: string }).senderId;
-        if (senderId) {
-          const existing = state.contacts.get(senderId);
-          state.contacts.set(senderId, {
-            ...existing,
-            lastInteraction: event.timestamp,
-            hasReplied: true,
-            lastReplyAt: event.timestamp,
-          });
-        }
+        const senderId = String(event.senderId);
+        const existing = state.contacts.get(senderId);
+        state.contacts.set(senderId, {
+          ...existing,
+          lastInteraction: event.timestamp,
+          hasReplied: true,
+          lastReplyAt: event.timestamp,
+        });
         break;
       }
 
       case "MessageSent": {
         if (event.senderId) {
           const existing = state.contacts.get(event.senderId);
-          if (!existing?.lastInteraction || event.timestamp > existing.lastInteraction) {
+          if (
+            !existing?.lastInteraction ||
+            event.timestamp > existing.lastInteraction
+          ) {
             state.contacts.set(event.senderId, {
               ...existing,
               lastInteraction: event.timestamp,
@@ -312,7 +322,7 @@ export const linkedInDojoBehavior: PlatformBehavior<
     state: LinkedInDojoPluginState,
     participantId: ParticipantIdType<LinkedInIdentity>,
   ): LinkedInContact | undefined => {
-    const contact = state.contacts.get(participantId as string);
+    const contact = state.contacts.get(participantId);
     if (!contact) return undefined;
 
     return {

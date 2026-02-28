@@ -54,12 +54,12 @@ about browsers, platform APIs, or crash recovery.
    externally. Everything the program "knows" is in an append-only event log.
 
 2. **Human-like interaction**: We model humans who check things on their own
-   schedule — not people who react instantly to push notifications. A
-   sockpuppet wakes up when it decides to, opens its inbox (already
-   populated by the platform layer, just as a web app's frontend populates
-   the page for a human), and decides what to do. The sockpuppet doesn't
-   explicitly fetch or sync data — it just reads views that are kept current
-   in the background. But it controls *when* it looks and *how often*.
+   schedule — not people who react instantly to push notifications. A sockpuppet
+   wakes up when it decides to, opens its inbox (already populated by the
+   platform layer, just as a web app's frontend populates the page for a human),
+   and decides what to do. The sockpuppet doesn't explicitly fetch or sync data
+   — it just reads views that are kept current in the background. But it
+   controls _when_ it looks and _how often_.
 
 3. **One sockpuppet per account**: The intended model is 1:1 (one sockpuppet
    controls one account), though nothing technically prevents multi-account
@@ -122,7 +122,8 @@ Events enter the system from three sources:
 - **Background sync** — each plugin defines a sync fiber that periodically
   observes the platform via CDP (scrape inbox, check auth status, etc.) and
   emits events through injection. This is the primary source of observation
-  events. The sync fiber is owned by the plugin and forked by `makePlatformLayer`.
+  events. The sync fiber is owned by the plugin and forked by
+  `makePlatformLayer`.
 - **Sockpuppet actions** — sockpuppets call actions (e.g., `sendMessage`), which
   automate browsers via CDP, observe the results of what they did, and emit
   events through injection. Actions are intentional acts — like a human sending
@@ -148,10 +149,10 @@ stream by folding events into plugin-wide state. Sockpuppets read from this
 state via pure materialization functions.
 
 The EventStore is reactive: it exposes a `subscribe` stream that delivers new
-events as they arrive. Projection wraps this stream with Zod validation.
-How the stream is produced is an implementation detail inside the EventStore —
-in-memory stores push directly on append; Postgres stores poll internally.
-Nothing above the Projection knows or cares.
+events as they arrive. Projection wraps this stream with Zod validation. How the
+stream is produced is an implementation detail inside the EventStore — in-memory
+stores push directly on append; Postgres stores poll internally. Nothing above
+the Projection knows or cares.
 
 This enables:
 
@@ -649,8 +650,14 @@ interface BaseBoundBrowser {
 
 // Platform extends — discriminated union on authStatus
 type LinkedInBrowser =
-  | BaseBoundBrowser & { readonly authStatus: "authenticated"; readonly profileViewingMode: string }
-  | BaseBoundBrowser & { readonly authStatus: "challenged"; readonly challengeType: string }
+  | BaseBoundBrowser & {
+    readonly authStatus: "authenticated";
+    readonly profileViewingMode: string;
+  }
+  | BaseBoundBrowser & {
+    readonly authStatus: "challenged";
+    readonly challengeType: string;
+  }
   | BaseBoundBrowser & { readonly authStatus: "expired" }
   | BaseBoundBrowser & { readonly authStatus: "unknown" };
 ```
@@ -797,16 +804,19 @@ the scope. Account-specific views (inbox, thread) are projected from the shared
 state by passing a `participantId` to the materialize function.
 
 **`applyEvent` is the existing derivation logic, factored out.** Each platform's
-`for (const event of events)` loops from the old `deriveInbox`, `deriveBrowsers`,
-`deriveContact` are merged into a single reducer. The `materialize*` functions
-are the post-loop formatting code, reading from accumulated state instead of
-re-folding events.
+`for (const event of events)` loops from the old `deriveInbox`,
+`deriveBrowsers`, `deriveContact` are merged into a single reducer. The
+`materialize*` functions are the post-loop formatting code, reading from
+accumulated state instead of re-folding events.
 
 **Full-fold derivation for one-off use** (API layer, tests) is a utility:
 
 ```typescript
 const deriveFromEvents = <TPluginState, TEvent>(
-  behavior: { emptyState: () => TPluginState; applyEvent: (s: TPluginState, e: TEvent) => void },
+  behavior: {
+    emptyState: () => TPluginState;
+    applyEvent: (s: TPluginState, e: TEvent) => void;
+  },
   events: readonly TEvent[],
 ): TPluginState => {
   const state = behavior.emptyState();
@@ -1009,11 +1019,11 @@ Implementations (Postgres, in-memory) provide `EventStoreService` via
 Consumers declare `EventStoreTag` as a dependency rather than accepting a raw
 EventStore as a config field.
 
-| Backend | `subscribe` strategy |
-|---------|----------------------|
-| In-memory | `append` pushes to an internal `PubSub`. `subscribe` reads with scope filter. Zero latency. |
-| Postgres | Background fiber polls `WHERE scope = $1 AND ts > $2` on a short interval. Yields chunks via `Stream.async`. |
-| Future reactive DB | Native change stream, wrapped as `Stream`. |
+| Backend            | `subscribe` strategy                                                                                         |
+| ------------------ | ------------------------------------------------------------------------------------------------------------ |
+| In-memory          | `append` pushes to an internal `PubSub`. `subscribe` reads with scope filter. Zero latency.                  |
+| Postgres           | Background fiber polls `WHERE scope = $1 AND ts > $2` on a short interval. Yields chunks via `Stream.async`. |
+| Future reactive DB | Native change stream, wrapped as `Stream`.                                                                   |
 
 ### ConfigStore
 
@@ -1132,7 +1142,9 @@ The sole write gateway. Validates via Zod and persists to the EventStore:
 interface Injection<TEvent extends StorableEvent> {
   readonly scope: Scope;
   readonly append: (event: TEvent) => Effect.Effect<void, InjectionError>;
-  readonly appendBatch: (events: readonly TEvent[]) => Effect.Effect<void, InjectionError>;
+  readonly appendBatch: (
+    events: readonly TEvent[],
+  ) => Effect.Effect<void, InjectionError>;
 }
 ```
 
@@ -1145,10 +1157,14 @@ interface Projection<TEvent extends StorableEvent> {
   readonly scope: Scope;
 
   /** One-shot query (for startup hydration and API reads). */
-  readonly query: (since?: string) => Effect.Effect<readonly TEvent[], EventStoreError>;
+  readonly query: (
+    since?: string,
+  ) => Effect.Effect<readonly TEvent[], EventStoreError>;
 
   /** Reactive stream of validated events (for background state fiber). */
-  readonly subscribe: (since?: string) => Stream.Stream<readonly TEvent[], EventStoreError>;
+  readonly subscribe: (
+    since?: string,
+  ) => Stream.Stream<readonly TEvent[], EventStoreError>;
 }
 ```
 
@@ -1239,8 +1255,8 @@ export const makeLinkedInActions = (
 });
 ```
 
-Observation logic (inbox sync, auth checks) is not part of the actions
-interface — see [Background Sync](#background-sync).
+Observation logic (inbox sync, auth checks) is not part of the actions interface
+— see [Background Sync](#background-sync).
 
 ### Platform Layer Factory
 
@@ -1361,17 +1377,17 @@ Key type design:
 - Both fibers are scoped to the layer's lifetime — when the layer is released
   (sockpuppet exits), fibers are interrupted automatically
 - `config.sync` is optional — test plugins (e.g., messageboard) can omit it
-- `RExtra` defaults to `never` (no extra dependencies). This is the escape
-  hatch for **observation deduplication**: when public state should be observed
-  once and shared across all participants. On LinkedIn, public posts visible
-  to every account are scraped once by a shared observer; each sockpuppet's
-  sync fiber depends on the shared infra layer (`LinkedInInfra`) to avoid
-  redundant scraping and can read shared derived state directly. On fully
-  public platforms (message boards, forums), the shared observer handles all
-  observation — each sockpuppet's sync fiber becomes trivial or empty, just
-  reading from a shared `Ref` that the infra layer maintains. The requirement
-  propagates to the layer's `R` type, so the caller provides it — same
-  pattern as action requirements.
+- `RExtra` defaults to `never` (no extra dependencies). This is the escape hatch
+  for **observation deduplication**: when public state should be observed once
+  and shared across all participants. On LinkedIn, public posts visible to every
+  account are scraped once by a shared observer; each sockpuppet's sync fiber
+  depends on the shared infra layer (`LinkedInInfra`) to avoid redundant
+  scraping and can read shared derived state directly. On fully public platforms
+  (message boards, forums), the shared observer handles all observation — each
+  sockpuppet's sync fiber becomes trivial or empty, just reading from a shared
+  `Ref` that the infra layer maintains. The requirement propagates to the
+  layer's `R` type, so the caller provides it — same pattern as action
+  requirements.
 
 ### Background Sync
 
@@ -1410,11 +1426,10 @@ export const makeLinkedInSync = (
         // 4. Check auth status from cookies
         // ... extract li_at cookie, emit AuthObserved event ...
       }).pipe(
-        Effect.catchAll((err) =>
-          Effect.log(`Sync failed: ${err}`)),
+        Effect.catchAll((err) => Effect.log(`Sync failed: ${err}`)),
       ),
       Schedule.spaced("2 minutes").pipe(
-        Schedule.jittered,  // ±20% jitter
+        Schedule.jittered, // ±20% jitter
       ),
     );
   });
@@ -1440,8 +1455,8 @@ const platformLayer = makePlatformLayer(
 - Schedules differ per platform (LinkedIn rate-limits aggressively; others may
   allow faster polling)
 - Error handling and backoff are platform-specific
-- The core `makePlatformLayer` stays generic — it just forks whatever the
-  plugin gives it
+- The core `makePlatformLayer` stays generic — it just forks whatever the plugin
+  gives it
 
 **The data flow with sync:**
 
@@ -1490,7 +1505,7 @@ const platformLayer = makePlatformLayer(
     platform: linkedInPlatform,
     account,
     actions,
-    sync,  // optional — omit for test plugins
+    sync, // optional — omit for test plugins
   },
 );
 
@@ -1545,11 +1560,11 @@ This pushes filtering to the EventStore level:
 - **Subscribe stream**: Only receives events for this participant
 - **No in-memory filter**: All events returned belong to this participant
 
-**Why per-participant scopes:** With a single `"journal"` scope, every bot
-would fetch all journal events from all bots, then filter in memory. With
-100 bots each having 1000 entries, each bot would fetch 100,000 events to
-get its 1000. Per-participant scopes push the filter to the database where
-indexes make it O(1) instead of O(N).
+**Why per-participant scopes:** With a single `"journal"` scope, every bot would
+fetch all journal events from all bots, then filter in memory. With 100 bots
+each having 1000 entries, each bot would fetch 100,000 events to get its 1000.
+Per-participant scopes push the filter to the database where indexes make it
+O(1) instead of O(N).
 
 ---
 
@@ -1557,8 +1572,8 @@ indexes make it O(1) instead of O(N).
 
 The human-like agent. Sees only Platform, Journal, and Briefing. Views are
 already current — the background sync fiber keeps them populated. The sockpuppet
-reads state and acts, like a human looking at their screen and deciding what
-to do.
+reads state and acts, like a human looking at their screen and deciding what to
+do.
 
 ```typescript
 const linkedInBot = Effect.gen(function* () {
@@ -1748,7 +1763,8 @@ BriefingEnded       { briefingId, endedBy, reason?, summary? }
 The `Briefing` service is what sockpuppets `yield*` to participate in briefings
 — both initiating and receiving. It wraps event injection/projection and agent
 identity into a single interface. The service is constructed with the agent's
-identity; Injection and Projection for the briefing scope are created internally.
+identity; Injection and Projection for the briefing scope are created
+internally.
 
 ```typescript
 const makeBriefingLayer = (
@@ -1994,19 +2010,19 @@ brief/
 
 ## Dependency Matrix
 
-| Layer | Service        | Depends On                     | Responsibility                              |
-| ----- | -------------- | ------------------------------ | ------------------------------------------- |
-| 0     | `Database`     | —                              | Raw SQL access                              |
-| 0     | `EventStore`   | Database                       | Append-only event log (Effect service)      |
-| 0     | `ConfigStore`  | Database                       | Browser configs                             |
-| 1     | `BrowserPool`  | ConfigStore                    | Launch browsers, return CDP URLs            |
-| 2     | `API`          | Injection, Projection          | HTTP event bus + control plane              |
-| 3     | `Injection`    | EventStore                     | Validated writes                            |
-| 3     | `Projection`   | EventStore                     | Validated reads                             |
-| 4     | `Platform`     | EventStore, BrowserPool        | State fold + materialization + actions (creates injection/projection internally) |
-| 4     | `Journal`      | EventStore                     | Sockpuppet decision log (creates injection/projection internally, per-participant scope) |
-| 4     | `Briefing`     | EventStore                     | Agent-to-agent structured conversations (creates injection/projection internally) |
-| 5     | `Sockpuppet`   | Platform, Journal, Briefing    | Human-like agent                            |
+| Layer | Service       | Depends On                  | Responsibility                                                                           |
+| ----- | ------------- | --------------------------- | ---------------------------------------------------------------------------------------- |
+| 0     | `Database`    | —                           | Raw SQL access                                                                           |
+| 0     | `EventStore`  | Database                    | Append-only event log (Effect service)                                                   |
+| 0     | `ConfigStore` | Database                    | Browser configs                                                                          |
+| 1     | `BrowserPool` | ConfigStore                 | Launch browsers, return CDP URLs                                                         |
+| 2     | `API`         | Injection, Projection       | HTTP event bus + control plane                                                           |
+| 3     | `Injection`   | EventStore                  | Validated writes                                                                         |
+| 3     | `Projection`  | EventStore                  | Validated reads                                                                          |
+| 4     | `Platform`    | EventStore, BrowserPool     | State fold + materialization + actions (creates injection/projection internally)         |
+| 4     | `Journal`     | EventStore                  | Sockpuppet decision log (creates injection/projection internally, per-participant scope) |
+| 4     | `Briefing`    | EventStore                  | Agent-to-agent structured conversations (creates injection/projection internally)        |
+| 5     | `Sockpuppet`  | Platform, Journal, Briefing | Human-like agent                                                                         |
 
 ---
 

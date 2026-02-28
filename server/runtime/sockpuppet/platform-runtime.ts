@@ -3,19 +3,16 @@
 
 import { type Context, Effect, Layer } from "effect";
 import type { Scope } from "$/core/branded.ts";
-import { EventStoreTag, type EventStoreError, type StorableEvent } from "$/store/mod.ts";
+import type { StorableEvent } from "$/store/mod.ts";
 import type { BaseInboxView } from "$/views/inbox.ts";
 import type { BaseThreadView } from "$/views/thread.ts";
 import type { BaseAccount, BaseBoundBrowser } from "$/views/browser.ts";
 import type { BaseContact } from "$/views/contact.ts";
 import { BrowserPool } from "$/browsers/mod.ts";
+import { type Injector, makeInjectionLayer } from "$/projections/injector.ts";
 import {
-  type Injector,
-  makeInjectionLayer,
-} from "$/projections/injector.ts";
-import {
-  type Projection,
   makeProjectionLayer,
+  type Projection,
 } from "$/projections/projection.ts";
 import {
   type ActionsRecord,
@@ -32,13 +29,25 @@ import {
  * Create a Layer that provides a typed Platform service with reactive state.
  *
  * Creates Injection and Projection layers internally using the platform
- * definition's scope and eventSchema. This simplifies layer composition -
- * callers only need to provide EventStoreTag.
+ * definition's scope and eventSchema. This simplifies layer composition —
+ * callers only need to provide EventStoreTag and BrowserPool.
+ *
+ * Optionally accepts a `sync` factory — a function from account to an Effect
+ * that periodically observes the platform via CDP and emits events through
+ * injection. When provided, `makePlatformLayer` calls it with the account and
+ * forks the result scoped to the layer's lifetime. Test plugins (e.g.,
+ * messageboard) may omit it.
+ *
+ * `RExtra` (defaults to `never`) is the escape hatch for observation
+ * deduplication: when public state should be observed once and shared across
+ * all participants. The sync fiber declares `RExtra` in its requirements,
+ * and `makePlatformLayer` propagates it to the layer's `R` type so the
+ * caller provides it.
  *
  * @param tag - The platform-specific context tag (e.g., LinkedInPlatform)
  * @param injectionTag - The scope-specific Injection context tag
  * @param projectionTag - The scope-specific Projection context tag
- * @param config - Platform configuration (definition, account, actions)
+ * @param config - Platform configuration (definition, account, actions, sync)
  */
 export function makePlatformLayer<
   TScope extends Scope,
@@ -64,6 +73,7 @@ export function makePlatformLayer<
       TContact
     >
   >,
+  RExtra = never,
 >(
   tag: TTag,
   injectionTag: Context.Tag<any, Injector<TEvent>>,
@@ -83,12 +93,14 @@ export function makePlatformLayer<
     >;
     readonly account: TAccount;
     readonly actions: TActions;
+    /** Plugin-defined background sync factory. Called with account, returns
+     *  an Effect that observes the platform and emits events via injection.
+     *  Optional — test plugins may omit. */
+    readonly sync?: (
+      account: TAccount,
+    ) => Effect.Effect<never, never, Injector<TEvent> | BrowserPool | RExtra>;
   },
-): Layer.Layer<
-  Context.Tag.Identifier<TTag> | Injector<TEvent> | Projection<TEvent>,
-  EventStoreError,
-  EventStoreTag | BrowserPool
-> {
+) {
   const { platform, account, actions } = config;
 
   // Create injection/projection layers internally with platform's scope and schema
@@ -105,12 +117,19 @@ export function makePlatformLayer<
 
   const serviceEffect = Effect.gen(function* () {
     const projection = yield* projectionTag;
-    return yield* makePlatformService(
+    const service = yield* makePlatformService(
       platform,
       account,
       projection,
       actions,
     );
+
+    // Fork sync fiber if provided — scoped to the layer's lifetime
+    if (config.sync) {
+      yield* Effect.forkScoped(config.sync(account));
+    }
+
+    return service;
   });
 
   // Use provideMerge to both satisfy internal dependencies AND export the

@@ -103,10 +103,10 @@ export type EnsureTarget =
   | { readonly kind: "feedPost"; readonly postUrn: string }
   | { readonly kind: "companyPage"; readonly companyId: string }
   | {
-      readonly kind: "groupPost";
-      readonly groupId: string;
-      readonly postUrn: string;
-    }
+    readonly kind: "groupPost";
+    readonly groupId: string;
+    readonly postUrn: string;
+  }
   | { readonly kind: "publicProfile"; readonly memberId: string };
 
 export type WatchTopic =

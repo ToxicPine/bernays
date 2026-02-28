@@ -9,8 +9,8 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import { type AgentId as AgentIdType } from "@bernays/server/core";
 import { EventStorePostgres, EventStoreTag } from "@bernays/server/store";
 import {
-  type BriefingService,
   Briefing,
+  type BriefingService,
   makeBriefingLayer,
 } from "@bernays/server/briefing";
 

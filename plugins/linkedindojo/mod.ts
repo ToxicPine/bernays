@@ -14,7 +14,10 @@ import type { LinkedInInbox, LinkedInThread } from "../linkedin/views.ts";
 import type { LinkedInAccount } from "../linkedin/account.ts";
 import type { LinkedInBrowser } from "../linkedin/browser.ts";
 import type { LinkedInContact } from "../linkedin/contact.ts";
-import { linkedInDojoBehavior, type LinkedInDojoPluginState } from "./behavior.ts";
+import {
+  linkedInDojoBehavior,
+  type LinkedInDojoPluginState,
+} from "./behavior.ts";
 
 const LINKEDIN_IDENTITY = "linkedin" as const;
 type LinkedInIdentity = typeof LINKEDIN_IDENTITY;

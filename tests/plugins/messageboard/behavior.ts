@@ -2,17 +2,25 @@
 // Minimal platform behavior for the messageboard test plugin.
 // Only the state and materialization needed to exercise the reactive pipeline.
 
-import type { BrowserConfigId, ParticipantId, ThreadId } from "@bernays/server/core";
+import type {
+  BrowserConfigId,
+  ParticipantId,
+  ThreadId,
+} from "@bernays/server/core";
 import { ParticipantIdFromString } from "@bernays/server/core";
 import {
   applyGraphEvent,
   emptyGraphState,
   type GraphMessage,
-  type GraphState,
   graphNodesToMessages,
+  type GraphState,
   materializeThreadGraphs,
 } from "@bernays/server/views";
-import type { BaseBoundBrowser, BaseInboxView, BaseThreadView } from "@bernays/server/views";
+import type {
+  BaseBoundBrowser,
+  BaseInboxView,
+  BaseThreadView,
+} from "@bernays/server/views";
 import type { PlatformBehavior } from "@bernays/server/platforms";
 import type { MessageBoardAccount } from "./account.ts";
 import type { MessageBoardAnchor, MessageBoardEvent } from "./schemas.ts";
@@ -26,11 +34,13 @@ export interface MessageBoardThreadSummary {
   readonly lastActivity: string;
 }
 
-export interface MessageBoardInbox extends BaseInboxView<MessageBoardThreadSummary> {
+export interface MessageBoardInbox
+  extends BaseInboxView<MessageBoardThreadSummary> {
   readonly byThreadId: Readonly<Record<string, MessageBoardThreadSummary>>;
 }
 
-export interface MessageBoardThread extends BaseThreadView<MessageBoardAnchor> {}
+export interface MessageBoardThread
+  extends BaseThreadView<MessageBoardAnchor> {}
 
 // =============================================================================
 // Plugin state
@@ -63,7 +73,10 @@ export const messageBoardBehavior: PlatformBehavior<
     graph: emptyGraphState(),
   }),
 
-  applyEvent: (state: MessageBoardPluginState, event: MessageBoardEvent): void => {
+  applyEvent: (
+    state: MessageBoardPluginState,
+    event: MessageBoardEvent,
+  ): void => {
     applyGraphEvent(state.graph, event);
   },
 

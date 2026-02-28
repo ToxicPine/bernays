@@ -33,28 +33,28 @@ A sockpuppet does exactly this:
 5. **Write it down** — record the decision in your journal
 6. **Leave** — the process can stop at any point and restart safely
 
-The sockpuppet controls *when* it looks and *how often*. It does not control
-*how* data arrives.
+The sockpuppet controls _when_ it looks and _how often_. It does not control
+_how_ data arrives.
 
 ## One Sockpuppet, One Person
 
-A sockpuppet represents a single person — not a single account. One person
-might have a LinkedIn and an X account, both operated by the same sockpuppet.
-The sockpuppet yields multiple platform services and acts across them with one
+A sockpuppet represents a single person — not a single account. One person might
+have a LinkedIn and an X account, both operated by the same sockpuppet. The
+sockpuppet yields multiple platform services and acts across them with one
 journal and one identity.
 
 Everything deployed together shares a briefing boundary and an API boundary.
 This means sockpuppets in the same deployment can talk to each other through
-briefings and share an event store. In practice, keep it close to one
-sockpuppet per deployment. If two sockpuppets don't need to brief each other
-or share infrastructure, they belong in separate deployments.
+briefings and share an event store. In practice, keep it close to one sockpuppet
+per deployment. If two sockpuppets don't need to brief each other or share
+infrastructure, they belong in separate deployments.
 
 ## What You See
 
 A sockpuppet sees exactly three services. Nothing else.
 
 - **Platform** — inbox, threads, contacts, browsers, and actions. Views are
-  already current. Actions are things you *do* (send a message, request a
+  already current. Actions are things you _do_ (send a message, request a
   connection).
 - **Journal** — your notebook. Record decisions so you can pick up where you
   left off after a restart.

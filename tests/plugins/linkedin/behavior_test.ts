@@ -17,8 +17,8 @@ import {
   ThreadId,
 } from "@bernays/server/core";
 import {
-  linkedInBehavior,
   type LinkedInAccount,
+  linkedInBehavior,
   type LinkedInEvent,
   LinkedInEventSchema,
   type LinkedInPluginState,
@@ -41,9 +41,7 @@ let eventCounter = 0;
 /** Raw base fields for event construction (Zod input format) */
 const rawBase = (overrides: Record<string, unknown> = {}) => ({
   scope: "linkedin",
-  eventId: crypto.randomUUID(),
   timestamp: new Date(Date.now() + eventCounter++).toISOString(),
-  correlationId: crypto.randomUUID(),
   ...overrides,
 });
 
@@ -162,11 +160,15 @@ Deno.test("behavior: AnchorMessageObserved creates thread and tracks contacts", 
   const state = foldEvents([event]);
 
   // Contact tracking — participants stored under branded ParticipantId keys
-  const selfContact = state.contacts.get(ParticipantId("linkedin", "self-user"));
+  const selfContact = state.contacts.get(
+    ParticipantId("linkedin", "self-user"),
+  );
   assertExists(selfContact);
   assertEquals(selfContact.connectionDegree, "1st");
 
-  const otherContact = state.contacts.get(ParticipantId("linkedin", "other-user"));
+  const otherContact = state.contacts.get(
+    ParticipantId("linkedin", "other-user"),
+  );
   assertExists(otherContact);
   assertEquals(otherContact.connectionDegree, "1st");
   assertExists(otherContact.lastInteraction);
@@ -198,7 +200,9 @@ Deno.test("behavior: MessageObserved tracks reply directionality", () => {
 
   const state = foldEvents([anchor, reply]);
 
-  const otherContact = state.contacts.get(ParticipantId("linkedin", "other-user"));
+  const otherContact = state.contacts.get(
+    ParticipantId("linkedin", "other-user"),
+  );
   assertExists(otherContact);
   assertEquals(otherContact.hasReplied, true);
   assertExists(otherContact.lastReplyAt);

@@ -15,10 +15,10 @@ import { AgentId, BriefingId, CorrelationId, EventId } from "$/core/branded.ts";
 import type { Injector } from "$/projections/injector.ts";
 import type { Projection } from "$/projections/projection.ts";
 import { BriefingEventSchema } from "$/events/briefing.ts";
-import { makeInjectorTag, makeInjectionLayer } from "$/projections/injector.ts";
+import { makeInjectionLayer, makeInjectorTag } from "$/projections/injector.ts";
 import {
-  makeProjectionTag,
   makeProjectionLayer,
+  makeProjectionTag,
 } from "$/projections/projection.ts";
 import { EventStoreTag } from "$/store/mod.ts";
 import {
@@ -119,7 +119,6 @@ export const BriefingInjection = makeInjectorTag<BriefingEvent>(
 export const BriefingProjection = makeProjectionTag<BriefingEvent>(
   "briefing/Projection",
 );
-
 
 // =============================================================================
 // Implementation

@@ -62,7 +62,9 @@ const waitForCdp = async (port: number, timeoutMs = 10000): Promise<string> => {
     }
     await new Promise((r) => setTimeout(r, 100));
   }
-  throw new Error(`CDP did not become ready on port ${port} within ${timeoutMs}ms`);
+  throw new Error(
+    `CDP did not become ready on port ${port} within ${timeoutMs}ms`,
+  );
 };
 
 /**
@@ -141,7 +143,7 @@ export const createLocalPool = (
 
           if (!resolvedExecutablePath) {
             throw new Error(
-              "No executable path: set PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH or pass executablePath option"
+              "No executable path: set PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH or pass executablePath option",
             );
           }
 

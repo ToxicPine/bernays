@@ -16,8 +16,8 @@ import {
   type ConfigStoreService,
   createPostgresConfigStore,
   EventStorePostgres,
-  EventStoreTag,
   type EventStoreService,
+  EventStoreTag,
 } from "@bernays/server/store";
 import { ManagedRuntime } from "effect";
 import {

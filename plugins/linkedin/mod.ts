@@ -2,8 +2,12 @@
 // LinkedIn platform definition and barrel exports
 
 import type { PlatformDefinition } from "@bernays/server/platforms";
-import { makeInjectorTag, makeInjectionLayer } from "@bernays/server/projections";
-import { makeProjectionTag, makeProjectionLayer } from "@bernays/server/projections";
+import { makeInjectionLayer } from "@bernays/server/projections";
+import {
+  makeProjectionLayer,
+  makeProjectionTag,
+} from "@bernays/server/projections";
+import { LinkedInInjectionTag } from "./service.ts";
 
 import {
   LINKEDIN_SCOPE,
@@ -46,9 +50,7 @@ export const linkedInPlatform: PlatformDefinition<
 // Injection / Projection Tags & Layers
 // =============================================================================
 
-export const LinkedInInjection = makeInjectorTag<LinkedInEvent>(
-  "linkedin/Injection",
-);
+export const LinkedInInjection = LinkedInInjectionTag;
 
 export const LinkedInProjection = makeProjectionTag<LinkedInEvent>(
   "linkedin/Projection",
@@ -76,9 +78,9 @@ export { LINKEDIN_SCOPE, type LinkedInScope } from "./schemas.ts";
 // Schemas (events)
 export {
   type LinkedInAnchor,
-  LinkedInAnchorSchema,
   type LinkedInAnchorMessageObserved,
   LinkedInAnchorMessageObservedSchema,
+  LinkedInAnchorSchema,
   type LinkedInAuthObserved,
   LinkedInAuthObservedSchema,
   type LinkedInConnectionAccepted,
@@ -120,7 +122,11 @@ export {
 } from "./schemas.ts";
 
 // Views
-export type { LinkedInInbox, LinkedInIndexMeta, LinkedInThread } from "./views.ts";
+export type {
+  LinkedInInbox,
+  LinkedInIndexMeta,
+  LinkedInThread,
+} from "./views.ts";
 
 // Browser
 export type {
@@ -160,8 +166,8 @@ export {
   type BeginSignInResult,
   ConnectionErrorCode,
   type ConnectionRequestResult,
-  type FollowUserResult,
   FollowErrorCode,
+  type FollowUserResult,
   type InvitationWithdrawnResult,
   type LinkedInActions,
   LinkedInPlatform,
@@ -173,10 +179,10 @@ export {
   ProfileErrorCode,
   type ProfileViewedResult,
   RestrictionErrorCode,
-  SendMessageErrorCode,
   type SendMessageError,
-  SignInErrorCode,
+  SendMessageErrorCode,
   type SignInError,
+  SignInErrorCode,
   TwoFactorErrorCode,
   type TwoFactorResult,
 } from "./service.ts";

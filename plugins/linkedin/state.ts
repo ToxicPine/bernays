@@ -4,7 +4,11 @@
 
 import type { GraphState } from "@bernays/server/views";
 import { emptyGraphState } from "@bernays/server/views";
-import type { LinkedInAuthStatus, LinkedInChallengeType, LinkedInProfileViewingMode } from "./browser.ts";
+import type {
+  LinkedInAuthStatus,
+  LinkedInChallengeType,
+  LinkedInProfileViewingMode,
+} from "./browser.ts";
 
 // =============================================================================
 // Plugin State
@@ -74,6 +78,9 @@ export interface LinkedInPluginState {
   /** Contact directory — built from observations */
   contacts: Map<string, ContactState>;
 
+  /** Conversation ID → graph ThreadId mapping (for lookups by LinkedIn conversation ID) */
+  conversationThreadMap: Map<string, string>;
+
   /** Last successful sync timestamp */
   lastSyncedAt?: string;
 }
@@ -88,4 +95,5 @@ export const emptyLinkedInState = (): LinkedInPluginState => ({
   weeklyInviteTimestamps: [],
   browserStatus: new Map(),
   contacts: new Map(),
+  conversationThreadMap: new Map(),
 });

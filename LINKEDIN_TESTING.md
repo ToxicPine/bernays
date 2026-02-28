@@ -34,9 +34,9 @@ Every test run starts from a **fresh browser profile**. No persistent
 LinkedIn auth state is two cookies (per
 [WAALAXY_INTERNALS.md](extensions/waalaxy/WAALAXY_INTERNALS.md)):
 
-| Cookie       | Purpose                                                      |
-| ------------ | ------------------------------------------------------------ |
-| `li_at`      | Primary auth token. Presence = logged in.                    |
+| Cookie       | Purpose                                                            |
+| ------------ | ------------------------------------------------------------------ |
+| `li_at`      | Primary auth token. Presence = logged in.                          |
 | `JSESSIONID` | Session ID. Used as CSRF token in Voyager API `csrf-token` header. |
 
 LinkedIn sets `JSESSIONID` with surrounding double-quotes (`"ajax:123456789"`).
@@ -60,55 +60,55 @@ actions (consequences of intentional acts).
 
 #### Auth Events
 
-| Event | Emitted By | Fields | Purpose |
-|-------|-----------|--------|---------|
-| `AuthObserved` | Sync fiber | `configId`, `participantId`, `status` (`authenticated` / `expired` / `challenged` / `unknown`), `challengeType?`, `previousLiAt?` | Periodic auth health check. Sync fiber reads `li_at` cookie and page state. `challenged` means LinkedIn is showing a `/checkpoint/challenge/` page — all API calls are blocked until resolved. If `previousLiAt` differs from current, the account may have switched. |
-| `TwoFactorChallengeObserved` | Auth script / sync fiber | `configId`, `challengeType` (`email` / `phone` / `mobile_app` / `authenticator` / `captcha` / `unknown`), `deliveryHint?`, `challengeId?` | Detected when LinkedIn redirects to `/checkpoint/challenge/` or `/checkpoint/challengesV2/`. Challenge types from Waalaxy's DOM marker detection: `email` (`email-pin-submit-button`), `phone` (`input__phone_verification_pin`), `mobile_app` (`d_checkpoint_ch_linkedInAppChallengeActivityDevice`), `authenticator` (`auth-app-div`), `captcha` (`captchaV2Challenge`). Note: `captcha` is not 2FA — it's an anti-bot challenge that can appear mid-session, not just during sign-in. |
-| `TwoFactorResultObserved` | Auth script | `configId`, `success`, `errorCode?` (`wrong_credentials` / `challenge_failed` / `rate_limited` / `account_restricted` / `captcha_rejected` / `unknown`) | Result of challenge submission. `errorCode` enables programmatic branching (retry on `rate_limited`, abort on `account_restricted`). |
+| Event                        | Emitted By               | Fields                                                                                                                                                  | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AuthObserved`               | Sync fiber               | `configId`, `participantId`, `status` (`authenticated` / `expired` / `challenged` / `unknown`), `challengeType?`, `previousLiAt?`                       | Periodic auth health check. Sync fiber reads `li_at` cookie and page state. `challenged` means LinkedIn is showing a `/checkpoint/challenge/` page — all API calls are blocked until resolved. If `previousLiAt` differs from current, the account may have switched.                                                                                                                                                                                                                    |
+| `TwoFactorChallengeObserved` | Auth script / sync fiber | `configId`, `challengeType` (`email` / `phone` / `mobile_app` / `authenticator` / `captcha` / `unknown`), `deliveryHint?`, `challengeId?`               | Detected when LinkedIn redirects to `/checkpoint/challenge/` or `/checkpoint/challengesV2/`. Challenge types from Waalaxy's DOM marker detection: `email` (`email-pin-submit-button`), `phone` (`input__phone_verification_pin`), `mobile_app` (`d_checkpoint_ch_linkedInAppChallengeActivityDevice`), `authenticator` (`auth-app-div`), `captcha` (`captchaV2Challenge`). Note: `captcha` is not 2FA — it's an anti-bot challenge that can appear mid-session, not just during sign-in. |
+| `TwoFactorResultObserved`    | Auth script              | `configId`, `success`, `errorCode?` (`wrong_credentials` / `challenge_failed` / `rate_limited` / `account_restricted` / `captcha_rejected` / `unknown`) | Result of challenge submission. `errorCode` enables programmatic branching (retry on `rate_limited`, abort on `account_restricted`).                                                                                                                                                                                                                                                                                                                                                     |
 
 #### Message Events
 
-| Event | Emitted By | Fields | Purpose |
-|-------|-----------|--------|---------|
-| `AnchorMessageObserved` | Sync fiber | `anchor` (`conversationId`, `participants`), `threadId`, `canonicalId`, `senderId`, `content`, `timestamp` | First message observed in a conversation. Establishes the thread anchor. |
-| `MessageObserved` | Sync fiber | `threadId`, `canonicalId`, `senderId`, `content`, `timestamp` | Subsequent message in an existing thread. |
-| `MessageSent` | `sendMessage` action | `threadId`, `canonicalId`, `content` | Consequence of the sockpuppet sending a message. |
-| `MessageMutated` | Sync fiber | `canonicalId`, `threadId`, `mutation` (`deleted` / `edited`), `editedContent?` | Detected when a message changes or disappears. |
+| Event                   | Emitted By           | Fields                                                                                                     | Purpose                                                                  |
+| ----------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `AnchorMessageObserved` | Sync fiber           | `anchor` (`conversationId`, `participants`), `threadId`, `canonicalId`, `senderId`, `content`, `timestamp` | First message observed in a conversation. Establishes the thread anchor. |
+| `MessageObserved`       | Sync fiber           | `threadId`, `canonicalId`, `senderId`, `content`, `timestamp`                                              | Subsequent message in an existing thread.                                |
+| `MessageSent`           | `sendMessage` action | `threadId`, `canonicalId`, `content`                                                                       | Consequence of the sockpuppet sending a message.                         |
+| `MessageMutated`        | Sync fiber           | `canonicalId`, `threadId`, `mutation` (`deleted` / `edited`), `editedContent?`                             | Detected when a message changes or disappears.                           |
 
 #### Connection Events
 
-| Event | Emitted By | Fields | Purpose |
-|-------|-----------|--------|---------|
-| `ConnectionRequestSent` | `sendConnectionRequest` action | `targetUserId`, `note?` | Consequence of sending an invitation. |
-| `InvitationWithdrawn` | `withdrawInvitation` action | `invitationId`, `targetUserId` | Consequence of withdrawing an invitation. |
-| `ConnectionAccepted` | Sync fiber | `invitationId`, `userId` | Detected when a pending invitation is accepted. |
-| `ConnectionRejected` | Sync fiber | `invitationId`, `userId` | Detected when a pending invitation is rejected / expires. |
-| `ConnectionStatusUnknown` | Sync fiber | `invitationId`, `userId`, `sentAt` | Invitation can't be resolved after repeated checks. LinkedIn's invitation APIs are unreliable — some invitations silently disappear. Prevents `pendingInvitations` from inflating indefinitely. |
+| Event                     | Emitted By                     | Fields                             | Purpose                                                                                                                                                                                         |
+| ------------------------- | ------------------------------ | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ConnectionRequestSent`   | `sendConnectionRequest` action | `targetUserId`, `note?`            | Consequence of sending an invitation.                                                                                                                                                           |
+| `InvitationWithdrawn`     | `withdrawInvitation` action    | `invitationId`, `targetUserId`     | Consequence of withdrawing an invitation.                                                                                                                                                       |
+| `ConnectionAccepted`      | Sync fiber                     | `invitationId`, `userId`           | Detected when a pending invitation is accepted.                                                                                                                                                 |
+| `ConnectionRejected`      | Sync fiber                     | `invitationId`, `userId`           | Detected when a pending invitation is rejected / expires.                                                                                                                                       |
+| `ConnectionStatusUnknown` | Sync fiber                     | `invitationId`, `userId`, `sentAt` | Invitation can't be resolved after repeated checks. LinkedIn's invitation APIs are unreliable — some invitations silently disappear. Prevents `pendingInvitations` from inflating indefinitely. |
 
 #### Profile Events
 
-| Event | Emitted By | Fields | Purpose |
-|-------|-----------|--------|---------|
+| Event           | Emitted By           | Fields                                                                                              | Purpose                                                          |
+| --------------- | -------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | `ProfileViewed` | `viewProfile` action | `targetUserId`, `profileUrl?`, `viewedAt`, `viewerPrivacySetting` (`full` / `anonymous` / `hidden`) | Consequence of viewing a profile. Records the privacy mode used. |
-| `UserFollowed` | `followUser` action | `targetUserId` | Consequence of following a profile without connecting. |
+| `UserFollowed`  | `followUser` action  | `targetUserId`                                                                                      | Consequence of following a profile without connecting.           |
 
 #### Message Request Events
 
-| Event | Emitted By | Fields | Purpose |
-|-------|-----------|--------|---------|
+| Event                | Emitted By                  | Fields                                  | Purpose                                                                                  |
+| -------------------- | --------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `MessageRequestSent` | `sendMessageRequest` action | `targetUserId`, `content`, `contextUrn` | Consequence of sending a message to a non-connection using a shared group/event context. |
 
 #### Restriction Events
 
-| Event | Emitted By | Fields | Purpose |
-|-------|-----------|--------|---------|
+| Event                 | Emitted By            | Fields                                                                                                                                                                                                                                      | Purpose                                                                                                                                                                                                                                                                                             |
+| --------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `RestrictionObserved` | Sync fiber or actions | `configId`, `restrictionType` (`desktop_connect_restricted` / `weekly_invites_exhausted` / `connect_note_restricted` / `message_request_restricted` / `daily_messages_exhausted` / `searches_exhausted` / `account_blocked`), `retryAfter?` | Detected from HTTP 429, known error codes (`MAX_INVITATION_SENT`, `WEEKLY_CONNECTIONS_LIMIT_REACHED`, etc.), or restriction patterns. Multiple restriction types can be active simultaneously — they are independent axes, not a single "rate limited" flag. See LinkedInBrowser restriction table. |
-| `RestrictionCleared` | Sync fiber | `configId`, `restrictionType` | Detected when a previously-observed restriction is no longer active (e.g., 1h cooldown expired, weekly limit reset). |
+| `RestrictionCleared`  | Sync fiber            | `configId`, `restrictionType`                                                                                                                                                                                                               | Detected when a previously-observed restriction is no longer active (e.g., 1h cooldown expired, weekly limit reset).                                                                                                                                                                                |
 
 #### Conversation Sync Events
 
-| Event | Emitted By | Fields | Purpose |
-|-------|-----------|--------|---------|
+| Event                 | Emitted By | Fields                                     | Purpose                                                                   |
+| --------------------- | ---------- | ------------------------------------------ | ------------------------------------------------------------------------- |
 | `ConversationsSynced` | Sync fiber | `participantId`, `threadCount`, `syncedAt` | Emitted after a full inbox scrape completes. Informational / audit trail. |
 
 #### Public Observation Events (future, shared infra)
@@ -117,11 +117,11 @@ These events are emitted by the shared `LinkedInInfra` observer when
 multi-account observation deduplication is active. Not needed for single-account
 mode or the initial test harness.
 
-| Event | Emitted By | Fields | Purpose |
-|-------|-----------|--------|---------|
-| `FeedPostObserved` | Shared observer | `postUrn`, `authorId`, `content`, `timestamp`, `reactions`, `comments` | Public feed post visible to all accounts. |
-| `GroupPostObserved` | Shared observer | `groupId`, `postUrn`, `authorId`, `content`, `timestamp` | Post in a LinkedIn Group. |
-| `CompanyPageObserved` | Shared observer | `companyId`, `name`, `followers`, `recentPosts` | Company page snapshot. |
+| Event                 | Emitted By      | Fields                                                                 | Purpose                                   |
+| --------------------- | --------------- | ---------------------------------------------------------------------- | ----------------------------------------- |
+| `FeedPostObserved`    | Shared observer | `postUrn`, `authorId`, `content`, `timestamp`, `reactions`, `comments` | Public feed post visible to all accounts. |
+| `GroupPostObserved`   | Shared observer | `groupId`, `postUrn`, `authorId`, `content`, `timestamp`               | Post in a LinkedIn Group.                 |
+| `CompanyPageObserved` | Shared observer | `companyId`, `name`, `followers`, `recentPosts`                        | Company page snapshot.                    |
 
 ### Plugin State
 
@@ -134,20 +134,20 @@ interface LinkedInPluginState {
   graph: GraphState;
 
   // Connection tracking
-  pendingInvitations: Map<string, {  // targetId → invitation state
+  pendingInvitations: Map<string, { // targetId → invitation state
     invitationId?: string;
     sentAt: string;
     status: "pending" | "accepted" | "rejected" | "withdrawn" | "unknown";
   }>;
-  weeklyInviteTimestamps: string[];  // for rolling 7-day window count
+  weeklyInviteTimestamps: string[]; // for rolling 7-day window count
 
   // Per-browser status (materialized into LinkedInBrowser discriminated union)
   browserStatus: Map<string, {
     authStatus: "authenticated" | "expired" | "challenged" | "unknown";
-    challengeType?: string;          // set when authStatus === "challenged"
-    profileViewingMode?: string;     // set when authStatus === "authenticated"
-    lastLiAt?: string;               // for account switch detection
-    restrictions: Map<string, string>;  // restrictionType → retryAfter ISO
+    challengeType?: string; // set when authStatus === "challenged"
+    profileViewingMode?: string; // set when authStatus === "authenticated"
+    lastLiAt?: string; // for account switch detection
+    restrictions: Map<string, string>; // restrictionType → retryAfter ISO
   }>;
 
   // Contact directory — built from observations
@@ -217,40 +217,47 @@ authenticated (we can only read settings with a live session).
 
 ```typescript
 interface LinkedInBrowserBase extends BaseBoundBrowser {
-  readonly restrictions: Readonly<Record<string, string>>;  // type → retryAfter
+  readonly restrictions: Readonly<Record<string, string>>; // type → retryAfter
   readonly weeklyInvitesRemaining: number | undefined;
 }
 
 type LinkedInBrowser =
   | LinkedInBrowserBase & {
-      readonly authStatus: "authenticated";
-      readonly profileViewingMode: "full" | "anonymous" | "hidden";
-    }
+    readonly authStatus: "authenticated";
+    readonly profileViewingMode: "full" | "anonymous" | "hidden";
+  }
   | LinkedInBrowserBase & {
-      readonly authStatus: "challenged";
-      readonly challengeType: "email" | "phone" | "mobile_app" | "authenticator"
-        | "mobile_app" | "captcha" | "unknown";
-    }
+    readonly authStatus: "challenged";
+    readonly challengeType:
+      | "email"
+      | "phone"
+      | "mobile_app"
+      | "authenticator"
+      | "mobile_app"
+      | "captcha"
+      | "unknown";
+  }
   | LinkedInBrowserBase & { readonly authStatus: "expired" }
   | LinkedInBrowserBase & { readonly authStatus: "unknown" };
 ```
 
 Restriction types (from Waalaxy's error handling):
 
-| Restriction | Trigger | Duration | Blocks |
-|-------------|---------|----------|--------|
-| `desktop_connect_restricted` | HTTP 429 or `MAX_INVITATION_SENT` on connect | 1 hour | `sendConnectionRequest` |
-| `weekly_invites_exhausted` | `WEEKLY_CONNECTIONS_LIMIT_REACHED` | Until weekly reset | `sendConnectionRequest` |
-| `connect_note_restricted` | LinkedIn strips notes from invitations | Indefinite | Notes on `sendConnectionRequest` |
-| `message_request_restricted` | Can't message non-connections | Indefinite | `sendMessageRequest` |
-| `daily_messages_exhausted` | Daily message limit hit | Until daily reset | `sendMessage` |
-| `searches_exhausted` | Search rate limit | Until reset | Search actions |
-| `account_blocked` | Account-level restriction | Indefinite | All actions |
+| Restriction                  | Trigger                                      | Duration           | Blocks                           |
+| ---------------------------- | -------------------------------------------- | ------------------ | -------------------------------- |
+| `desktop_connect_restricted` | HTTP 429 or `MAX_INVITATION_SENT` on connect | 1 hour             | `sendConnectionRequest`          |
+| `weekly_invites_exhausted`   | `WEEKLY_CONNECTIONS_LIMIT_REACHED`           | Until weekly reset | `sendConnectionRequest`          |
+| `connect_note_restricted`    | LinkedIn strips notes from invitations       | Indefinite         | Notes on `sendConnectionRequest` |
+| `message_request_restricted` | Can't message non-connections                | Indefinite         | `sendMessageRequest`             |
+| `daily_messages_exhausted`   | Daily message limit hit                      | Until daily reset  | `sendMessage`                    |
+| `searches_exhausted`         | Search rate limit                            | Until reset        | Search actions                   |
+| `account_blocked`            | Account-level restriction                    | Indefinite         | All actions                      |
 
-Actions must check relevant restrictions before attempting. `sendConnectionRequest`
-checks `desktop_connect_restricted` and `weekly_invites_exhausted`.
-`sendMessageRequest` checks `message_request_restricted`. This is a pre-flight
-guard — fail fast with a typed error rather than wasting an API call.
+Actions must check relevant restrictions before attempting.
+`sendConnectionRequest` checks `desktop_connect_restricted` and
+`weekly_invites_exhausted`. `sendMessageRequest` checks
+`message_request_restricted`. This is a pre-flight guard — fail fast with a
+typed error rather than wasting an API call.
 
 #### LinkedInContact
 
@@ -261,8 +268,8 @@ account and the contact).
 ```typescript
 interface LinkedInContact extends BaseContact<"linkedin"> {
   // ── Public fields (shared across accounts) ──────────────────────
-  readonly publicIdentifier?: string;   // LinkedIn URL slug
-  readonly memberId?: string;           // numeric URN ID (for Voyager API calls)
+  readonly publicIdentifier?: string; // LinkedIn URL slug
+  readonly memberId?: string; // numeric URN ID (for Voyager API calls)
   readonly firstName?: string;
   readonly lastName?: string;
   readonly headline?: string;
@@ -270,7 +277,7 @@ interface LinkedInContact extends BaseContact<"linkedin"> {
   readonly company?: { readonly name: string; readonly logoUrl?: string };
   readonly profilePictureUrl?: string;
   readonly profileUrl?: string;
-  readonly isOpenProfile?: boolean;     // can receive InMail without connection
+  readonly isOpenProfile?: boolean; // can receive InMail without connection
   readonly isPremium?: boolean;
   readonly isJobSeeker?: boolean;
 
@@ -279,14 +286,15 @@ interface LinkedInContact extends BaseContact<"linkedin"> {
   readonly sharedGroups?: readonly string[];
   readonly sharedEvents?: readonly string[];
   readonly lastInteraction?: string;
-  readonly hasReplied?: boolean;        // did they reply to us in any thread?
+  readonly hasReplied?: boolean; // did they reply to us in any thread?
   readonly lastReplyAt?: string;
 }
 ```
 
-The `memberId` is critical — Voyager API calls use `urn:li:fsd_profile:<memberId>`,
-not the public identifier. `sharedGroups` and `sharedEvents` are required for
-`sendMessageRequest` (messaging non-connections requires a shared context URN).
+The `memberId` is critical — Voyager API calls use
+`urn:li:fsd_profile:<memberId>`, not the public identifier. `sharedGroups` and
+`sharedEvents` are required for `sendMessageRequest` (messaging non-connections
+requires a shared context URN).
 
 In single-account mode, all fields are populated by the per-sockpuppet sync
 fiber. In multi-account mode, public fields can come from the shared observer
@@ -296,9 +304,8 @@ and per-account fields are populated by each sockpuppet's sync fiber.
 
 LinkedIn has two kinds of observable state:
 
-- **Private state** — inbox, DMs, notifications, pending invitations,
-  connection status. Each account sees different data. Must be observed
-  per-account.
+- **Private state** — inbox, DMs, notifications, pending invitations, connection
+  status. Each account sees different data. Must be observed per-account.
 - **Public state** — feed posts, company pages, group threads, public profile
   data. Visible to every account. Should be observed once.
 
@@ -341,16 +348,16 @@ projection fiber folds all of them — public and private — into its local
 
 The infra is a **shared cache** of public LinkedIn state. Two operations:
 
-1. **`ensureFetched`** — guarantees a resource is in the cache and fresh.
-   If missing or stale, scrapes via CDP, emits events to the EventStore,
-   and updates the `Ref`. If already fresh, no-op. Idempotent — multiple
-   sockpuppets calling it for the same resource result in one fetch.
-2. **`Ref.get` on `publicState`** — read the cached data. Always the same
-   path regardless of who triggered the fetch.
+1. **`ensureFetched`** — guarantees a resource is in the cache and fresh. If
+   missing or stale, scrapes via CDP, emits events to the EventStore, and
+   updates the `Ref`. If already fresh, no-op. Idempotent — multiple sockpuppets
+   calling it for the same resource result in one fetch.
+2. **`Ref.get` on `publicState`** — read the cached data. Always the same path
+   regardless of who triggered the fetch.
 
-This separation means reading is never blocked on a scrape. A sockpuppet
-calls `ensureFetched`, then reads from the `Ref`. If another sockpuppet
-already ensured the same resource, the read is immediate.
+This separation means reading is never blocked on a scrape. A sockpuppet calls
+`ensureFetched`, then reads from the `Ref`. If another sockpuppet already
+ensured the same resource, the read is immediate.
 
 ```typescript
 interface LinkedInPublicState {
@@ -433,27 +440,30 @@ const makeLinkedInInfraLayer = (
 Usage from a sockpuppet or sync fiber:
 
 ```typescript
-const infra = yield* LinkedInInfra;
+const infra = yield * LinkedInInfra;
 
 // Ensure the company page is cached, then read it
-yield* infra.ensureFetched({ kind: "companyPage", companyId: "12345" });
-const state = yield* Ref.get(infra.publicState);
+yield * infra.ensureFetched({ kind: "companyPage", companyId: "12345" });
+const state = yield * Ref.get(infra.publicState);
 const page = state.companyPages.get("12345");
 
 // Subscribe to ongoing refresh (optional)
-yield* infra.watch({ kind: "company", companyId: "12345" });
+yield * infra.watch({ kind: "company", companyId: "12345" });
 ```
 
-`watch`/`unwatch` are opt-in autonomous scraping. A sockpuppet that cares
-about a company page can watch it for periodic refresh. But the default mode
-is demand-driven — no scraping happens until someone calls `ensureFetched`.
+`watch`/`unwatch` are opt-in autonomous scraping. A sockpuppet that cares about
+a company page can watch it for periodic refresh. But the default mode is
+demand-driven — no scraping happens until someone calls `ensureFetched`.
 
 Cache settings can be overridden at construction time, e.g., for tests:
 
 ```typescript
 // Aggressive caching for tests (short TTL, fast watch)
 const testInfra = makeLinkedInInfraLayer({
-  companyPage: { ttl: Duration.seconds(10), watchInterval: Duration.seconds(10) },
+  companyPage: {
+    ttl: Duration.seconds(10),
+    watchInterval: Duration.seconds(10),
+  },
 });
 
 // Conservative for production (longer TTL, less scraping)
@@ -464,25 +474,25 @@ const prodInfra = makeLinkedInInfraLayer({
 
 #### Voyager Endpoints
 
-| Resource | Voyager API | Default TTL | Default Watch |
-|----------|-------------|-------------|---------------|
-| Feed posts | `GET /voyager/api/feed/dash/feedDashUpdates` | 1 hour | 4 hours |
-| Company pages | `GET /voyager/api/organization/companies/<id>` | 6 hours | 24 hours |
-| Group threads | `GET /voyager/api/groups/<id>/posts` | 1 hour | 4 hours |
-| Public profiles | `GET /voyager/api/identity/dash/profiles` | 12 hours | 48 hours |
+| Resource        | Voyager API                                    | Default TTL | Default Watch |
+| --------------- | ---------------------------------------------- | ----------- | ------------- |
+| Feed posts      | `GET /voyager/api/feed/dash/feedDashUpdates`   | 1 hour      | 4 hours       |
+| Company pages   | `GET /voyager/api/organization/companies/<id>` | 6 hours     | 24 hours      |
+| Group threads   | `GET /voyager/api/groups/<id>/posts`           | 1 hour      | 4 hours       |
+| Public profiles | `GET /voyager/api/identity/dash/profiles`      | 12 hours    | 48 hours      |
 
 TTL governs `ensureFetched` freshness (demand-driven, only costs a request when
 asked). Watch interval governs autonomous polling (speculative, always longer
 than TTL). ±20% jitter on all watch intervals. Both overridable via
-`LinkedInCacheSettings`. The infra does **not** touch private state. It never reads any
-account's inbox, notifications, or pending invitations.
+`LinkedInCacheSettings`. The infra does **not** touch private state. It never
+reads any account's inbox, notifications, or pending invitations.
 
 #### When to Skip Shared Infra
 
 For single-account deployments (the common case today), the shared infra layer
 is optional. The per-sockpuppet sync fiber can handle both public and private
-observation — there's nothing to deduplicate with one account. The plugin
-should work either way:
+observation — there's nothing to deduplicate with one account. The plugin should
+work either way:
 
 - **With infra**: Sync fiber handles private observation, reads public state
   from shared `Ref`. `RExtra = LinkedInInfra`.
@@ -505,16 +515,16 @@ shared `Ref` to avoid re-observing public state. If not, it observes everything.
 #### Observation Tasks
 
 Different tasks run at different frequencies — informed by Waalaxy's worker
-periods. Running everything at the same interval either checks auth too
-slowly or checks connections too aggressively.
+periods. Running everything at the same interval either checks auth too slowly
+or checks connections too aggressively.
 
-| Task | Frequency | Waalaxy Equiv. | Purpose |
-|------|-----------|----------------|---------|
-| Auth check | Every cycle (2 min) | `checkLinkedInState` (1 min) | Read `li_at` cookie + check for `/checkpoint/challenge/`. Detect auth expiry, challenges, and account switches. |
-| Inbox sync | Every cycle (2 min) | `fetchAllConversations` (2 min) | Scrape conversations via Voyager API. Emit message events. |
-| Profile viewing mode | Once on startup | — | Read `/mysettings-api/settingsApiSettingCards/profileViewingOptions`. Store in browser state for `viewProfile` action. |
-| Connection status | Every 30th cycle (~60 min) | `checkForNewConnections` (120 min) | Check pending invitations. Emit `ConnectionAccepted` / `ConnectionRejected` / `ConnectionStatusUnknown`. |
-| Hot invitation check | Every cycle for 30 min after send | `unknownStatusProspectsWorker` (30s) | Recently-sent invitations get accelerated checking. |
+| Task                 | Frequency                         | Waalaxy Equiv.                       | Purpose                                                                                                                |
+| -------------------- | --------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| Auth check           | Every cycle (2 min)               | `checkLinkedInState` (1 min)         | Read `li_at` cookie + check for `/checkpoint/challenge/`. Detect auth expiry, challenges, and account switches.        |
+| Inbox sync           | Every cycle (2 min)               | `fetchAllConversations` (2 min)      | Scrape conversations via Voyager API. Emit message events.                                                             |
+| Profile viewing mode | Once on startup                   | —                                    | Read `/mysettings-api/settingsApiSettingCards/profileViewingOptions`. Store in browser state for `viewProfile` action. |
+| Connection status    | Every 30th cycle (~60 min)        | `checkForNewConnections` (120 min)   | Check pending invitations. Emit `ConnectionAccepted` / `ConnectionRejected` / `ConnectionStatusUnknown`.               |
+| Hot invitation check | Every cycle for 30 min after send | `unknownStatusProspectsWorker` (30s) | Recently-sent invitations get accelerated checking.                                                                    |
 
 ##### Auth Check
 
@@ -523,6 +533,7 @@ checks the current page URL for `/checkpoint/challenge/` or
 `/checkpoint/challengesV2/` redirects.
 
 Emits `AuthObserved` with:
+
 - `status: "authenticated"` — `li_at` present, no challenge page
 - `status: "challenged"` — redirected to checkpoint page. Also emits
   `TwoFactorChallengeObserved` with the detected challenge type (sniffed from
@@ -542,11 +553,14 @@ Uses the Voyager API via CDP fetch to read conversations and messages. Emits
 `AnchorMessageObserved` / `MessageObserved` events for anything new.
 
 Voyager endpoints (from Waalaxy internals):
-- Conversation list: `GET /voyager/api/voyagerMessagingDashMessengerConversations`
+
+- Conversation list:
+  `GET /voyager/api/voyagerMessagingDashMessengerConversations`
 - Conversation events: per-conversation message fetch
 - Connection summary: `GET /voyager/api/relationships/connectionsSummary`
 
 Also detects:
+
 - Message deletions/edits → `MessageMutated`
 - Restriction signals (HTTP 429, error codes) → `RestrictionObserved`
 
@@ -559,10 +573,11 @@ After a full sync, emits `ConversationsSynced`.
 ##### Connection Status Check
 
 Checks pending invitations against LinkedIn's connections API. Runs on a slow
-cycle (every ~60 min) for general checks, but recently-sent invitations
-(within 30 min of `ConnectionRequestSent`) are checked on every sync cycle.
+cycle (every ~60 min) for general checks, but recently-sent invitations (within
+30 min of `ConnectionRequestSent`) are checked on every sync cycle.
 
 Emits:
+
 - `ConnectionAccepted` — invitation accepted
 - `ConnectionRejected` — invitation rejected or expired
 - `ConnectionStatusUnknown` — can't resolve after repeated attempts (prevents
@@ -581,7 +596,9 @@ const makeLinkedInSync = (pool, account) =>
 
     yield* Effect.repeat(
       Effect.gen(function* () {
-        const session = yield* pool.getSession(account.browserBindings[0].configId);
+        const session = yield* pool.getSession(
+          account.browserBindings[0].configId,
+        );
         cycle++;
 
         // 1. Auth check (every cycle)
@@ -656,7 +673,8 @@ Sends a message to a 1st-degree connection in an existing thread.
 - **Pre-flight**: Check `daily_messages_exhausted` restriction
 - **Events emitted**: `MessageSent`
 - **Errors**: Thread not found, not connected, rate limited, auth expired
-- **Voyager endpoint**: `POST /voyager/api/voyagerMessagingDashMessengerMessages?action=createMessage`
+- **Voyager endpoint**:
+  `POST /voyager/api/voyagerMessagingDashMessengerMessages?action=createMessage`
 
 #### sendMessageRequest
 
@@ -664,11 +682,19 @@ Sends a message to a non-connection using a shared group or event as context.
 This is LinkedIn's "message request" feature — requires a `contextEntityUrn`.
 
 - **Input**: `targetId: string`, `content: string`, `contextUrn?: string`
-- **CDP**: If `contextUrn` not provided, auto-lookup via `GET /voyager/api/identity/profiles/<publicIdentifier>/highlights` to find `sharedGroupsHighlightUrn` or `sharedProfessionalEventUrn`. Then send via Voyager messaging API with `messageRequestContextByRecipient` field.
-- **Pre-flight**: Check `message_request_restricted` restriction. Check that contact has `sharedGroups` or `sharedEvents` (or `isOpenProfile`).
-- **Events emitted**: `MessageRequestSent`. On restriction: `RestrictionObserved`.
-- **Errors**: No shared context found, message request restricted, profile inaccessible
-- **Voyager endpoint**: `POST /voyager/api/voyagerMessagingDashMessengerMessages?action=createMessage` (same endpoint, different body shape with `messageRequestContextByRecipient`)
+- **CDP**: If `contextUrn` not provided, auto-lookup via
+  `GET /voyager/api/identity/profiles/<publicIdentifier>/highlights` to find
+  `sharedGroupsHighlightUrn` or `sharedProfessionalEventUrn`. Then send via
+  Voyager messaging API with `messageRequestContextByRecipient` field.
+- **Pre-flight**: Check `message_request_restricted` restriction. Check that
+  contact has `sharedGroups` or `sharedEvents` (or `isOpenProfile`).
+- **Events emitted**: `MessageRequestSent`. On restriction:
+  `RestrictionObserved`.
+- **Errors**: No shared context found, message request restricted, profile
+  inaccessible
+- **Voyager endpoint**:
+  `POST /voyager/api/voyagerMessagingDashMessengerMessages?action=createMessage`
+  (same endpoint, different body shape with `messageRequestContextByRecipient`)
 
 #### sendConnectionRequest
 
@@ -676,20 +702,26 @@ Sends a connection invitation with optional note.
 
 - **Input**: `targetId: string`, `note?: string`
 - **CDP**: Sends invitation via Voyager API
-- **Pre-flight**: Check `desktop_connect_restricted` and `weekly_invites_exhausted` restrictions. If `connect_note_restricted` is active and `note` is provided, either strip the note or fail with a typed error.
-- **Events emitted**: `ConnectionRequestSent`. On restriction: `RestrictionObserved`.
-- **Errors**: Already connected, weekly limit reached, profile inaccessible, note restricted
-- **Voyager endpoint**: `POST /voyager/api/voyagerRelationshipsDashMemberRelationships?action=verifyQuotaAndCreateV2&decorationId=com.linkedin.voyager.dash.deco.relationships.InvitationCreationResultWithInvitee-2`
+- **Pre-flight**: Check `desktop_connect_restricted` and
+  `weekly_invites_exhausted` restrictions. If `connect_note_restricted` is
+  active and `note` is provided, either strip the note or fail with a typed
+  error.
+- **Events emitted**: `ConnectionRequestSent`. On restriction:
+  `RestrictionObserved`.
+- **Errors**: Already connected, weekly limit reached, profile inaccessible,
+  note restricted
+- **Voyager endpoint**:
+  `POST /voyager/api/voyagerRelationshipsDashMemberRelationships?action=verifyQuotaAndCreateV2&decorationId=com.linkedin.voyager.dash.deco.relationships.InvitationCreationResultWithInvitee-2`
 - **Error mapping** (from Waalaxy's connect error handler):
 
-  | HTTP Status | Body Code | Restriction Type |
-  |-------------|-----------|-----------------|
-  | 400 | `MAX_INVITATION_SENT` | `desktop_connect_restricted` (1h) |
-  | 400 | `CANT_INVITE_CONNECTION_LIMIT_REACHED` | `weekly_invites_exhausted` |
-  | 400 | `CANT_RESEND_YET` | Per-contact 3-week cooldown |
-  | 403 | — | `profile_inaccessible` (per-contact) |
-  | 406 | — | `invalid_invitation_state` |
-  | 429 | — | `desktop_connect_restricted` (1h) |
+  | HTTP Status | Body Code                              | Restriction Type                     |
+  | ----------- | -------------------------------------- | ------------------------------------ |
+  | 400         | `MAX_INVITATION_SENT`                  | `desktop_connect_restricted` (1h)    |
+  | 400         | `CANT_INVITE_CONNECTION_LIMIT_REACHED` | `weekly_invites_exhausted`           |
+  | 400         | `CANT_RESEND_YET`                      | Per-contact 3-week cooldown          |
+  | 403         | —                                      | `profile_inaccessible` (per-contact) |
+  | 406         | —                                      | `invalid_invitation_state`           |
+  | 429         | —                                      | `desktop_connect_restricted` (1h)    |
 
 #### withdrawInvitation
 
@@ -698,18 +730,20 @@ Withdraws a pending connection invitation.
 - **Input**: `invitationId: string`
 - **CDP**: Withdraws via Voyager API
 - **Events emitted**: `InvitationWithdrawn`
-- **Voyager endpoint**: `POST /voyager/api/voyagerRelationshipsDashInvitations/urn:li:fsd_invitation:<invitationId>?action=withdraw`
+- **Voyager endpoint**:
+  `POST /voyager/api/voyagerRelationshipsDashInvitations/urn:li:fsd_invitation:<invitationId>?action=withdraw`
 - **Body**: `{ "invitationType": "CONNECTION" }`
 
 #### followUser
 
-Follows a profile without connecting. Lower-commitment than a connection
-request — useful for warming up before sending an invitation.
+Follows a profile without connecting. Lower-commitment than a connection request
+— useful for warming up before sending an invitation.
 
 - **Input**: `targetId: string`
 - **CDP**: Sends via Voyager API
 - **Events emitted**: `UserFollowed`
-- **Voyager endpoint**: `POST /voyager/api/feed/dash/followingStates/urn:li:fsd_followingState:urn:li:fsd_profile:<memberId>`
+- **Voyager endpoint**:
+  `POST /voyager/api/feed/dash/followingStates/urn:li:fsd_followingState:urn:li:fsd_profile:<memberId>`
 - **Body**: `{ "patch": { "$set": { "following": true } } }`
 
 #### viewProfile
@@ -724,8 +758,9 @@ view).
   sockpuppet's identity or creates a suspicious mismatch.
 - **Events emitted**: `ProfileViewed` (with `viewerPrivacySetting`)
 - **Privacy setting lookup**: The sync fiber reads the account's setting on
-  startup via `GET /mysettings-api/settingsApiSettingCards/profileViewingOptions`
-  and stores it in browser state. The action reads it from there.
+  startup via
+  `GET /mysettings-api/settingsApiSettingCards/profileViewingOptions` and stores
+  it in browser state. The action reads it from there.
 - **Tracking payload** (from Waalaxy internals):
   ```json
   {
@@ -744,15 +779,22 @@ Begins the sign-in process. Used by the auth acquisition script.
 
 - **Input**: `email: string`, `password: string`
 - **CDP**: Navigates to login page, fills credentials, submits form
-- **Returns**: `{ status: "authenticated" }`, `{ status: "challenged", challengeType }`, or `{ status: "failed", errorCode, error }`
-- **Error codes**: `wrong_credentials`, `challenge_failed`, `rate_limited`, `account_restricted`, `proxy_error`, `unknown` (from Waalaxy's `Xt` enum, simplified)
-- **Events emitted**: `AuthObserved` (on success), `TwoFactorChallengeObserved` (on challenge redirect)
-- **Not tested in the automated harness** — tested by the interactive auth script.
+- **Returns**: `{ status: "authenticated" }`,
+  `{ status: "challenged", challengeType }`, or
+  `{ status: "failed", errorCode, error }`
+- **Error codes**: `wrong_credentials`, `challenge_failed`, `rate_limited`,
+  `account_restricted`, `proxy_error`, `unknown` (from Waalaxy's `Xt` enum,
+  simplified)
+- **Events emitted**: `AuthObserved` (on success), `TwoFactorChallengeObserved`
+  (on challenge redirect)
+- **Not tested in the automated harness** — tested by the interactive auth
+  script.
 - **Login flow** (from Waalaxy internals):
   1. `GET /login?fromSignIn=true` → extract form inputs + `JSESSIONID`
   2. `POST /checkpoint/lg/login-submit` → submit credentials
   3. 200 + `li_at` in Set-Cookie → `authenticated`
-  4. 303 redirect to `/checkpoint/challenge/` → `challenged` (detect type from DOM)
+  4. 303 redirect to `/checkpoint/challenge/` → `challenged` (detect type from
+     DOM)
   5. 429 → `rate_limited`
   6. 400 + `error-for-password` → `wrong_credentials`
 
@@ -762,10 +804,13 @@ Submits a 2FA / challenge code during sign-in. Used by the auth acquisition
 script.
 
 - **Input**: `code: string`, `rememberDevice?: boolean`
-- **CDP**: Fills code into challenge form, submits via `POST /checkpoint/challenge/verify` or `/verifyV2`
-- **Returns**: `{ status: "authenticated" }` or `{ status: "failed", errorCode }`
+- **CDP**: Fills code into challenge form, submits via
+  `POST /checkpoint/challenge/verify` or `/verifyV2`
+- **Returns**: `{ status: "authenticated" }` or
+  `{ status: "failed", errorCode }`
 - **Events emitted**: `TwoFactorResultObserved`, `AuthObserved` (on success)
-- **Not tested in the automated harness** — tested by the interactive auth script.
+- **Not tested in the automated harness** — tested by the interactive auth
+  script.
 
 ---
 
@@ -797,8 +842,8 @@ root, gitignored):
 
 ```typescript
 interface LinkedInCookieFile {
-  readonly li_at: string;       // Auth token
-  readonly JSESSIONID: string;  // CSRF token (quotes stripped)
+  readonly li_at: string; // Auth token
+  readonly JSESSIONID: string; // CSRF token (quotes stripped)
   readonly extractedAt: string; // ISO timestamp, metadata for humans
 }
 ```
@@ -835,8 +880,8 @@ testing can proceed independently.
 
 ## Phase 2: Test Harness
 
-Standard `Deno.test` suite. Lives at `tests/e2e/linkedin_test.ts`. Specifies
-and exercises the ideal LinkedIn plugin behavior.
+Standard `Deno.test` suite. Lives at `tests/e2e/linkedin_test.ts`. Specifies and
+exercises the ideal LinkedIn plugin behavior.
 
 ### Structure
 
@@ -984,7 +1029,9 @@ const baseLayers = BrowserPoolLive(stubPool).pipe(
 const sync = makeLinkedInSync(pool, account);
 const actions = makeLinkedInActions(pool, account);
 const platformLayer = makePlatformLayer(
-  LinkedInPlatform, LinkedInInjection, LinkedInProjection,
+  LinkedInPlatform,
+  LinkedInInjection,
+  LinkedInProjection,
   { platform: linkedInPlatform, account, actions, sync },
 );
 const journalLayer = makeJournalLayer(account.id);
@@ -999,8 +1046,18 @@ The first test step:
 3. Injects cookies:
    ```typescript
    await context.addCookies([
-     { name: "li_at", value: cookies.li_at, domain: ".www.linkedin.com", path: "/" },
-     { name: "JSESSIONID", value: cookies.JSESSIONID, domain: ".www.linkedin.com", path: "/" },
+     {
+       name: "li_at",
+       value: cookies.li_at,
+       domain: ".www.linkedin.com",
+       path: "/",
+     },
+     {
+       name: "JSESSIONID",
+       value: cookies.JSESSIONID,
+       domain: ".www.linkedin.com",
+       path: "/",
+     },
    ]);
    ```
 4. Navigates to `https://www.linkedin.com/feed/`.
@@ -1014,8 +1071,8 @@ The first test step:
 
 ## Cookie & Test Params Transport
 
-All LinkedIn secrets and test parameters live in JSON files in the project
-root. No environment variables.
+All LinkedIn secrets and test parameters live in JSON files in the project root.
+No environment variables.
 
 ### Cookie File
 
@@ -1049,24 +1106,24 @@ const loadLinkedInTestConfig = (): LinkedInTestConfig => {
 };
 ```
 
-Both files are validated with Zod at load time. Missing files produce
-actionable error messages (e.g., "Run: deno run -A tests/scripts/linkedin-auth.ts").
+Both files are validated with Zod at load time. Missing files produce actionable
+error messages (e.g., "Run: deno run -A tests/scripts/linkedin-auth.ts").
 
 ---
 
 ## Configuration Files
 
-All LinkedIn-specific configuration is file-based. No environment variables
-are used for LinkedIn secrets or test parameters.
+All LinkedIn-specific configuration is file-based. No environment variables are
+used for LinkedIn secrets or test parameters.
 
-| File                          | Created By        | Purpose                                |
-| ----------------------------- | ----------------- | -------------------------------------- |
-| `.linkedin-cookies.json`      | Auth script       | `li_at` + `JSESSIONID` (gitignored)   |
-| `.linkedin-test-params.json`  | Hand-written      | `selfMemberId`, `threadId`, `profileTarget`, `connectTarget` (gitignored) |
+| File                         | Created By   | Purpose                                                                   |
+| ---------------------------- | ------------ | ------------------------------------------------------------------------- |
+| `.linkedin-cookies.json`     | Auth script  | `li_at` + `JSESSIONID` (gitignored)                                       |
+| `.linkedin-test-params.json` | Hand-written | `selfMemberId`, `threadId`, `profileTarget`, `connectTarget` (gitignored) |
 
 The only environment variable relevant to the test harness is
-`PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH`, which is set by the Nix flake
-to point at the correct chromium binary.
+`PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH`, which is set by the Nix flake to
+point at the correct chromium binary.
 
 ---
 
@@ -1111,10 +1168,9 @@ LinkedIn `li_at` tokens typically last weeks to months, but can be invalidated
 by password change, LinkedIn security review, manual sign-out, or extended
 inactivity.
 
-For CI, commit the cookie and params JSON files as encrypted secrets or
-inject them as file artifacts before the test run. If the auth verification
-step fails (cookies stale), the suite should skip gracefully rather than
-failing the build.
+For CI, commit the cookie and params JSON files as encrypted secrets or inject
+them as file artifacts before the test run. If the auth verification step fails
+(cookies stale), the suite should skip gracefully rather than failing the build.
 
 ### Rate Limiting
 

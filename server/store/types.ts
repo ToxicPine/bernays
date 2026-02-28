@@ -40,8 +40,8 @@ export const createEventStoreError = (
 export const StorableEventSchema = z.object({
   scope: z.string().min(1).transform((val) => makeScope(val)),
   type: z.string().min(1),
-  eventId: z.uuid().transform(EventId),
-  timestamp: z.iso.datetime(),
+  eventId: z.uuid().default(() => crypto.randomUUID()).transform(EventId),
+  timestamp: z.iso.datetime().default(() => new Date().toISOString()),
 });
 
 export type StorableEvent = z.infer<typeof StorableEventSchema>;
@@ -87,4 +87,3 @@ export class EventStoreTag extends Context.Tag("EventStore")<
   EventStoreTag,
   EventStoreService
 >() {}
-

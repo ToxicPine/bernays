@@ -4,25 +4,34 @@
 import {
   type BrowserConfigId,
   ParticipantId,
-  ParticipantIdFromString,
   type ParticipantId as ParticipantIdType,
-  type ThreadId,
+  ParticipantIdFromString,
+  ThreadId,
 } from "@bernays/server/core";
 import {
   applyGraphEvent,
   calculateUnreadCount,
   emptyGraphState as _emptyGraphState,
   type GraphMessage,
-  type GraphState as _GraphState,
+  GraphReplySchema,
   graphNodesToMessages,
+  type GraphState as _GraphState,
   materializeThreadGraphs,
   type ThreadGraph,
 } from "@bernays/server/views";
 import type { PlatformBehavior } from "@bernays/server/platforms";
 
-import type { LinkedInAnchor, LinkedInEvent, LinkedInScope } from "./schemas.ts";
+import type {
+  LinkedInAnchor,
+  LinkedInEvent,
+  LinkedInScope,
+} from "./schemas.ts";
 import { LINKEDIN_SCOPE } from "./schemas.ts";
-import type { LinkedInInbox, LinkedInIndexMeta, LinkedInThread } from "./views.ts";
+import type {
+  LinkedInInbox,
+  LinkedInIndexMeta,
+  LinkedInThread,
+} from "./views.ts";
 import type { LinkedInAccount } from "./account.ts";
 import type { LinkedInBrowser } from "./browser.ts";
 import type { LinkedInContact } from "./contact.ts";
@@ -57,7 +66,9 @@ const getOrCreateContact = (
 ): ContactState => {
   let c = state.contacts.get(id);
   if (!c) {
-    c = {};
+    // Extract memberId from participant ID string "linkedin:ABC123"
+    const memberId = id.includes(":") ? id.split(":").slice(1).join(":") : id;
+    c = { memberId };
     state.contacts.set(id, c);
   }
   return c;
@@ -87,7 +98,10 @@ const toLinkedInThread = (
 };
 
 /** Count invites in the last 7 days from a list of timestamps */
-const countWeeklyInvites = (timestamps: readonly string[], now: Date): number => {
+const countWeeklyInvites = (
+  timestamps: readonly string[],
+  now: Date,
+): number => {
   const oneWeekAgo = new Date(now);
   oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
   const cutoff = oneWeekAgo.toISOString();
@@ -112,12 +126,15 @@ const applyEvent = (state: LinkedInPluginState, event: LinkedInEvent): void => {
       const bs = getOrCreateBrowser(state, event.configId);
       bs.authStatus = event.status;
       if (event.status === "challenged" && event.challengeType) {
-        bs.challengeType = event.challengeType as BrowserStatusState["challengeType"];
+        bs.challengeType = event.challengeType;
       } else {
         bs.challengeType = undefined;
       }
       if (event.previousLiAt) {
         bs.lastLiAt = event.previousLiAt;
+      }
+      if (event.profileViewingMode) {
+        bs.profileViewingMode = event.profileViewingMode;
       }
       break;
     }
@@ -129,6 +146,13 @@ const applyEvent = (state: LinkedInPluginState, event: LinkedInEvent): void => {
 
     // ── Message events ────────────────────────────────────────────
     case "AnchorMessageObserved": {
+      // Map conversationId → canonicalId (which becomes the graph thread ID)
+      if (event.anchor.conversationId) {
+        state.conversationThreadMap.set(
+          event.anchor.conversationId,
+          event.canonicalId,
+        );
+      }
       // Track contacts from participants
       for (const pid of event.anchor.participants) {
         const c = getOrCreateContact(state, pid);
@@ -144,10 +168,9 @@ const applyEvent = (state: LinkedInPluginState, event: LinkedInEvent): void => {
     }
 
     case "MessageObserved": {
-      // Track reply directionality — senderId is on the base event
-      const senderId = (event as unknown as { senderId: string }).senderId;
-      if (senderId) {
-        const c = getOrCreateContact(state, senderId);
+      // Track reply directionality
+      if (event.senderId) {
+        const c = getOrCreateContact(state, event.senderId);
         if (!c.lastInteraction || event.timestamp > c.lastInteraction) {
           c.lastInteraction = event.timestamp;
         }
@@ -160,9 +183,51 @@ const applyEvent = (state: LinkedInPluginState, event: LinkedInEvent): void => {
       break;
     }
 
-    case "MessageSent":
-      // Graph already handled; no contact tracking needed for our own messages
+    case "MessageSent": {
+      // Manually add to graph as a reply node (MessageSent lacks `kind` so
+      // applyGraphEvent ignores it). Find the last node in this thread and
+      // chain to it.
+      const sentCanonicalId = event.canonicalId;
+      const sentThreadId = String(event.threadId);
+
+      // Resolve the graph thread ID from conversation ID
+      const graphThreadId = state.conversationThreadMap.get(sentThreadId);
+      if (graphThreadId && !state.graph.nodes.has(sentCanonicalId)) {
+        // Find the last node in this thread for predecessorId
+        let lastNodeId = graphThreadId;
+        const visited = new Set<string>();
+        const findLast = (nodeId: string): string => {
+          if (visited.has(nodeId)) return nodeId;
+          visited.add(nodeId);
+          const children = state.graph.children.get(nodeId) ?? [];
+          if (children.length === 0) return nodeId;
+          return findLast(children[children.length - 1]);
+        };
+        lastNodeId = findLast(graphThreadId);
+
+        // Build a proper GraphReply via schema parse
+        const syntheticReply = GraphReplySchema.parse({
+          kind: "reply",
+          scope: LINKEDIN_SCOPE,
+          type: "MessageObserved",
+          eventId: event.eventId,
+          timestamp: event.timestamp,
+          canonicalId: sentCanonicalId,
+          senderId: "",
+          predecessorId: lastNodeId,
+          content: event.content,
+        });
+
+        state.graph.nodes.set(sentCanonicalId, {
+          message: syntheticReply,
+          deleted: false,
+        });
+        const children = state.graph.children.get(lastNodeId) ?? [];
+        children.push(sentCanonicalId);
+        state.graph.children.set(lastNodeId, children);
+      }
       break;
+    }
 
     case "MessageMutated":
       // Graph already handled via applyGraphEvent
@@ -172,6 +237,7 @@ const applyEvent = (state: LinkedInPluginState, event: LinkedInEvent): void => {
     case "ConnectionRequestSent": {
       state.weeklyInviteTimestamps.push(event.timestamp);
       state.pendingInvitations.set(event.targetUserId, {
+        invitationId: event.invitationId,
         sentAt: event.timestamp,
         status: "pending",
       });
@@ -274,7 +340,11 @@ const materializeInbox = (
   state: LinkedInPluginState,
   participantId: ParticipantIdType<"linkedin">,
 ): LinkedInInbox => {
-  const threads = materializeThreadGraphs<LinkedInScope, GraphMessage, LinkedInAnchor>(
+  const threads = materializeThreadGraphs<
+    LinkedInScope,
+    GraphMessage,
+    LinkedInAnchor
+  >(
     LINKEDIN_SCOPE,
     state.graph,
   );
@@ -302,7 +372,10 @@ const materializeInbox = (
   }
 
   const now = new Date();
-  const weeklyInvitesSent = countWeeklyInvites(state.weeklyInviteTimestamps, now);
+  const weeklyInvitesSent = countWeeklyInvites(
+    state.weeklyInviteTimestamps,
+    now,
+  );
   const weeklyInvitesRemaining = Math.max(0, 100 - weeklyInvitesSent);
 
   return {
@@ -317,11 +390,26 @@ const materializeThread = (
   state: LinkedInPluginState,
   threadId: ThreadId,
 ): LinkedInThread | undefined => {
-  const threads = materializeThreadGraphs<LinkedInScope, GraphMessage, LinkedInAnchor>(
+  const threads = materializeThreadGraphs<
+    LinkedInScope,
+    GraphMessage,
+    LinkedInAnchor
+  >(
     LINKEDIN_SCOPE,
     state.graph,
   );
-  const thread = threads.get(threadId);
+
+  // Direct lookup by graph thread ID (canonical hash)
+  let thread = threads.get(threadId);
+
+  // Fallback: try looking up by conversation ID via the mapping
+  if (!thread) {
+    const mappedCanonicalId = state.conversationThreadMap.get(String(threadId));
+    if (mappedCanonicalId) {
+      thread = threads.get(ThreadId(mappedCanonicalId));
+    }
+  }
+
   if (!thread) return undefined;
 
   // Use empty participant as fallback; the platform service passes the real one
@@ -335,7 +423,10 @@ const materializeBrowsers = (
   runningConfigIds: ReadonlySet<BrowserConfigId>,
 ): readonly LinkedInBrowser[] => {
   const now = new Date();
-  const weeklyInvitesSent = countWeeklyInvites(state.weeklyInviteTimestamps, now);
+  const weeklyInvitesSent = countWeeklyInvites(
+    state.weeklyInviteTimestamps,
+    now,
+  );
   const weeklyInvitesRemaining = Math.max(0, 100 - weeklyInvitesSent);
 
   return account.browserBindings.map((binding): LinkedInBrowser => {
@@ -387,7 +478,7 @@ const materializeContact = (
   state: LinkedInPluginState,
   participantId: ParticipantIdType<"linkedin">,
 ): LinkedInContact | undefined => {
-  const c = state.contacts.get(participantId as string);
+  const c = state.contacts.get(String(participantId));
   if (!c) return undefined;
 
   // Only return if we have some useful info

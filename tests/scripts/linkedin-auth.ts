@@ -47,7 +47,9 @@ console.log();
 // Browser Launch
 // =============================================================================
 
-const executablePath = Deno.env.get("PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH");
+const executablePath = Deno.env.get(
+  "PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH",
+);
 const browser = await chromium.launch({
   headless: false,
   ...(executablePath && { executablePath }),

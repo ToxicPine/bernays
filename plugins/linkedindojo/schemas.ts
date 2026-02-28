@@ -52,8 +52,8 @@ export type LinkedInDojoAuthObserved = z.infer<
   typeof LinkedInDojoAuthObservedSchema
 >;
 
-export const LinkedInDojoAnchorMessageObservedSchema =
-  AnchorMessageObservedBase.extend({
+export const LinkedInDojoAnchorMessageObservedSchema = AnchorMessageObservedBase
+  .extend({
     scope: linkedInDojoScopeSchema,
     type: z.literal("AnchorMessageObserved"),
     anchor: LinkedInAnchorSchema,
@@ -87,8 +87,8 @@ export type LinkedInDojoMessageSent = z.infer<
   typeof LinkedInDojoMessageSentSchema
 >;
 
-export const LinkedInDojoRestrictionObservedSchema =
-  CorrelationMetadataSchema.extend({
+export const LinkedInDojoRestrictionObservedSchema = CorrelationMetadataSchema
+  .extend({
     scope: linkedInDojoScopeSchema,
     type: z.literal("RestrictionObserved"),
     configId: z.string().transform(BrowserConfigId),
@@ -100,8 +100,8 @@ export type LinkedInDojoRestrictionObserved = z.infer<
   typeof LinkedInDojoRestrictionObservedSchema
 >;
 
-export const LinkedInDojoRestrictionClearedSchema =
-  CorrelationMetadataSchema.extend({
+export const LinkedInDojoRestrictionClearedSchema = CorrelationMetadataSchema
+  .extend({
     scope: linkedInDojoScopeSchema,
     type: z.literal("RestrictionCleared"),
     configId: z.string().transform(BrowserConfigId),

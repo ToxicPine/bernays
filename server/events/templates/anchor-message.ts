@@ -18,9 +18,11 @@ import {
  */
 export const AnchorMessageObservedBase = z.object({
   kind: z.literal("anchor").default("anchor"),
-  eventId: z.uuid().transform(EventId),
-  correlationId: z.uuid().transform(CorrelationId),
-  timestamp: z.iso.datetime(),
+  eventId: z.uuid().default(() => crypto.randomUUID()).transform(EventId),
+  correlationId: z.uuid().default(() => crypto.randomUUID()).transform(
+    CorrelationId,
+  ),
+  timestamp: z.iso.datetime().default(() => new Date().toISOString()),
   canonicalId: z.string().transform(CanonicalId),
   senderId: z.string().transform(ParticipantIdFromString),
   content: z.string().optional(),
