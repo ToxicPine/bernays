@@ -117,7 +117,7 @@ mode or the initial test harness.
 | Event | Emitted By | Fields | Purpose |
 |-------|-----------|--------|---------|
 | `FeedPostObserved` | Shared observer | `postUrn`, `authorId`, `content`, `timestamp`, `reactions`, `comments` | Public feed post visible to all accounts. |
-| `GroupPostObserved` | Shared observer | `groupId`, `postUrn`, `authorId`, `content`, `timestamp` | Group thread post. |
+| `GroupPostObserved` | Shared observer | `groupId`, `postUrn`, `authorId`, `content`, `timestamp` | Post in a LinkedIn Group. |
 | `CompanyPageObserved` | Shared observer | `companyId`, `name`, `followers`, `recentPosts` | Company page snapshot. |
 
 ### Plugin State
@@ -353,14 +353,14 @@ already ensured the same resource, the read is immediate.
 interface LinkedInPublicState {
   readonly feedPosts: Map<string, FeedPost>;
   readonly companyPages: Map<string, CompanyPage>;
-  readonly groupThreads: Map<string, GroupThread>;
+  readonly groupPosts: Map<string, GroupPost>;
   readonly publicProfiles: Map<string, PublicProfile>;
 }
 
 type EnsureTarget =
   | { readonly kind: "feedPost"; readonly postUrn: string }
   | { readonly kind: "companyPage"; readonly companyId: string }
-  | { readonly kind: "groupThread"; readonly groupId: string; readonly postUrn: string }
+  | { readonly kind: "groupPost"; readonly groupId: string; readonly postUrn: string }
   | { readonly kind: "publicProfile"; readonly memberId: string };
 
 type WatchTopic =
@@ -370,22 +370,33 @@ type WatchTopic =
 
 /** Per-resource-kind cache control.
  *  - ttl: when ensureFetched considers a cached entry stale and re-scrapes.
- *    Short = fresher data on demand reads. Only costs a request when someone asks.
+ *    Only costs a request when someone asks.
+ *  - evictAfter: how long after the last access before an entry is evicted
+ *    from the cache entirely. Prevents the cache from growing unbounded with
+ *    resources nobody cares about anymore. Tracked per-entry by last
+ *    ensureFetched or Ref.get access time.
  *  - watchInterval: how often the background fiber re-scrapes watched topics.
- *    Longer than TTL — autonomous polling is speculative, not demand-driven.
- *    ±20% jitter is applied to all watch intervals at runtime. */
+ *    Longer than TTL — autonomous polling is speculative. ±20% jitter applied
+ *    at runtime. Watching a topic also counts as an access, so watched entries
+ *    won't be evicted. */
+interface CacheResourceSettings {
+  readonly ttl: Duration;
+  readonly evictAfter: Duration;
+  readonly watchInterval: Duration;
+}
+
 interface LinkedInCacheSettings {
-  readonly feedPost:      { readonly ttl: Duration; readonly watchInterval: Duration };
-  readonly companyPage:   { readonly ttl: Duration; readonly watchInterval: Duration };
-  readonly groupThread:   { readonly ttl: Duration; readonly watchInterval: Duration };
-  readonly publicProfile: { readonly ttl: Duration; readonly watchInterval: Duration };
+  readonly feedPost:      CacheResourceSettings;
+  readonly companyPage:   CacheResourceSettings;
+  readonly groupPost:     CacheResourceSettings;
+  readonly publicProfile: CacheResourceSettings;
 }
 
 const defaultCacheSettings: LinkedInCacheSettings = {
-  feedPost:      { ttl: Duration.hours(1),  watchInterval: Duration.hours(4) },
-  companyPage:   { ttl: Duration.hours(6),  watchInterval: Duration.hours(24) },
-  groupThread:   { ttl: Duration.hours(1),  watchInterval: Duration.hours(4) },
-  publicProfile: { ttl: Duration.hours(12), watchInterval: Duration.hours(48) },
+  feedPost:      { ttl: Duration.hours(1),  evictAfter: Duration.hours(24),  watchInterval: Duration.hours(4) },
+  companyPage:   { ttl: Duration.hours(6),  evictAfter: Duration.hours(72),  watchInterval: Duration.hours(24) },
+  groupPost:     { ttl: Duration.hours(1),  evictAfter: Duration.hours(24),  watchInterval: Duration.hours(4) },
+  publicProfile: { ttl: Duration.hours(12), evictAfter: Duration.hours(168), watchInterval: Duration.hours(48) },
 };
 
 interface LinkedInInfraService {
