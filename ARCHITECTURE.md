@@ -132,11 +132,14 @@ Events enter the system from three sources:
   integration with outside systems.
 
 For public platforms (message boards, forums, public feeds), an external service
-can push observation events directly to the event store via the HTTP API. This
-keeps the sync fiber trivial — or eliminates it entirely — since the platform's
-public data can be scraped server-side without a browser session. The fiber only
-needs to handle things that require an authenticated browser (e.g., DMs, private
-notifications).
+can push observation events directly to the event store via the HTTP API. But
+the more general pattern is **observation deduplication via shared infra**: a
+plugin defines a shared layer that observes public state once and maintains a
+`Ref` of derived state. Each sockpuppet's sync fiber depends on this shared
+layer (via `RExtra` on `makePlatformLayer`) and reads from the shared `Ref`
+instead of scraping independently. This works for fully public platforms (the
+sync fiber becomes trivial) and for mixed platforms like LinkedIn (public posts
+observed once by the shared layer, private DMs observed per-account).
 
 ### 3. Derive Everything
 
@@ -204,8 +207,8 @@ No special error handling paths. Platform automation observes what happens and
 emits events:
 
 ```typescript
-{ scope: "linkedin", type: "RateLimitObserved", retryAfter: "..." }
-{ scope: "linkedin", type: "AuthExpiredObserved", configId: "..." }
+{ scope: "linkedin", type: "RestrictionObserved", restrictionType: "weekly_invites_exhausted", retryAfter: "..." }
+{ scope: "linkedin", type: "AuthObserved", status: "challenged", challengeType: "captcha" }
 ```
 
 The behavior's `deriveBrowsers` folds these events to determine browser status.
@@ -444,7 +447,7 @@ Each platform defines a discriminated union of its event types:
 ```typescript
 export const LinkedInEventSchema = z.discriminatedUnion("type", [
   LinkedInAuthObservedSchema,
-  LinkedInRateLimitObservedSchema,
+  LinkedInRestrictionObservedSchema,
   LinkedInAnchorMessageSchema,
   LinkedInReplyMessageSchema,
   // ...
@@ -644,11 +647,12 @@ interface BaseBoundBrowser {
   readonly metadata: Record<string, unknown>;
 }
 
-// Platform extends
-interface LinkedInBrowser extends BaseBoundBrowser {
-  readonly authStatus: "authenticated" | "expired" | "unknown";
-  readonly rateLimitedUntil?: string;
-}
+// Platform extends — discriminated union on authStatus
+type LinkedInBrowser =
+  | BaseBoundBrowser & { readonly authStatus: "authenticated"; readonly profileViewingMode: string }
+  | BaseBoundBrowser & { readonly authStatus: "challenged"; readonly challengeType: string }
+  | BaseBoundBrowser & { readonly authStatus: "expired" }
+  | BaseBoundBrowser & { readonly authStatus: "unknown" };
 ```
 
 ---
@@ -1257,6 +1261,7 @@ export function makePlatformLayer<
     any,
     PlatformService<TScope, TIdentity, TActions, TInbox, TThread, TBrowser, TContact>
   >,
+  RExtra = never,
 >(
   tag: TTag,
   injectionTag: Context.Tag<any, Injector<TEvent>>,
@@ -1267,12 +1272,12 @@ export function makePlatformLayer<
     readonly actions: TActions;
     /** Plugin-defined background sync. Observes the platform via CDP and
      *  emits events through injection. Optional — test plugins may omit. */
-    readonly sync?: Effect.Effect<never, never, Injector<TEvent> | BrowserPool>;
+    readonly sync?: Effect.Effect<never, never, Injector<TEvent> | BrowserPool | RExtra>;
   },
 ): Layer.Layer<
   Context.Tag.Identifier<TTag> | Injector<TEvent> | Projection<TEvent>,
   EventStoreError,
-  EventStoreTag | BrowserPool
+  EventStoreTag | BrowserPool | RExtra
 > {
   // Create injection/projection layers internally
   const injectionLayer = makeInjectionLayer(injectionTag, platform.scope, platform.eventSchema);
@@ -1356,6 +1361,17 @@ Key type design:
 - Both fibers are scoped to the layer's lifetime — when the layer is released
   (sockpuppet exits), fibers are interrupted automatically
 - `config.sync` is optional — test plugins (e.g., messageboard) can omit it
+- `RExtra` defaults to `never` (no extra dependencies). This is the escape
+  hatch for **observation deduplication**: when public state should be observed
+  once and shared across all participants. On LinkedIn, public posts visible
+  to every account are scraped once by a shared observer; each sockpuppet's
+  sync fiber depends on the shared infra layer (`LinkedInInfra`) to avoid
+  redundant scraping and can read shared derived state directly. On fully
+  public platforms (message boards, forums), the shared observer handles all
+  observation — each sockpuppet's sync fiber becomes trivial or empty, just
+  reading from a shared `Ref` that the infra layer maintains. The requirement
+  propagates to the layer's `R` type, so the caller provides it — same
+  pattern as action requirements.
 
 ### Background Sync
 
