@@ -1,5 +1,10 @@
 // src/browsers/local/pool.ts
 // Local Playwright pool implementation - returns CDP URLs
+//
+// Uses chromium.launchServer() to start a Chromium process and expose a
+// CDP WebSocket endpoint. The `channel: "chromium"` option forces Playwright
+// to use the full chromium build instead of the headless shell, which avoids
+// crashes on NixOS where the headless shell binary may be incompatible.
 
 import { Effect } from "effect";
 import { type BrowserServer, chromium } from "playwright";
@@ -88,15 +93,20 @@ export const createLocalPool = (
             args.push(`--user-data-dir=${effectiveUserDataDir}`);
           }
 
-          // Resolve executable path: explicit option > env var > Playwright default
+          // Resolve executable path: explicit option > env var > Playwright default.
+          // PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH is set by the nix devshell
+          // (flake-parts/playwright.nix) to point at the nix-managed chromium.
           const resolvedExecutablePath = executablePath ??
-            (typeof Deno !== "undefined"
-              ? Deno.env.get("PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH")
-              : undefined);
+            Deno.env.get("PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH") ??
+            undefined;
 
           const server = await chromium.launchServer({
             headless,
             args,
+            // Use "chromium" channel to force the full chromium build instead
+            // of the headless shell. On NixOS the headless shell binary can
+            // crash (SIGILL/SIGTRAP) while the full chromium works fine.
+            channel: "chromium",
             ...(resolvedExecutablePath && { executablePath: resolvedExecutablePath }),
           });
 
