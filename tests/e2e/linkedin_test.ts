@@ -56,16 +56,8 @@ Deno.test({
   fn: async (t) => {
     // ── Setup ──────────────────────────────────────────────────────
 
-    // Load cookies — skip entire suite if unavailable
-    let cookies: { li_at: string; JSESSIONID: string };
-    try {
-      cookies = loadLinkedInCookies();
-    } catch (err) {
-      console.log(
-        `Skipping LinkedIn e2e tests: ${err instanceof Error ? err.message : err}`,
-      );
-      return;
-    }
+    // Load cookies — fail immediately if unavailable
+    const cookies = loadLinkedInCookies();
 
     // Create the local browser pool with in-memory config store
     const configStore = createInMemoryConfigStore([
