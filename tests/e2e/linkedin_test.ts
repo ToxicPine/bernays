@@ -6,7 +6,10 @@
 //   EventStoreInMemory (PubSub) → Injection → Projection (subscribe) →
 //   background fiber fold → Ref<PluginState> → materialize → Sockpuppet
 //
-// Requires: LinkedIn cookies (env vars or .linkedin-cookies.json)
+// Requires:
+//   - LinkedIn cookies (env vars or .linkedin-cookies.json)
+//   - Test params (env vars or .linkedin-test-params.json)
+//
 // Run: nix develop -c deno test --allow-all tests/e2e/linkedin_test.ts
 
 import { assertEquals, assertExists, assertGreater } from "@std/assert";
@@ -15,6 +18,7 @@ import { Effect, Layer } from "effect";
 import {
   BrowserConfigId,
   ParticipantId,
+  type ThreadId,
 } from "@bernays/server/core";
 import {
   createInMemoryConfigStore,
@@ -23,7 +27,6 @@ import {
   type StorableEvent,
 } from "@bernays/server/store";
 import {
-  BrowserPool,
   BrowserPoolLive,
   makeLocalBackend,
 } from "@bernays/server/browsers";
@@ -38,12 +41,24 @@ import {
   makeLinkedInActions,
 } from "@bernays/plugins/linkedin";
 import { loadLinkedInCookies } from "../lib/linkedin-cookies.ts";
+import { loadLinkedInTestParams } from "../lib/linkedin-params.ts";
 
 // =============================================================================
-// Constants
+// Setup
 // =============================================================================
 
 const CONFIG_ID = BrowserConfigId("linkedin-test-browser");
+const cookies = loadLinkedInCookies();
+const params = loadLinkedInTestParams();
+
+const SELF_ID = ParticipantId("linkedin", params.selfMemberId);
+
+const account: LinkedInAccount = {
+  id: SELF_ID,
+  browserBindings: [
+    { configId: CONFIG_ID, metadata: { deviceType: "desktop" } },
+  ],
+};
 
 // =============================================================================
 // Test
@@ -54,21 +69,14 @@ Deno.test({
   sanitizeResources: false,
   sanitizeOps: false,
   fn: async (t) => {
-    // ── Setup ──────────────────────────────────────────────────────
+    // ── Browser + pool setup ───────────────────────────────────────
 
-    // Load cookies — fail immediately if unavailable
-    const cookies = loadLinkedInCookies();
-
-    // Create the local browser pool with in-memory config store
     const configStore = createInMemoryConfigStore([
       { id: CONFIG_ID, context: "" },
     ]);
     const pool = makeLocalBackend(configStore);
-
-    // Launch the browser
     const session = await Effect.runPromise(pool.launch(CONFIG_ID));
 
-    // Connect via CDP and inject cookies
     const browser = await chromium.connectOverCDP(session.cdpUrl);
     const context = await browser.newContext();
     await context.addCookies([
@@ -86,17 +94,10 @@ Deno.test({
       },
     ]);
 
-    // Build the LinkedIn account
-    const SELF_ID = ParticipantId("linkedin", "test-user");
-    const account: LinkedInAccount = {
-      id: SELF_ID,
-      browserBindings: [{ configId: CONFIG_ID, metadata: { deviceType: "desktop" } }],
-    };
+    // ── Platform layer ─────────────────────────────────────────────
 
-    // Create actions backed by the real pool
     const actions = makeLinkedInActions(pool, account);
 
-    // Layer stack: real local pool + in-memory event store
     const baseLayers = BrowserPoolLive(pool).pipe(
       Layer.provideMerge(EventStoreInMemory),
     );
@@ -119,13 +120,10 @@ Deno.test({
         });
         const url = page.url();
         if (url.includes("/login") || url.includes("/checkpoint")) {
-          await page.close();
-          console.log(
+          throw new Error(
             "LinkedIn cookies expired. Re-run: deno run -A tests/scripts/linkedin-auth.ts",
           );
-          return;
         }
-        // We're on /feed — cookies are valid
         assertEquals(url.includes("/feed"), true);
       } finally {
         await page.close();
@@ -165,16 +163,16 @@ Deno.test({
     // Actions are currently TODO stubs that get a CDP session but don't
     // do real automation. These tests verify the wiring works — the
     // action resolves, gets a session, and returns a stub result.
+    // Once implementations are filled in, these become real tests.
 
     await t.step("action: sendMessage stub resolves", async () => {
       const program = Effect.gen(function* () {
         return yield* Effect.provide(
           Effect.gen(function* () {
             const platform = yield* LinkedInPlatform;
-            // Stub returns { success: true } without actually sending
             const result = yield* platform.actions.sendMessage()(
-              "thread-1" as any,
-              "test message",
+              params.threadId as ThreadId,
+              "e2e test message",
             );
             assertEquals(result.success, true);
             return result;
@@ -192,7 +190,7 @@ Deno.test({
           Effect.gen(function* () {
             const platform = yield* LinkedInPlatform;
             const result = yield* platform.actions.viewProfile()(
-              "target-user",
+              params.profileTarget,
             );
             assertEquals(result.viewed, true);
             return result;
@@ -210,8 +208,8 @@ Deno.test({
           Effect.gen(function* () {
             const platform = yield* LinkedInPlatform;
             const result = yield* platform.actions.sendConnectionRequest()(
-              "target-user",
-              "Let's connect",
+              params.connectTarget,
+              "e2e test connection request",
             );
             assertEquals(result.sent, true);
             return result;
@@ -246,7 +244,6 @@ Deno.test({
           platformLayer,
         );
 
-        // Let the PubSub propagate
         yield* Effect.sleep(50);
 
         const allEvents = yield* eventStore.fetch({ type: "all" });
@@ -278,7 +275,6 @@ Deno.test({
             const injector = yield* LinkedInInjection;
             const platform = yield* LinkedInPlatform;
 
-            // Inject AuthObserved
             yield* injector.append({
               scope: LINKEDIN_SCOPE,
               type: "AuthObserved",
@@ -290,10 +286,8 @@ Deno.test({
               status: "authenticated",
             } as any);
 
-            // Wait for background fiber to process
             yield* Effect.sleep(100);
 
-            // Browser view should now show authenticated
             const browsers = yield* platform.browsers;
             assertEquals(browsers.length, 1);
             assertEquals(browsers[0].authStatus, "authenticated");
