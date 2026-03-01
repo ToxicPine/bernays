@@ -5,8 +5,8 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import {
   type ConfigStoreService,
   EventStorePostgres,
-  EventStoreTag,
   type EventStoreService,
+  EventStoreTag,
 } from "@bernays/server/store";
 import {
   type AnyPlatform,
@@ -16,11 +16,11 @@ import {
 } from "@bernays/server/platforms";
 import {
   type Injector,
-  makeInjectorTag,
   makeInjectionLayer,
-  type Projection,
-  makeProjectionTag,
+  makeInjectorTag,
   makeProjectionLayer,
+  makeProjectionTag,
+  type Projection,
 } from "@bernays/server/projections";
 import {
   BRIEFING_SCOPE,
@@ -45,7 +45,9 @@ import {
  * Read-only view of an account store — only the operations the API needs.
  */
 export interface AccountStoreView {
-  readonly get: (id: string) => Effect.Effect<import("effect").Option.Option<BaseAccount>>;
+  readonly get: (
+    id: string,
+  ) => Effect.Effect<import("effect").Option.Option<BaseAccount>>;
   readonly list: () => Effect.Effect<readonly BaseAccount[]>;
 }
 

@@ -13,14 +13,6 @@ export const E2EConfigSchema = z.object({
   browserTimeout: z.number().default(60_000),
 });
 
-export const LinkedInTestConfigSchema = z.object({
-  linkedinTestEmail: z.email(),
-  linkedinTestPassword: z.string().min(1),
-  linkedinTestThreadId: z.string().min(1),
-});
-
-export type LinkedInTestConfig = z.infer<typeof LinkedInTestConfigSchema>;
-
 export const LocalTestConfigSchema = z.object({
   headless: z.boolean().default(false),
   userDataDir: z.string().optional(),
@@ -64,9 +56,6 @@ const ENV_VAR_NAMES: Record<string, string> = {
   flyAppName: "FLY_APP_NAME",
   testTimeout: "E2E_TEST_TIMEOUT",
   browserTimeout: "E2E_BROWSER_TIMEOUT",
-  linkedinTestEmail: "LINKEDIN_TEST_EMAIL",
-  linkedinTestPassword: "LINKEDIN_TEST_PASSWORD",
-  linkedinTestThreadId: "LINKEDIN_TEST_THREAD_ID",
   headless: "HEADLESS",
   userDataDir: "USER_DATA_DIR",
 };
@@ -127,35 +116,6 @@ export const loadConfig = async (): Promise<E2EConfig> => {
     .join("\n");
 
   throw new Error(`E2E config validation failed:\n${errors}`);
-};
-
-/**
- * Load LinkedIn test config, throwing if required values are missing.
- */
-export const loadLinkedInTestConfig = async (): Promise<LinkedInTestConfig> => {
-  const projectRoot = new URL("../..", import.meta.url).pathname;
-  await loadEnvFile(`${projectRoot}/.env`);
-  await loadEnvFile(`${projectRoot}/.env.test`);
-
-  const result = LinkedInTestConfigSchema.safeParse({
-    linkedinTestEmail: Deno.env.get("LINKEDIN_TEST_EMAIL") ?? "",
-    linkedinTestPassword: Deno.env.get("LINKEDIN_TEST_PASSWORD") ?? "",
-    linkedinTestThreadId: Deno.env.get("LINKEDIN_TEST_THREAD_ID") ?? "",
-  });
-
-  if (result.success) {
-    return result.data;
-  }
-
-  const errors = result.error.issues
-    .map((i) => {
-      const field = i.path[0] as string;
-      const envVar = ENV_VAR_NAMES[field] ?? field;
-      return `  - ${envVar}: ${i.message}`;
-    })
-    .join("\n");
-
-  throw new Error(`LinkedIn Test Config Validation Error:\n${errors}`);
 };
 
 /**

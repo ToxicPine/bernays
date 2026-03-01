@@ -16,22 +16,18 @@ import {
   ThreadId,
 } from "$/core/branded.ts";
 import { makeJournalScope } from "$/core/scope.ts";
-import {
-  type JournalEntry,
-  JournalEntrySchema,
-} from "$/events/journal.ts";
+import { type JournalEntry, JournalEntrySchema } from "$/events/journal.ts";
 import {
   type Injector,
-  makeInjectorTag,
   makeInjectionLayer,
+  makeInjectorTag,
 } from "$/projections/injector.ts";
 import {
-  type Projection,
-  makeProjectionTag,
   makeProjectionLayer,
+  makeProjectionTag,
+  type Projection,
 } from "$/projections/projection.ts";
 import { EventStoreTag } from "$/store/types.ts";
-
 
 // =============================================================================
 // Scoped Tags for Journal's Injection/Projection

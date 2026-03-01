@@ -11,13 +11,13 @@ import {
   type TestSession,
   validateBrowserbase,
   validateDatabase,
-} from "../lib/mod.ts";
+} from "$/lib/mod.ts";
 import {
   type ConfigStoreService,
   createPostgresConfigStore,
   EventStorePostgres,
-  EventStoreTag,
   type EventStoreService,
+  EventStoreTag,
 } from "@bernays/server/store";
 import { ManagedRuntime } from "effect";
 import {

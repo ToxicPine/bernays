@@ -3,10 +3,7 @@
 export {
   type E2EConfig,
   E2EConfigSchema,
-  type LinkedInTestConfig,
-  LinkedInTestConfigSchema,
   loadConfig,
-  loadLinkedInTestConfig,
   loadLocalTestConfig,
   type LocalTestConfig,
   LocalTestConfigSchema,

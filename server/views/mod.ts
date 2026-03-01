@@ -29,6 +29,8 @@ export {
   type GraphNode,
   graphNodesToMessages,
   type GraphNodeView,
+  type GraphReply,
+  GraphReplySchema,
   type GraphState,
   materializeThreadGraphs,
   type NodeState,

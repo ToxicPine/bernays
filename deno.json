@@ -1,6 +1,6 @@
 {
   "nodeModulesDir": "auto",
-  "exclude": ["secret-sauce/"],
+  "exclude": ["secret-sauce/", "extensions/"],
   "workspace": [
     "./server",
     "./plugins",

@@ -9,10 +9,8 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import { type AgentId as AgentIdType } from "@bernays/server/core";
 import { EventStorePostgres, EventStoreTag } from "@bernays/server/store";
 import {
-  type BriefingService,
   Briefing,
-  BriefingInjectionLive,
-  BriefingProjectionLive,
+  type BriefingService,
   makeBriefingLayer,
 } from "@bernays/server/briefing";
 
@@ -49,13 +47,8 @@ export const createServerContext = async (
 
   const eventStoreLayer = Layer.succeed(EventStoreTag, eventStore);
 
-  const injectionProjectionLayer = Layer.mergeAll(
-    BriefingInjectionLive,
-    BriefingProjectionLive,
-  ).pipe(Layer.provide(eventStoreLayer));
-
   const briefingLayer = makeBriefingLayer(config.self).pipe(
-    Layer.provide(injectionProjectionLayer),
+    Layer.provide(eventStoreLayer),
   );
 
   const briefing = await Effect.runPromise(

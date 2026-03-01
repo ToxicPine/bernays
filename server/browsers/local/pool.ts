@@ -1,8 +1,11 @@
 // src/browsers/local/pool.ts
-// Local Playwright pool implementation - returns CDP URLs
+// Local browser pool - returns real CDP WebSocket URLs
+//
+// Launches chromium with --remote-debugging-port to expose actual CDP endpoints.
+// Uses the headless_shell binary on NixOS (via PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH)
+// which provides full CDP support and works reliably in headless mode.
 
 import { Effect } from "effect";
-import { type BrowserServer, chromium } from "playwright";
 import type { BrowserConfigId as BrowserConfigIdType } from "$/core/branded.ts";
 import type { ConfigStoreService } from "$/store/config-store.ts";
 import {
@@ -19,6 +22,7 @@ import {
 export interface LocalPoolOptions {
   readonly headless?: boolean;
   readonly userDataDir?: string;
+  readonly executablePath?: string;
 }
 
 // =============================================================================
@@ -27,7 +31,7 @@ export interface LocalPoolOptions {
 
 interface BrowserInstance {
   readonly configId: BrowserConfigIdType;
-  readonly server: BrowserServer;
+  readonly process: Deno.ChildProcess;
   readonly cdpUrl: string;
 }
 
@@ -35,9 +39,37 @@ interface BrowserInstance {
 // Local Pool Implementation
 // =============================================================================
 
+// Find an available port for CDP
+const findAvailablePort = async (): Promise<number> => {
+  const listener = Deno.listen({ port: 0 });
+  const port = (listener.addr as Deno.NetAddr).port;
+  listener.close();
+  return port;
+};
+
+// Wait for CDP to be ready and return the WebSocket URL
+const waitForCdp = async (port: number, timeoutMs = 10000): Promise<string> => {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/json/version`);
+      if (res.ok) {
+        const json = await res.json() as { webSocketDebuggerUrl: string };
+        return json.webSocketDebuggerUrl;
+      }
+    } catch {
+      // CDP not ready yet
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error(
+    `CDP did not become ready on port ${port} within ${timeoutMs}ms`,
+  );
+};
+
 /**
- * Creates a local Playwright-backed browser pool.
- * Launches Chromium and exposes the CDP WebSocket URL.
+ * Creates a local browser pool that launches Chromium with real CDP endpoints.
+ * Uses --remote-debugging-port to expose actual Chrome DevTools Protocol.
  *
  * @param configStore - Config store for browser configurations
  * @param options - Local pool options
@@ -46,7 +78,7 @@ export const createLocalPool = (
   configStore: ConfigStoreService,
   options: LocalPoolOptions = {},
 ): BrowserPoolService => {
-  const { headless = true, userDataDir } = options;
+  const { headless = true, userDataDir, executablePath } = options;
 
   const instances = new Map<string, BrowserInstance>();
 
@@ -74,7 +106,21 @@ export const createLocalPool = (
 
       return yield* Effect.tryPromise({
         try: async () => {
-          const args: string[] = [];
+          // Find an available port for CDP
+          const port = await findAvailablePort();
+
+          // Build command args
+          const args: string[] = [
+            `--remote-debugging-port=${port}`,
+            "--no-first-run",
+            "--no-sandbox",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+          ];
+
+          if (headless) {
+            args.push("--headless");
+          }
 
           // Configure proxy if specified
           if (config.proxy) {
@@ -87,17 +133,34 @@ export const createLocalPool = (
             args.push(`--user-data-dir=${effectiveUserDataDir}`);
           }
 
-          const server = await chromium.launchServer({
-            headless,
-            args,
-          });
+          args.push("about:blank");
 
-          // Extract the CDP WebSocket endpoint
-          const cdpUrl = server.wsEndpoint();
+          // Resolve executable path: explicit option > env var
+          // PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH is set by the nix devshell
+          // (flake-parts/playwright.nix) to point at the nix-managed headless_shell.
+          const resolvedExecutablePath = executablePath ??
+            Deno.env.get("PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH");
+
+          if (!resolvedExecutablePath) {
+            throw new Error(
+              "No executable path: set PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH or pass executablePath option",
+            );
+          }
+
+          // Spawn the browser process
+          const command = new Deno.Command(resolvedExecutablePath, {
+            args,
+            stdout: "null",
+            stderr: "null",
+          });
+          const process = command.spawn();
+
+          // Wait for CDP to be ready
+          const cdpUrl = await waitForCdp(port);
 
           const instance: BrowserInstance = {
             configId,
-            server,
+            process,
             cdpUrl,
           };
 
@@ -122,7 +185,11 @@ export const createLocalPool = (
         const instance = instances.get(configId);
         if (!instance) return;
 
-        await instance.server.close().catch(() => {});
+        try {
+          instance.process.kill("SIGTERM");
+        } catch {
+          // Process may already be dead
+        }
         instances.delete(configId);
       },
       catch: (err) =>

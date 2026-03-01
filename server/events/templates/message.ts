@@ -16,10 +16,12 @@ import {
  * Platforms extend this and override `type` with their scoped version.
  */
 export const MessageObservedBase = z.object({
-  kind: z.literal("reply"),
-  eventId: z.uuid().transform(EventId),
-  correlationId: z.uuid().transform(CorrelationId),
-  timestamp: z.iso.datetime(),
+  kind: z.literal("reply").default("reply"),
+  eventId: z.uuid().default(() => crypto.randomUUID()).transform(EventId),
+  correlationId: z.uuid().default(() => crypto.randomUUID()).transform(
+    CorrelationId,
+  ),
+  timestamp: z.iso.datetime().default(() => new Date().toISOString()),
   canonicalId: z.string().transform(CanonicalId),
   senderId: z.string().transform(ParticipantIdFromString),
   predecessorId: z.string().transform(CanonicalId),

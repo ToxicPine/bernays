@@ -15,7 +15,9 @@ import { CausationId, CorrelationId, IntentId } from "$/core/branded.ts";
  * - intentId: Associates event with originating intent (optional)
  */
 export const CorrelationMetadataSchema = StorableEventSchema.extend({
-  correlationId: z.uuid().transform(CorrelationId),
+  correlationId: z.uuid().default(() => crypto.randomUUID()).transform(
+    CorrelationId,
+  ),
   causationId: z.uuid().transform(CausationId).optional(),
   intentId: z.uuid().transform(IntentId).optional(),
 });

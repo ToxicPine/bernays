@@ -10,10 +10,12 @@ in config // {
   shellHook = (config.shellHook or "") + ''
     export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
     export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}
-    export PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH=${pkgs.playwright-driver.browsers}/chromium-${chromium-rev}/chrome-linux/chrome
-    
+    # Use headless_shell binary instead of full chromium - the regular chromium
+    # crashes in headless mode on NixOS with crashpad "read out of range" errors.
+    export PLAYWRIGHT_LAUNCH_OPTIONS_EXECUTABLE_PATH=${pkgs.playwright-driver.browsers}/chromium_headless_shell-${chromium-rev}/chrome-linux/headless_shell
+
     export BROWSER_STATE_DIR=${browserStateDir}
-    
+
     mkdir -p "${browserStateDir}"
   '';
 }

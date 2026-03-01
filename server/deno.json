@@ -21,7 +21,7 @@
     "@std/uuid": "jsr:@std/uuid@^1.1.0",
     "postgres": "npm:postgres@^3.4.8",
     "effect": "npm:effect@^3.19.14",
-    "playwright": "npm:playwright@^1.57.0",
+    "playwright": "npm:playwright@1.56.1",
     "@browserbasehq/sdk": "npm:@browserbasehq/sdk@^2.6.0"
   },
   "compilerOptions": {

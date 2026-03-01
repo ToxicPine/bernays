@@ -19,9 +19,10 @@ import {
   type LinkedInAccount,
   LinkedInInjection,
   LinkedInPlatform,
-  LinkedInProjection,
   linkedInPlatform,
+  LinkedInProjection,
   makeLinkedInActions,
+  makeLinkedInSync,
 } from "@bernays/plugins/linkedin";
 import { type EventStoreTag } from "@bernays/server/store";
 import { config } from "./config.ts";
@@ -30,7 +31,9 @@ import { config } from "./config.ts";
 // Browser Layer
 // ============================================================================
 
-export const createBrowserLayer = (configStore: import("@bernays/server/store").ConfigStoreService) => {
+export const createBrowserLayer = (
+  configStore: import("@bernays/server/store").ConfigStoreService,
+) => {
   const pool = makeBrowserbaseBackend(config.browserbaseApiKey, configStore);
   return BrowserPoolLive(pool);
 };
@@ -46,7 +49,9 @@ const createSockpuppetLayer = (
 ) => {
   const actions = makeLinkedInActions(browserPool, account);
 
-  // platformLayer creates LinkedIn injection/projection internally and exports them
+  // platformLayer creates LinkedIn injection/projection internally and exports them.
+  // Sync fiber is forked internally by makePlatformLayer — it yields BrowserPool
+  // and Injector from context.
   const platformLayer = makePlatformLayer(
     LinkedInPlatform,
     LinkedInInjection,
@@ -55,6 +60,7 @@ const createSockpuppetLayer = (
       platform: linkedInPlatform,
       account,
       actions,
+      sync: makeLinkedInSync,
     },
   );
 

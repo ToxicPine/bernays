@@ -4,26 +4,29 @@
 import { Context, Effect, Layer } from "effect";
 import type { Page } from "playwright";
 import {
+  type Injector,
   makeInjectorTag,
   makeProjectionTag,
-  type Injector,
 } from "@bernays/server/projections";
 import { makePlatformLayer } from "@bernays/server/runtime";
-import type { PlatformDefinition, PlatformService } from "@bernays/server/platforms";
+import type {
+  PlatformDefinition,
+  PlatformService,
+} from "@bernays/server/platforms";
 import {
   CanonicalId,
   CorrelationId,
   EventId,
-  ParticipantId,
   hash,
+  ParticipantId,
 } from "@bernays/server/core";
 import type { BaseBoundBrowser } from "@bernays/server/views";
 
 import {
   MESSAGEBOARD_SCOPE,
   MessageBoardAnchorSchema,
-  MessageBoardEventSchema,
   type MessageBoardEvent,
+  MessageBoardEventSchema,
   type MessageBoardScope,
 } from "./schemas.ts";
 import {

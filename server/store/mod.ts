@@ -8,13 +8,16 @@ export {
   type EventStoreQuery,
   type EventStoreService,
   EventStoreTag,
-  StorableEventSchema,
   type StorableEvent,
+  StorableEventSchema,
 } from "./types.ts";
 
 export { EventStoreInMemory } from "./memory.ts";
 
-export { EventStorePostgres, type PostgresEventStoreOptions } from "./postgres.ts";
+export {
+  EventStorePostgres,
+  type PostgresEventStoreOptions,
+} from "./postgres.ts";
 
 export {
   createEventIndex,
