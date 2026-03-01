@@ -1,11 +1,26 @@
-# LinkedIn Account Bindings
+# LinkedIn Account Configuration
 #
-# Each account maps a persistent LinkedIn member ID to browser sessions.
+# Each account maps a persistent LinkedIn member ID to browser sessions and
+# optionally includes auth credentials for session injection.
+#
+# Fields:
+#   id           - LinkedIn member ID (e.g. "ACoAAD..." from profile URN)
+#   li_at        - Session token (from cookies after login)
+#   JSESSIONID   - CSRF token (from cookies, quotes stripped)
+#   extractedAt  - ISO timestamp when credentials were captured (metadata)
+#   browserBindings - Which browser configs this account uses
+#
+# Credentials can be exported via: deno run -A tests/scripts/linkedin-auth.ts
+# Then copy li_at, JSESSIONID, extractedAt into this file.
+#
 # Dynamic platform state (display name, connection count, rate limits) is
 # derived from events, not stored here.
 
 [[accounts]]
 id = "alice-linkedin-id"
+li_at = "AQEDAQNmZW..."
+JSESSIONID = "ajax:1234567890123456789"
+extractedAt = "2026-02-27T12:00:00.000Z"
 
   [[accounts.browserBindings]]
   configId = "browser_alice"
@@ -15,6 +30,9 @@ id = "alice-linkedin-id"
 
 [[accounts]]
 id = "bob-linkedin-id"
+li_at = "AQEDAQNib2..."
+JSESSIONID = "ajax:9876543210987654321"
+extractedAt = "2026-02-27T12:00:00.000Z"
 
   [[accounts.browserBindings]]
   configId = "browser_bob_desktop"
@@ -28,6 +46,7 @@ id = "bob-linkedin-id"
   [accounts.browserBindings.metadata]
   deviceType = "mobile"
 
-# Minimal - just the ID, no browsers bound yet
+# Minimal account - just the ID, credentials can be added later
+# This will be upserted to the account store but won't have usable credentials
 [[accounts]]
 id = "charlie-linkedin-id"

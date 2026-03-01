@@ -5,6 +5,7 @@
   "imports": {
     "$/": "./",
     "@bernays/server": "workspace:*",
+    "@std/path": "jsr:@std/path@^1.1.4",
     "@zod/zod": "jsr:@zod/zod@^4.3.5",
     "@std/uuid": "jsr:@std/uuid@^1.1.0",
     "playwright": "npm:playwright@1.56.1",

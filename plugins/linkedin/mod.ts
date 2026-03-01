@@ -201,3 +201,14 @@ export {
   type LinkedInPublicState,
   type WatchTopic,
 } from "./infra.ts";
+
+// TOML utilities
+export {
+  type CredentialsMap,
+  getCredentials,
+  type LinkedInCredentials,
+  LinkedInCredentialsSchema,
+  type LoadResult,
+  loadLinkedInAccountsFromToml,
+  parseLinkedInAccountsToml,
+} from "./toml.ts";
